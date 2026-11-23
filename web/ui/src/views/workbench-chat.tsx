@@ -200,14 +200,15 @@ export function toBlocks(items: ChatItem[]): Block[] {
         } else if (item.kind === "plan") {
           out.push({ type: "plan", item });
         } else if (item.kind === "tool") {
-          /* Thinking between two tools is hidden, so it must not split the
-             group: drop it and keep adding to the tools block before it. */
+          /* Thinking right before a tool goes into the step list, so it does
+             not split the group and stays readable there (owner, 2026-11-23).
+             Empty assistant lines in between are dropped. */
           let back = out.length - 1;
           while (back >= 0 && isQuiet(out[back]!)) back--;
-          if (back >= 0 && back < out.length - 1 && out[back]!.type === "tools") out.length = back + 1;
+          const moved = out.splice(back + 1).flatMap((b) => (b.type === "thinking" && (b.item.text || "").trim() ? [b.item] : []));
           const last = out[out.length - 1];
-          if (last && last.type === "tools") last.items.push(item);
-          else out.push({ type: "tools", key: "g:" + item.id, items: [item] });
+          if (last && last.type === "tools") last.items.push(...moved, item);
+          else out.push({ type: "tools", key: "g:" + (moved[0] ?? item).id, items: [...moved, item] });
         }
       }
     }
@@ -403,10 +404,11 @@ function PlainToolRow({ item: raw }: { item: ChatItem }) {
   );
 }
 
-function ToolGroup({ items }: { items: ChatItem[] }) {
+export function ToolGroup({ items }: { items: ChatItem[] }) {
   /* Open while a step runs, folded once all are done (owner, 2026-11-23);
      a click overrides either way. */
-  const running = items.some((i) => i.status === "running");
+  const tools = items.filter((i) => i.kind === "tool");
+  const running = tools.some((i) => i.status === "running");
   const [userOpen, setUserOpen] = useState<boolean | null>(null);
   const open = userOpen ?? running;
   const setOpen = (v: boolean) => setUserOpen(v);
@@ -415,17 +417,38 @@ function ToolGroup({ items }: { items: ChatItem[] }) {
       <button type="button" className="wbc-group-head" onClick={() => setOpen(!open)} aria-expanded={open}>
         <Ic name={open ? "chevron-down" : "chevron-right"} size={13} />
         <span className="wbc-group-title">
-          {items.length} {items.length === 1 ? "step" : "steps"}
+          {tools.length} {tools.length === 1 ? "step" : "steps"}
         </span>
-        <span className="wbc-group-sub">{groupSummary(items)}</span>
+        <span className="wbc-group-sub">{groupSummary(tools)}</span>
       </button>
       {open ? (
         <div className="wbc-group-rows">
-          {items.map((t) => (
-            <ToolRow key={t.id} item={t} />
-          ))}
+          {items.map((t) => (t.kind === "thinking" ? <ThinkingRow key={t.id} item={t} /> : <ToolRow key={t.id} item={t} />))}
         </div>
       ) : null}
+    </div>
+  );
+}
+
+/* A thinking step inside a tool group: its first line, the rest on click. */
+function ThinkingRow({ item }: { item: ChatItem }) {
+  const [open, setOpen] = useState(false);
+  const text = (item.text || "").trim();
+  const first = text.split("\n").find((l) => l.trim()) || "";
+  return (
+    <div className={"wbc-tool-row wbc-think-row" + (open ? " is-open" : "")}>
+      <div className="wbc-tool-head">
+        <button type="button" className="wbc-tool-line" onClick={() => setOpen(!open)} aria-expanded={open}>
+          <span className="wbc-tool-st">
+            <Ic name="brain" size={13} />
+          </span>
+          <span className="wbc-verb">Thinking</span>
+          <span className="wbc-target">{open ? "" : first}</span>
+          <span className="wb-spacer" />
+          <Ic name={open ? "chevron-up" : "chevron-down"} size={12} />
+        </button>
+      </div>
+      {open ? <div className="wbc-think-text">{text}</div> : null}
     </div>
   );
 }

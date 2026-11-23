@@ -2186,3 +2186,24 @@
   border: 0;
   border-radius: 0;
 }
+
+/* Thinking inside a step list (owner, 2026-11-23). */
+.wbc-think-row .wbc-tool-st,
+.wbc-think-row .wbc-target {
+  color: var(--wb-term-dim);
+}
+
+.wbc-think-row .wbc-target {
+  font-style: italic;
+}
+
+.wbc-think-text {
+  margin: 2px 12px 8px 36px;
+  padding-left: 10px;
+  border-left: 2px solid var(--wbc-line);
+  color: var(--wb-term-dim);
+  font-size: 12.5px;
+  line-height: 1.55;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
