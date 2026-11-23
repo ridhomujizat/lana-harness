@@ -2145,6 +2145,15 @@
   max-height: 132px;
 }
 
+/* Phone: menus never run past the screen edge. */
+.wbc-composer.is-compact .wbc-pop {
+  max-width: calc(100vw - 24px);
+}
+
+.wbc-composer.is-compact .wbc-tool {
+  padding: 0 6px;
+}
+
 /* Images sent as paths (phone uploads). */
 .wbc-img-thumb {
   display: block;

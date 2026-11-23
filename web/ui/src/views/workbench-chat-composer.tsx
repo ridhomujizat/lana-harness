@@ -604,74 +604,72 @@ export function Composer(props: ComposerProps) {
           </Pop>
         </Anchor>
         <span className="wb-spacer" />
-        {!compact ? (
-          <>
-            <Anchor open={menu === "model"}>
-              <button type="button" className={"wbc-tool" + (menu === "model" ? " is-on" : "")} disabled={disabled} onClick={() => setMenu(menu === "model" ? null : "model")}>
-                <span>
-                  {modelLabel(shownModel)}
-                  {shownEffort ? " · " + shownEffort : ""}
-                </span>
-                <Ic name="chevron-down" size={12} />
-              </button>
-              <Pop className="wbc-pop-right" width={300}>
-                <div className="wbc-pop-sec">Model</div>
-                {MODELS.map((m) => (
-                  <PopRow key={m.id} label={m.label} tag={m.tag} desc={m.desc} checked={sameModel(shownModel, m.id)} onClick={() => pickModel({ model: m.id })} />
-                ))}
-                <div className="wbc-pop-sec">Effort</div>
-                <div className="wbc-seg">
-                  {EFFORTS.map((e) => (
-                    <button key={e} type="button" className={e === shownEffort ? "is-on" : ""} onClick={() => pickModel({ effort: e })}>
-                      {e}
-                    </button>
-                  ))}
-                </div>
-                <div className="wbc-pop-foot">{working ? "Applies when Claude is idle" : "Applied in the terminal with /model and /effort"}</div>
-              </Pop>
-            </Anchor>
-            <Anchor open={menu === "ctx"} hover>
-              <button type="button" className={"wbc-tool wbc-ctx" + (menu === "ctx" ? " is-on" : "")} aria-label="Context" onClick={() => setMenu(menu === "ctx" ? null : "ctx")}>
-                <Donut pct={pct} />
-                <span>{ctx ? pct + "%" : "–"}</span>
-              </button>
-              <Pop className="wbc-pop-right" width={280}>
-                <div className="wbc-ctx-head">
-                  <Donut pct={pct} size={36} />
-                  <div>
-                    <div className="wbc-ctx-big">
-                      {ctx ? fmtK(ctx.used) + " / " + fmtK(ctx.window) + " tokens" : "No usage yet"}
-                    </div>
-                    <div className="wbc-ctx-sub">{pct}% of context used</div>
-                  </div>
-                </div>
-                {ctx ? (
-                  <dl className="wbc-ctx-rows">
-                    <dt>Cache read</dt>
-                    <dd>{fmtK(ctx.cache_read)}</dd>
-                    <dt>New input</dt>
-                    <dd>{fmtK(ctx.input)}</dd>
-                    <dt>Last turn output</dt>
-                    <dd>{fmtK(ctx.output)}</dd>
-                    <dt>Left before auto-compact</dt>
-                    <dd>~{fmtK(Math.max(0, Math.round(ctx.window * 0.8) - ctx.used))}</dd>
-                  </dl>
-                ) : null}
-                <button
-                  type="button"
-                  className="wbc-pop-action"
-                  disabled={disabled || working}
-                  onClick={() => {
-                    setMenu(null);
-                    chatSay(sessionId, "/compact").catch((err) => props.onError(errorMessage(err)));
-                  }}
-                >
-                  Compact now <span>/compact</span>
+        {/* Model and context show on the phone too (owner, 2026-11-23); the
+            phone label drops the effort to fit the row. */}
+        <Anchor open={menu === "model"}>
+          <button type="button" className={"wbc-tool" + (menu === "model" ? " is-on" : "")} disabled={disabled} onClick={() => setMenu(menu === "model" ? null : "model")}>
+            <span>
+              {modelLabel(shownModel)}
+              {shownEffort && !compact ? " · " + shownEffort : ""}
+            </span>
+            <Ic name="chevron-down" size={12} />
+          </button>
+          <Pop className="wbc-pop-right" width={300}>
+            <div className="wbc-pop-sec">Model</div>
+            {MODELS.map((m) => (
+              <PopRow key={m.id} label={m.label} tag={m.tag} desc={m.desc} checked={sameModel(shownModel, m.id)} onClick={() => pickModel({ model: m.id })} />
+            ))}
+            <div className="wbc-pop-sec">Effort</div>
+            <div className="wbc-seg">
+              {EFFORTS.map((e) => (
+                <button key={e} type="button" className={e === shownEffort ? "is-on" : ""} onClick={() => pickModel({ effort: e })}>
+                  {e}
                 </button>
-              </Pop>
-            </Anchor>
-          </>
-        ) : null}
+              ))}
+            </div>
+            <div className="wbc-pop-foot">{working ? "Applies when Claude is idle" : "Applied in the terminal with /model and /effort"}</div>
+          </Pop>
+        </Anchor>
+        <Anchor open={menu === "ctx"} hover={!compact}>
+          <button type="button" className={"wbc-tool wbc-ctx" + (menu === "ctx" ? " is-on" : "")} aria-label="Context" onClick={() => setMenu(menu === "ctx" ? null : "ctx")}>
+            <Donut pct={pct} />
+            <span>{ctx ? pct + "%" : "–"}</span>
+          </button>
+          <Pop className="wbc-pop-right" width={280}>
+            <div className="wbc-ctx-head">
+              <Donut pct={pct} size={36} />
+              <div>
+                <div className="wbc-ctx-big">
+                  {ctx ? fmtK(ctx.used) + " / " + fmtK(ctx.window) + " tokens" : "No usage yet"}
+                </div>
+                <div className="wbc-ctx-sub">{pct}% of context used</div>
+              </div>
+            </div>
+            {ctx ? (
+              <dl className="wbc-ctx-rows">
+                <dt>Cache read</dt>
+                <dd>{fmtK(ctx.cache_read)}</dd>
+                <dt>New input</dt>
+                <dd>{fmtK(ctx.input)}</dd>
+                <dt>Last turn output</dt>
+                <dd>{fmtK(ctx.output)}</dd>
+                <dt>Left before auto-compact</dt>
+                <dd>~{fmtK(Math.max(0, Math.round(ctx.window * 0.8) - ctx.used))}</dd>
+              </dl>
+            ) : null}
+            <button
+              type="button"
+              className="wbc-pop-action"
+              disabled={disabled || working}
+              onClick={() => {
+                setMenu(null);
+                chatSay(sessionId, "/compact").catch((err) => props.onError(errorMessage(err)));
+              }}
+            >
+              Compact now <span>/compact</span>
+            </button>
+          </Pop>
+        </Anchor>
       </div>
     </div>
   );
