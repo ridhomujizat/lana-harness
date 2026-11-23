@@ -69,6 +69,8 @@ import {
   type WbTab,
 } from "./workbench-model";
 import { TermPane, type SendInput } from "./workbench-term";
+import { ChatPane } from "./workbench-chat";
+import { chatSupport, setPaneView, togglePaneView, usePaneView } from "./workbench-chat-view";
 import { prune as pruneTermCache } from "./workbench-term-cache";
 import { WbGitContext, useWbGit, useWorkbenchGit } from "./workbench-git-state";
 import { emitGitRootEvent } from "../api/workbench-git";
@@ -639,6 +641,12 @@ function PaneView({
 }) {
   const access = usePaneAccess();
   const status = statusOf(session);
+  /* Spec 71: a Claude pane can show its terminal or a chat of the same
+     process. */
+  const phone = useSyncExternalStore(subscribePhone, readPhone, () => false);
+  const support = chatSupport(session?.agent);
+  const storedView = usePaneView(id, phone);
+  const view = support === "yes" ? storedView : "terminal";
   /* Spec 66 REQ-WG-071, 075: the pane's worktree, and a warning when another
      agent works in the same one. */
   const git = useWbGit();
@@ -716,6 +724,21 @@ function PaneView({
         ) : null}
         <LanaChip session={session} />
         <RestoredChip session={session} />
+        {support !== "none" ? (
+          <span className="wb-pane-tools wb-view-tools">
+            <button
+              type="button"
+              className={"wb-view-btn" + (view === "chat" ? " is-chat" : "")}
+              disabled={support === "no"}
+              aria-label={support === "no" ? "Chat is not available for " + (session?.agent || "this agent") + " yet" : view === "chat" ? "Show the terminal" : "Show as chat"}
+              data-tip={support === "no" ? "Chat is not available for " + (session?.agent || "this agent") + " yet" : view === "chat" ? "Show the terminal ⇧⌘J" : "Show as chat ⇧⌘J"}
+              onMouseDown={(e) => e.stopPropagation()}
+              onClick={() => setPaneView(id, view === "chat" ? "terminal" : "chat")}
+            >
+              <Ic name={view === "chat" ? "square-terminal" : "message-square"} size={14} />
+            </button>
+          </span>
+        ) : null}
         <span className={"wb-pane-state wb-pane-state-" + status}>
           <StatusDot status={status} />
           {status === "exited" ? "exited " + (session?.exit_code ?? 0) : status === "blocked" ? "needs you" : status}
@@ -764,8 +787,21 @@ function PaneView({
           </button>
         </span>
       </div>
-      <div className="wb-pane-body">
+      <div className={"wb-pane-body" + (view === "chat" ? " is-chat" : "")}>
+        {session && view === "chat" ? (
+          <div className="wb-chat-host" onMouseDown={() => actions.onFocus(id)}>
+          <ChatPane
+            sessionId={id}
+            session={session}
+            active={view === "chat"}
+            readOnly={access.mode !== "control"}
+            compact={phone}
+            onOpenTerminal={() => setPaneView(id, "terminal")}
+          />
+          </div>
+        ) : null}
         {session ? (
+          <div className="wb-term-host" style={{ width: "100%", height: "100%" }}>
           <TermPane
             key={id + ":" + session.pid + ":" + access.mode}
             sessionId={id}
@@ -778,6 +814,7 @@ function PaneView({
             onOpenFile={actions.onOpenFile}
             sessionSize={{ cols: session.cols, rows: session.rows }}
           />
+          </div>
         ) : (
           <p className="wb-pane-missing">This terminal is gone.</p>
         )}
@@ -1077,6 +1114,12 @@ function PhoneWorkbench(props: PhoneProps) {
   const claimRef = useRef<(() => void) | null>(null);
   const [owner, setOwner] = useState(true);
   const transformRef = useRef<((data: string) => string) | null>(null);
+  /* Spec 71 D2: a Claude pane opens in Chat on a phone. */
+  const phoneIds = tab ? tabSessions(tab) : [];
+  const phoneCurrent = tab && tab.focus && phoneIds.includes(tab.focus) ? tab.focus : phoneIds[0];
+  const phoneSupport = chatSupport(phoneCurrent ? sessions[phoneCurrent]?.agent : undefined);
+  const phoneStored = usePaneView(phoneCurrent || "", true);
+  const phoneView = phoneSupport === "yes" ? phoneStored : "terminal";
   useEffect(() => {
     transformRef.current = ctrl
       ? (data) => {
@@ -1153,6 +1196,17 @@ function PhoneWorkbench(props: PhoneProps) {
             <StatusDot status={counts.blocked ? "blocked" : counts.working ? "working" : "idle"} /> {summary}
           </span>
         </div>
+        {phoneSupport !== "none" && current ? (
+          <button
+            type="button"
+            className={"wb-icon-btn wb-icon-btn-lg wb-view-btn" + (phoneView === "chat" ? " is-chat" : "")}
+            disabled={phoneSupport === "no"}
+            aria-label={phoneView === "chat" ? "Show the terminal" : "Show as chat"}
+            onClick={() => setPaneView(current, phoneView === "chat" ? "terminal" : "chat")}
+          >
+            <Ic name={phoneView === "chat" ? "square-terminal" : "message-square"} size={18} />
+          </button>
+        ) : null}
         <button type="button" className="wbg-toggle wbg-toggle-lg" aria-label="Files and changes" onClick={props.onChanges}>
           <Ic name="git-compare" size={18} />
           {props.changeCount ? <span className="wbg-badge">{props.changeCount}</span> : null}
@@ -1234,7 +1288,20 @@ function PhoneWorkbench(props: PhoneProps) {
               <b>Fit to this screen</b>
             </button>
           ) : null}
-          <div className="wb-phone-term">
+          <div className={"wb-phone-term" + (phoneView === "chat" ? " is-chat" : "")}>
+            {session && current && phoneView === "chat" ? (
+              <div className="wb-chat-host">
+                <ChatPane
+                  sessionId={current}
+                  session={session}
+                  active
+                  readOnly={access.mode !== "control"}
+                  compact
+                  onOpenTerminal={() => setPaneView(current, "terminal")}
+                />
+              </div>
+            ) : null}
+            <div className="wb-term-host" style={{ width: "100%", height: "100%" }}>
             <TermPane
               key={current + ":" + (session?.pid ?? 0) + ":" + access.mode}
               sessionId={current}
@@ -1250,8 +1317,9 @@ function PhoneWorkbench(props: PhoneProps) {
               onOwnerChange={setOwner}
               onOpenFile={props.onOpenFile}
             />
+            </div>
           </div>
-          {status === "exited" ? (
+          {phoneView === "chat" && status !== "exited" ? null : status === "exited" ? (
             <div className="wb-phone-bar">
               <div>
                 <b>Process exited {session?.exit_code ?? 0}</b>
@@ -1934,6 +2002,8 @@ export function WorkbenchPage() {
   /* REQ-WG-076: the "+" menu. */
   const plusRef = useRef<HTMLSpanElement | null>(null);
   const [plusMenu, setPlusMenu] = useState(false);
+  const spaceRef = useRef<HTMLSpanElement | null>(null);
+  const [spaceMenu, setSpaceMenu] = useState(false);
 
   const actions: PaneActions = {
     onFocus: (id) => {
@@ -2237,6 +2307,10 @@ export function WorkbenchPage() {
       case "rename-tab":
         if (sp && t) openRenameTab(sp.id, t.id);
         break;
+      case "chat-view":
+        /* Spec 71 REQ-WC-050: ⇧⌘J switches a Claude pane between views. */
+        if (focus && chatSupport(sessionsRef.current[focus]?.agent) === "yes") togglePaneView(focus, readPhone());
+        break;
       case "clear":
         if (focus) window.dispatchEvent(new CustomEvent("lana:wb-clear", { detail: focus }));
         break;
@@ -2412,11 +2486,62 @@ export function WorkbenchPage() {
               <Ic name="panel-left" size={16} />
             </button>
           ) : null}
+          {/* With the panel hidden, the space name picks the space
+              (owner, 2026-11-23). */}
           {!panelOpen && space ? (
-            <span className="wb-tabs-space">
-              <SpaceTile space={space} label={spaceLabel(space, sessions)} size={18} />
-              {spaceLabel(space, sessions)}
+            <span className="wb-tabs-space-wrap" ref={spaceRef}>
+              <button
+                type="button"
+                className={"wb-tabs-space" + (spaceMenu ? " is-open" : "")}
+                aria-haspopup="menu"
+                aria-expanded={spaceMenu}
+                title={spaceCwd(space, sessions) || undefined}
+                onClick={() => setSpaceMenu((m) => !m)}
+              >
+                <SpaceTile space={space} label={spaceLabel(space, sessions)} size={18} />
+                <span className="wb-tabs-space-name">{spaceLabel(space, sessions)}</span>
+                <Ic name="chevron-down" size={13} className="wb-tabs-space-chev" />
+              </button>
             </span>
+          ) : null}
+          {spaceMenu && !panelOpen ? (
+            <Menu anchorRef={spaceRef} open onClose={() => setSpaceMenu(false)} className="wb-space-menu" width={260}>
+              {layout.spaces.map((sp) => {
+                const label = spaceLabel(sp, sessions);
+                const n = sp.tabs.length;
+                return (
+                  <MenuItem
+                    key={sp.id}
+                    className="wb-space-mi"
+                    aria-current={sp.id === space?.id ? "true" : undefined}
+                    right={
+                      <span className="wb-space-mi-r">
+                        <span className="wb-space-mi-n">{n + (n === 1 ? " tab" : " tabs")}</span>
+                        <span className="wb-space-mi-ck">{sp.id === space?.id ? <Ic name="check" size={14} /> : null}</span>
+                      </span>
+                    }
+                    title={spaceCwd(sp, sessions) || undefined}
+                    onClick={() => {
+                      setSpaceMenu(false);
+                      update((l) => selectSpace(l, sp.id));
+                    }}
+                  >
+                    <SpaceTile space={sp} label={label} size={16} />
+                    {label}
+                  </MenuItem>
+                );
+              })}
+              <MenuSeparator />
+              <MenuItem
+                icon="plus"
+                onClick={() => {
+                  setSpaceMenu(false);
+                  newSpace();
+                }}
+              >
+                New space
+              </MenuItem>
+            </Menu>
           ) : null}
           {space?.tabs.map((t) => {
             const s = tabStatus(t, sessions);

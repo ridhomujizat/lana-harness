@@ -1,0 +1,1852 @@
+/* Spec 71: the Claude Code chat view of a Workbench pane. Design: figcraft
+   page "Workbench · Claude Chat". Plain elements on the pane's own tokens,
+   so it follows the light and dark themes. */
+
+.wbc {
+  --wbc-send: #1a1831;
+  --wbc-col: 760px;
+  --wbc-bubble: color-mix(in srgb, var(--wb-term-text) 7%, var(--wb-term));
+  --wbc-card: color-mix(in srgb, var(--wb-term-text) 3%, var(--wb-term));
+  --wbc-line: color-mix(in srgb, var(--wb-term-text) 12%, transparent);
+  --wbc-line-strong: color-mix(in srgb, var(--wb-term-text) 20%, transparent);
+  --wbc-out: color-mix(in srgb, var(--wb-term-text) 5%, var(--wb-term));
+  --wbc-violet: #6c68c8;
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  background: var(--wb-term);
+  color: var(--wb-term-text);
+  font-size: 13.5px;
+}
+
+:root[data-theme="dark"] .wbc {
+  --wbc-send: #49447e;
+  --wbc-violet: #b9b6f0;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) .wbc {
+    --wbc-send: #49447e;
+    --wbc-violet: #b9b6f0;
+  }
+}
+
+.wbc-scroll {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+
+.wbc-col {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  width: 100%;
+  max-width: var(--wbc-col);
+  margin: 0 auto;
+  padding: 18px 20px 12px;
+}
+
+.wbc.is-compact .wbc-col {
+  padding: 12px 12px 8px;
+}
+
+/* ---- dividers, banners --------------------------------------------- */
+
+.wbc-divider {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin: 6px 0;
+  color: var(--wb-term-dim);
+  font-size: 11px;
+}
+
+.wbc-divider::before,
+.wbc-divider::after {
+  content: "";
+  flex: 1 1 auto;
+  height: 1px;
+  background: var(--wbc-line);
+}
+
+.wbc-banner {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 12px;
+  border: 1px solid color-mix(in srgb, var(--wbc-violet) 45%, transparent);
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--wbc-violet) 8%, var(--wb-term));
+  color: var(--wb-term-text);
+  font-size: 12.5px;
+}
+
+.wbc-banner .i {
+  color: var(--wbc-violet);
+}
+
+.wbc-older,
+.wbc-loading {
+  align-self: center;
+  border: 0;
+  background: none;
+  color: var(--wb-term-dim);
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.wbc-older:hover {
+  color: var(--wb-term-text);
+}
+
+/* ---- messages ------------------------------------------------------ */
+
+.wbc-user {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 6px;
+  margin: 8px 0 4px;
+}
+
+.wbc-bubble {
+  max-width: min(560px, 85%);
+  padding: 8px 14px;
+  border-radius: 12px;
+  background: var(--wbc-bubble);
+  line-height: 1.55;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.wbc-bubble.is-command {
+  font-family: var(--mono);
+  font-size: 12.5px;
+}
+
+.wbc-bubble.is-queued {
+  border: 1px dashed var(--wbc-line-strong);
+  background: transparent;
+  color: var(--wb-term-dim);
+}
+
+.wbc-bubble.is-sending {
+  opacity: 0.7;
+}
+
+.wbc-queued {
+  color: var(--wb-term-dim);
+  font-size: 11px;
+}
+
+.wbc-user-images {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 6px;
+}
+
+.wbc-user-images img {
+  max-width: 180px;
+  max-height: 130px;
+  border: 1px solid var(--wbc-line);
+  border-radius: 10px;
+  object-fit: cover;
+}
+
+.wbc-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 6px;
+}
+
+.wbc-head-tile {
+  display: inline-grid;
+  place-items: center;
+  width: 18px;
+  height: 18px;
+}
+
+.wbc-head-name {
+  font-weight: 600;
+  font-size: 13px;
+}
+
+.wbc-head-meta {
+  color: var(--wb-term-dim);
+  font-size: 11.5px;
+}
+
+.wbc-text {
+  line-height: 1.62;
+  overflow-wrap: anywhere;
+}
+
+.wbc-text .md > :first-child {
+  margin-top: 0;
+}
+
+.wbc-text .md > :last-child {
+  margin-bottom: 0;
+}
+
+.wbc-thinking button {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--wb-term-dim);
+  font-size: 12.5px;
+  cursor: pointer;
+}
+
+.wbc-thinking-text {
+  margin-top: 6px;
+  padding-left: 16px;
+  border-left: 2px solid var(--wbc-line);
+  color: var(--wb-term-dim);
+  font-size: 12.5px;
+  line-height: 1.55;
+  white-space: pre-wrap;
+}
+
+.wbc-turn-end {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--wb-term-dim);
+  font-size: 11.5px;
+}
+
+.wbc-copy {
+  display: inline-grid;
+  place-items: center;
+  width: 22px;
+  height: 22px;
+  border: 0;
+  border-radius: 6px;
+  background: none;
+  color: var(--wb-term-dim);
+  cursor: pointer;
+}
+
+.wbc-copy:hover {
+  background: var(--wb-btn-hover);
+  color: var(--wb-term-text);
+}
+
+.wbc-answered {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.wbc-answered-row {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  color: var(--wb-term-dim);
+  font-size: 12.5px;
+}
+
+.wbc-answered em {
+  color: var(--wb-term-text);
+  font-style: normal;
+}
+
+/* ---- tool groups --------------------------------------------------- */
+
+.wbc-group {
+  border: 1px solid var(--wbc-line);
+  border-radius: 10px;
+  background: var(--wbc-card);
+  overflow: hidden;
+}
+
+.wbc-group-head {
+  justify-content: flex-start;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  height: 36px;
+  padding: 0 12px;
+  border: 0;
+  background: none;
+  color: var(--wb-term-dim);
+  text-align: left;
+  cursor: pointer;
+}
+
+.wbc-group-title {
+  color: var(--wb-term-text);
+  font-size: 12.5px;
+  font-weight: 500;
+}
+
+.wbc-group-sub {
+  font-size: 12px;
+}
+
+.wbc-group-rows {
+  padding: 4px 0 6px;
+  border-top: 1px solid var(--wbc-line);
+}
+
+.wbc-tool-line {
+  justify-content: flex-start;
+  height: auto;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  min-height: 30px;
+  padding: 0 12px;
+  border: 0;
+  background: none;
+  color: var(--wb-term-dim);
+  font-family: var(--mono);
+  font-size: 12px;
+  text-align: left;
+  cursor: pointer;
+}
+
+.wbc-tool-line:hover {
+  background: var(--wb-btn-hover);
+}
+
+.wbc-tool-st {
+  display: inline-grid;
+  flex: none;
+  place-items: center;
+  width: 16px;
+}
+
+.wbc-tool-st.st-done {
+  color: var(--green);
+}
+
+.wbc-tool-st.st-error {
+  color: var(--red);
+}
+
+.wbc-tool-st.st-running .i {
+  color: #d4704f;
+  animation: wbc-spin 1s linear infinite;
+}
+
+.wbc-verb {
+  flex: none;
+  font-weight: 500;
+  color: var(--wb-term-dim);
+}
+
+.tone-green {
+  color: var(--green);
+}
+
+.tone-amber {
+  color: var(--amber);
+}
+
+.tone-blue {
+  color: var(--blue);
+}
+
+.tone-red {
+  color: var(--red);
+}
+
+.tone-violet {
+  color: var(--wbc-violet);
+}
+
+.wbc-target {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--wb-term-text);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.wbc-meta {
+  flex: none;
+  font-size: 11.5px;
+}
+
+.wbc-out {
+  max-height: 320px;
+  margin: 2px 12px 8px 36px;
+  padding: 8px 10px;
+  overflow: auto;
+  border-radius: 6px;
+  background: var(--wbc-out);
+  color: var(--wb-term-text);
+  font-family: var(--mono);
+  font-size: 11.5px;
+  line-height: 1.55;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.wbc-out.is-error {
+  color: var(--red);
+}
+
+.wbc-out.wbc-local {
+  margin: 0;
+}
+
+.wbc-diff .del {
+  color: var(--red);
+}
+
+.wbc-diff .add {
+  color: var(--green);
+}
+
+/* ---- live status --------------------------------------------------- */
+
+.wbc-status {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 2px 0;
+  color: var(--wb-term-dim);
+  font-size: 12.5px;
+}
+
+.wbc-status > .i {
+  color: #d4704f;
+}
+
+.wbc-status.is-quiet > .i {
+  color: var(--wb-term-dim);
+}
+
+.wbc-status-text {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.wbc-status-src {
+  margin-left: auto;
+  flex: none;
+  color: var(--wb-term-dim);
+  font-family: inherit;
+  font-size: 11px;
+}
+
+.wbc-spin {
+  animation: wbc-spin 1s linear infinite;
+}
+
+@keyframes wbc-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+/* ---- cards --------------------------------------------------------- */
+
+.wbc-card {
+  --tone: var(--amber);
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 14px 16px;
+  border: 1px solid color-mix(in srgb, var(--tone) 45%, transparent);
+  border-radius: 12px;
+  background: color-mix(in srgb, var(--tone) 7%, var(--wb-term));
+}
+
+.wbc-card-violet {
+  --tone: var(--wbc-violet);
+}
+
+.wbc-card-blue {
+  --tone: var(--blue);
+}
+
+.wbc-card.is-done {
+  opacity: 0.85;
+}
+
+.wbc-card-head {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+}
+
+.wbc-card-head > .i {
+  flex: none;
+  margin-top: 2px;
+  color: var(--tone);
+}
+
+.wbc-card-title {
+  font-size: 13.5px;
+  font-weight: 600;
+}
+
+.wbc-card-sub {
+  color: var(--wb-term-dim);
+  font-family: var(--mono);
+  font-size: 11.5px;
+}
+
+.wbc-card-text {
+  margin-top: 4px;
+  color: var(--wb-term-dim);
+  font-size: 12.5px;
+}
+
+.wbc-card-q {
+  font-size: 13.5px;
+  font-weight: 500;
+}
+
+.wbc-command {
+  margin: 0;
+  padding: 9px 12px;
+  border-radius: 7px;
+  background: var(--wbc-out);
+  font-family: var(--mono);
+  font-size: 12.5px;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.wbc-options {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.wbc-option {
+  justify-content: flex-start;
+  height: auto;
+  line-height: 1.4;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-height: 36px;
+  padding: 6px 10px;
+  border: 1px solid var(--wbc-line);
+  border-radius: 8px;
+  background: var(--wb-term);
+  color: var(--wb-term-text);
+  font-size: 13px;
+  text-align: left;
+  cursor: pointer;
+}
+
+.wbc-option:hover:not(:disabled),
+.wbc-option.is-selected {
+  border-color: color-mix(in srgb, var(--tone) 65%, transparent);
+  background: color-mix(in srgb, var(--tone) 12%, var(--wb-term));
+}
+
+.wbc-option kbd,
+.wbc-pop-row kbd,
+.wbc-mode kbd {
+  display: inline-grid;
+  place-items: center;
+  min-width: 20px;
+  height: 20px;
+  padding: 0 4px;
+  border: 1px solid var(--wbc-line);
+  border-radius: 5px;
+  background: var(--wbc-card);
+  color: var(--wb-term-dim);
+  font-family: var(--mono);
+  font-size: 11px;
+}
+
+.wbc-option.is-selected kbd {
+  color: var(--tone);
+}
+
+.wbc-card-foot {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  color: var(--wb-term-dim);
+  font-size: 11.5px;
+}
+
+.wbc-card-foot > :last-child {
+  margin-left: auto;
+}
+
+.wbc-card-btns {
+  display: inline-flex;
+  gap: 8px;
+}
+
+.wbc-card-actions {
+  padding-left: 25px;
+}
+
+.wbc-link {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--wb-term-text);
+  font-size: 12px;
+  font-weight: 500;
+  cursor: pointer;
+}
+
+.wbc-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 30px;
+  padding: 0 14px;
+  border: 1px solid var(--wbc-line-strong);
+  border-radius: 8px;
+  background: var(--wb-term);
+  color: var(--wb-term-text);
+  font-size: 12.5px;
+  font-weight: 500;
+  cursor: pointer;
+}
+
+.wbc-btn-primary {
+  border-color: transparent;
+  background: var(--wbc-send);
+  color: #fff;
+}
+
+.wbc-btn:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+.wbc-tabs {
+  display: inline-flex;
+  gap: 6px;
+}
+
+.wbc-tabs button {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  height: 24px;
+  padding: 0 10px;
+  border: 1px solid var(--wbc-line);
+  border-radius: 7px;
+  background: none;
+  color: var(--wb-term-dim);
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.wbc-tabs button.is-active {
+  border-color: color-mix(in srgb, var(--tone) 60%, transparent);
+  background: color-mix(in srgb, var(--tone) 16%, transparent);
+  color: var(--wb-term-text);
+}
+
+.wbc-q-title {
+  font-size: 15px;
+  font-weight: 600;
+}
+
+.wbc-q-hint {
+  margin-top: -6px;
+  color: var(--wb-term-dim);
+  font-size: 11.5px;
+}
+
+.wbc-q-options {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.wbc-q-option {
+  justify-content: flex-start;
+  height: auto;
+  line-height: 1.4;
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  padding: 9px 14px;
+  border: 1px solid var(--wbc-line);
+  border-radius: 9px;
+  background: var(--wb-term);
+  color: var(--wb-term-text);
+  text-align: left;
+  cursor: pointer;
+}
+
+.wbc-q-option.is-on,
+.wbc-q-option:hover:not(:disabled):not(.is-other) {
+  border-color: color-mix(in srgb, var(--tone) 65%, transparent);
+  background: color-mix(in srgb, var(--tone) 10%, var(--wb-term));
+}
+
+.wbc-q-option.is-other {
+  align-items: center;
+  cursor: default;
+}
+
+.wbc-q-option.is-other input {
+  flex: 1 1 auto;
+  height: 28px;
+  padding: 0 10px;
+  border: 1px solid var(--wbc-line);
+  border-radius: 7px;
+  background: var(--wbc-card);
+  color: var(--wb-term-text);
+  font: inherit;
+  font-size: 12.5px;
+}
+
+.wbc-radio,
+.wbc-check {
+  display: inline-grid;
+  flex: none;
+  place-items: center;
+  width: 16px;
+  height: 16px;
+  margin-top: 2px;
+  border: 1.5px solid var(--wbc-line-strong);
+  border-radius: 50%;
+}
+
+.wbc-check {
+  border-radius: 4px;
+}
+
+.is-on > .wbc-radio,
+.is-on > .wbc-check {
+  border-color: var(--tone);
+}
+
+.wbc-radio i {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--tone);
+}
+
+.is-on > .wbc-check {
+  background: var(--tone);
+  color: #fff;
+}
+
+.wbc-q-body {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.wbc-q-label {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13.5px;
+  font-weight: 500;
+}
+
+.wbc-q-desc {
+  color: var(--wb-term-dim);
+  font-size: 12px;
+}
+
+.wbc-tag {
+  padding: 1px 7px;
+  border-radius: 5px;
+  background: color-mix(in srgb, var(--tone) 18%, transparent);
+  color: var(--tone);
+  font-size: 10.5px;
+  font-style: normal;
+  font-weight: 500;
+}
+
+.wbc-plan-body {
+  max-height: 360px;
+  padding: 12px 14px;
+  overflow: auto;
+  border-radius: 8px;
+  background: var(--wbc-out);
+  font-size: 13px;
+}
+
+.wbc-more {
+  margin-top: 6px;
+  color: var(--wb-term-dim);
+  font-size: 12px;
+}
+
+.wbc-feedback {
+  height: 34px;
+  padding: 0 12px;
+  border: 1px solid var(--wbc-line);
+  border-radius: 8px;
+  background: var(--wb-term);
+  color: var(--wb-term-text);
+  font: inherit;
+  font-size: 13px;
+}
+
+/* ---- empty states, drop, toast ------------------------------------- */
+
+.wbc-empty {
+  display: flex;
+  flex: 1 1 auto;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  padding: 24px;
+  text-align: center;
+}
+
+.wbc-empty-card {
+  width: min(640px, 100%);
+  margin-top: 8px;
+  text-align: left;
+}
+
+.wbc-empty > .i {
+  color: var(--wb-term-dim);
+}
+
+.wbc-empty-title {
+  font-size: 14px;
+  font-weight: 500;
+}
+
+.wbc-empty-text {
+  max-width: 460px;
+  color: var(--wb-term-dim);
+  font-size: 12.5px;
+}
+
+.wbc-drop {
+  position: absolute;
+  inset: 10px;
+  z-index: 5;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  border: 1.5px dashed var(--wbc-violet);
+  border-radius: 12px;
+  background: color-mix(in srgb, var(--wbc-violet) 12%, color-mix(in srgb, var(--wb-term) 92%, transparent));
+  pointer-events: none;
+}
+
+.wbc-drop .i {
+  color: var(--wbc-violet);
+}
+
+.wbc-drop-title {
+  font-size: 15px;
+  font-weight: 600;
+}
+
+.wbc-drop-text {
+  color: var(--wb-term-dim);
+  font-size: 12px;
+}
+
+.wbc-toast {
+  position: absolute;
+  left: 50%;
+  bottom: 150px;
+  z-index: 6;
+  max-width: 80%;
+  padding: 8px 14px;
+  border-radius: 8px;
+  background: var(--text, #1d1c1a);
+  color: var(--text-inv, #fff);
+  font-size: 12.5px;
+  transform: translateX(-50%);
+  box-shadow: var(--shadow-pop);
+}
+
+/* ---- composer ------------------------------------------------------ */
+
+.wbc-dock {
+  flex: none;
+  width: 100%;
+  max-width: var(--wbc-col);
+  margin: 0 auto;
+  padding: 0 20px 10px;
+}
+
+.wbc.is-compact .wbc-dock {
+  padding: 0 10px 10px;
+}
+
+.wbc-hint {
+  margin-top: 6px;
+  color: var(--wb-term-dim);
+  font-size: 11px;
+  text-align: center;
+}
+
+.wbc-composer {
+  position: relative;
+  padding: 6px;
+  border: 1px solid var(--wbc-line);
+  border-radius: 18px;
+  background: var(--wbc-card);
+}
+
+.wbc-field {
+  border: 1px solid var(--wbc-line-strong);
+  border-radius: 13px;
+  background: var(--wb-term);
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.06);
+  transition: border-color 0.15s, box-shadow 0.15s;
+}
+
+.wbc-field:focus-within {
+  border-color: color-mix(in srgb, var(--wbc-violet) 70%, transparent);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--wbc-violet) 14%, transparent);
+}
+
+.wbc-field.is-locked {
+  background: var(--wbc-card);
+}
+
+.wbc-field-row {
+  display: flex;
+  align-items: flex-end;
+  gap: 8px;
+  padding: 10px 8px 8px 14px;
+}
+
+.wbc-lock {
+  flex: none;
+  align-self: flex-start;
+  margin-top: 3px;
+  color: var(--wb-term-dim);
+}
+
+.wbc-field textarea {
+  flex: 1 1 auto;
+  min-height: 44px;
+  max-height: 220px;
+  padding: 0;
+  border: 0;
+  outline: 0;
+  background: none;
+  color: var(--wb-term-text);
+  font: inherit;
+  font-size: 14px;
+  line-height: 1.5;
+  resize: none;
+}
+
+.wbc-field textarea::placeholder {
+  color: var(--wb-term-dim);
+}
+
+.wbc-send {
+  display: inline-grid;
+  flex: none;
+  place-items: center;
+  width: 32px;
+  height: 32px;
+  border: 0;
+  border-radius: 50%;
+  background: var(--wbc-send);
+  color: #fff;
+  cursor: pointer;
+}
+
+.wbc-send:disabled {
+  background: var(--wbc-line);
+  color: var(--wb-term-dim);
+  cursor: default;
+}
+
+.wbc-send.is-stop {
+  border: 1px solid color-mix(in srgb, var(--red) 50%, transparent);
+  background: color-mix(in srgb, var(--red) 14%, var(--wb-term));
+}
+
+.wbc-send.is-stop i {
+  width: 10px;
+  height: 10px;
+  border-radius: 2px;
+  background: var(--red);
+}
+
+.wbc-attachments {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  padding: 10px 12px 0;
+}
+
+.wbc-att {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  height: 56px;
+  padding: 0 12px 0 8px;
+  border: 1px solid var(--wbc-line);
+  border-radius: 9px;
+  background: var(--wbc-card);
+}
+
+.wbc-att.is-image {
+  width: 56px;
+  padding: 0;
+  overflow: hidden;
+}
+
+.wbc-att.is-image img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.wbc-att.is-error {
+  border-color: color-mix(in srgb, var(--red) 50%, transparent);
+}
+
+.wbc-att-ic {
+  display: inline-grid;
+  place-items: center;
+  width: 32px;
+  height: 32px;
+  border-radius: 7px;
+  background: var(--wbc-bubble);
+  color: var(--wb-term-dim);
+}
+
+.wbc-att-body {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 90px;
+}
+
+.wbc-att-name {
+  max-width: 160px;
+  overflow: hidden;
+  font-size: 12px;
+  font-weight: 500;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.wbc-att-meta {
+  color: var(--wb-term-dim);
+  font-size: 11px;
+}
+
+.wbc-att-progress {
+  height: 4px;
+  overflow: hidden;
+  border-radius: 2px;
+  background: var(--wbc-line);
+}
+
+.wbc-att-progress i {
+  display: block;
+  width: 40%;
+  height: 100%;
+  border-radius: 2px;
+  background: var(--wbc-violet);
+  animation: wbc-progress 1.2s ease-in-out infinite;
+}
+
+@keyframes wbc-progress {
+  from {
+    transform: translateX(-100%);
+  }
+  to {
+    transform: translateX(250%);
+  }
+}
+
+.wbc-att-x {
+  position: absolute;
+  top: 3px;
+  right: 3px;
+  display: none;
+  place-items: center;
+  width: 16px;
+  height: 16px;
+  border: 0;
+  border-radius: 50%;
+  background: rgba(0, 0, 0, 0.65);
+  color: #fff;
+  cursor: pointer;
+}
+
+.wbc-att:hover .wbc-att-x {
+  display: inline-grid;
+}
+
+.wbc-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 6px 2px 0;
+}
+
+.wbc-anchor {
+  position: relative;
+  display: inline-flex;
+}
+
+.wbc-tool {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 26px;
+  padding: 0 8px;
+  border: 0;
+  border-radius: 7px;
+  background: none;
+  color: var(--wb-term-dim);
+  font-size: 12px;
+  font-weight: 500;
+  cursor: pointer;
+}
+
+.wbc-tool:hover:not(:disabled),
+.wbc-tool.is-on {
+  background: var(--wb-btn-hover);
+  color: var(--wb-term-text);
+}
+
+.wbc-tool:disabled {
+  opacity: 0.55;
+  cursor: default;
+}
+
+.wbc-mode.tone-amber > span {
+  color: var(--amber);
+}
+
+.wbc-mode.tone-blue > span {
+  color: var(--blue);
+}
+
+.wbc-mode.tone-green > span {
+  color: var(--green);
+}
+
+.wbc-mode.tone-red > span {
+  color: var(--red);
+}
+
+.wbc-mode kbd {
+  height: 18px;
+  border: 0;
+  background: none;
+  font-size: 10.5px;
+}
+
+.wbc-ctx span {
+  font-family: var(--mono);
+  font-size: 11.5px;
+}
+
+.wbc-donut circle {
+  fill: none;
+  stroke-width: 3;
+}
+
+.wbc-donut-track {
+  stroke: var(--wbc-line);
+}
+
+.wbc-donut-fill {
+  stroke: var(--wbc-violet);
+  stroke-linecap: round;
+}
+
+.wbc-donut.is-high .wbc-donut-fill {
+  stroke: var(--amber);
+}
+
+/* Toolbar menus open right above their button (decision 5). */
+.wbc-pop {
+  position: absolute;
+  bottom: calc(100% + 8px);
+  z-index: 20;
+  display: none;
+  flex-direction: column;
+  padding: 6px;
+  border: 1px solid var(--wbc-line-strong);
+  border-radius: 12px;
+  background: var(--surface, var(--wb-term));
+  color: var(--text, var(--wb-term-text));
+  box-shadow: var(--shadow-pop);
+}
+
+.wbc-pop-left {
+  left: 0;
+}
+
+.wbc-pop-right {
+  right: 0;
+}
+
+.wbc-anchor.is-open > .wbc-pop,
+.wbc-anchor.is-hover:hover > .wbc-pop {
+  display: flex;
+}
+
+.wbc-pop-row {
+  justify-content: flex-start;
+  height: auto;
+  line-height: 1.35;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 7px 10px;
+  border: 0;
+  border-radius: 7px;
+  background: none;
+  color: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.wbc-pop-row:hover,
+.wbc-pop-row.is-checked {
+  background: var(--wb-btn-hover);
+}
+
+.wbc-pop-row > .i {
+  margin-left: auto;
+  color: var(--wbc-violet);
+}
+
+.wbc-pop-text {
+  display: flex;
+  flex: 1 1 auto;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.wbc-pop-label {
+  font-size: 12.5px;
+  font-weight: 500;
+}
+
+.wbc-pop-desc {
+  color: var(--text-3, var(--wb-term-dim));
+  font-size: 11.5px;
+}
+
+.wbc-pop-sec {
+  padding: 8px 10px 4px;
+  color: var(--text-4, var(--wb-term-dim));
+  font-size: 11px;
+  font-weight: 500;
+}
+
+.wbc-pop-foot {
+  margin: 6px -6px -6px;
+  padding: 8px 16px;
+  border-top: 1px solid var(--wbc-line);
+  color: var(--text-4, var(--wb-term-dim));
+  font-size: 11px;
+}
+
+.wbc-seg {
+  display: flex;
+  gap: 2px;
+  margin: 2px 6px 4px;
+  padding: 2px;
+  border: 1px solid var(--wbc-line);
+  border-radius: 8px;
+}
+
+.wbc-seg button {
+  flex: 1 1 0;
+  height: 24px;
+  border: 0;
+  border-radius: 6px;
+  background: none;
+  color: var(--text-3, var(--wb-term-dim));
+  font-size: 11.5px;
+  font-weight: 500;
+  cursor: pointer;
+}
+
+.wbc-seg button.is-on {
+  background: var(--wbc-send);
+  color: #fff;
+}
+
+.wbc-ctx-head {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 8px 8px 4px;
+}
+
+.wbc-ctx-big {
+  font-size: 13.5px;
+  font-weight: 600;
+}
+
+.wbc-ctx-sub {
+  color: var(--text-4, var(--wb-term-dim));
+  font-size: 11.5px;
+}
+
+.wbc-ctx-rows {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 5px 12px;
+  margin: 8px 8px 4px;
+  font-size: 12px;
+}
+
+.wbc-ctx-rows dt {
+  color: var(--text-3, var(--wb-term-dim));
+}
+
+.wbc-ctx-rows dd {
+  margin: 0;
+  font-family: var(--mono);
+  text-align: right;
+}
+
+.wbc-pop-action {
+  display: flex;
+  justify-content: space-between;
+  margin: 6px -6px -6px;
+  padding: 9px 16px;
+  border: 0;
+  border-top: 1px solid var(--wbc-line);
+  border-radius: 0 0 12px 12px;
+  background: none;
+  color: var(--wbc-violet);
+  font-size: 12px;
+  font-weight: 500;
+  cursor: pointer;
+}
+
+.wbc-pop-action span {
+  color: var(--text-4, var(--wb-term-dim));
+  font-family: var(--mono);
+  font-size: 11px;
+}
+
+.wbc-pop-action:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+/* The `/` and `@` menus: full composer width, long list (REQ-WC-055). */
+.wbc-bigmenu {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: calc(100% + 8px);
+  z-index: 20;
+  display: flex;
+  flex-direction: column;
+  max-height: min(460px, 60vh);
+  border: 1px solid var(--wbc-line-strong);
+  border-radius: 12px;
+  background: var(--surface, var(--wb-term));
+  color: var(--text, var(--wb-term-text));
+  box-shadow: var(--shadow-pop);
+  overflow: hidden;
+}
+
+.wbc-bigmenu-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex: none;
+  height: 36px;
+  padding: 0 16px;
+  border-bottom: 1px solid var(--wbc-line);
+  font-size: 11.5px;
+}
+
+.wbc-bigmenu-title {
+  font-weight: 500;
+}
+
+.wbc-bigmenu-count,
+.wbc-bigmenu-hint {
+  color: var(--text-4, var(--wb-term-dim));
+}
+
+.wbc-bigmenu-list {
+  flex: 1 1 auto;
+  min-height: 0;
+  padding: 4px 6px;
+  overflow-y: auto;
+}
+
+.wbc-bigmenu-sec {
+  padding: 8px 10px 4px;
+  color: var(--text-4, var(--wb-term-dim));
+  font-size: 10.5px;
+  font-weight: 500;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.wbc-bigmenu-row {
+  justify-content: flex-start;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  height: 30px;
+  padding: 0 10px;
+  border: 0;
+  border-radius: 7px;
+  background: none;
+  color: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.wbc-bigmenu-row.is-hl {
+  background: var(--wb-btn-hover);
+}
+
+.wbc-bigmenu-row > .i {
+  flex: none;
+  color: var(--text-3, var(--wb-term-dim));
+}
+
+.wbc-bigmenu-label {
+  flex: none;
+  min-width: 150px;
+  max-width: 60%;
+  overflow: hidden;
+  font-family: var(--mono);
+  font-size: 12.5px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.wbc-bigmenu-desc {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--text-3, var(--wb-term-dim));
+  font-size: 12.5px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.wbc-bigmenu-meta {
+  flex: none;
+  margin-left: auto;
+  color: var(--text-4, var(--wb-term-dim));
+  font-family: var(--mono);
+  font-size: 11px;
+}
+
+.wbc-bigmenu-empty {
+  padding: 18px;
+  color: var(--text-4, var(--wb-term-dim));
+  font-size: 12.5px;
+  text-align: center;
+}
+
+.wbc-bigmenu-foot {
+  flex: none;
+  padding: 8px 16px;
+  border-top: 1px solid var(--wbc-line);
+  color: var(--text-4, var(--wb-term-dim));
+  font-size: 11px;
+}
+
+/* ---- compact (phone) ----------------------------------------------- */
+
+.wbc.is-compact .wbc-field textarea {
+  min-height: 24px;
+}
+
+.wbc.is-compact .wbc-option,
+.wbc.is-compact .wbc-q-option {
+  min-height: 44px;
+}
+
+.wbc.is-compact .wbc-bigmenu-desc {
+  display: none;
+}
+
+.wb-chat-host {
+  position: absolute;
+  inset: 0;
+  z-index: 2;
+  overflow: hidden;
+  border-radius: 0 0 10px 10px;
+}
+
+/* The terminal under a chat view keeps its size (REQ-WC-051). */
+.wb-pane-body.is-chat {
+  position: relative;
+}
+
+.wb-pane-body.is-chat > .wb-term-host {
+  visibility: hidden;
+}
+
+.wb-phone-term.is-chat {
+  position: relative;
+}
+
+.wb-phone-term.is-chat > .wb-term-host {
+  visibility: hidden;
+}
+
+.wb-phone-term .wb-chat-host {
+  border-radius: 0;
+}
+
+.wb-view-btn.is-chat {
+  color: var(--wb-term-text);
+}
+
+/* ---- subagents and background tasks (REQ-WC-061, 062) -------------- */
+
+.wbc-agent-ic {
+  flex: none;
+  color: var(--wbc-violet);
+}
+
+.wbc-agent-type {
+  flex: none;
+  padding: 0 6px;
+  border-radius: 5px;
+  background: color-mix(in srgb, var(--wbc-violet) 14%, transparent);
+  color: var(--wbc-violet);
+  font-size: 11px;
+}
+
+.wbc-agent-title {
+  font-family: var(--sans, inherit);
+}
+
+.wbc-agent-summary {
+  margin: -2px 12px 6px 36px;
+  color: var(--wb-term-dim);
+  font-size: 11.5px;
+}
+
+.wbc-agent-body {
+  margin: 2px 12px 8px 36px;
+  padding: 8px 10px;
+  border-left: 2px solid color-mix(in srgb, var(--wbc-violet) 40%, transparent);
+}
+
+.wbc-agent-steps {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.wbc-agent-step {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 24px;
+  color: var(--wb-term-dim);
+  font-family: var(--mono);
+  font-size: 11.5px;
+}
+
+.wbc-agent-report {
+  margin-top: 8px;
+  padding: 10px 12px;
+  border-radius: 8px;
+  background: var(--wbc-out);
+  font-size: 13px;
+}
+
+.wbc-agent-report-head {
+  margin-bottom: 6px;
+  color: var(--wb-term-dim);
+  font-size: 11px;
+  font-weight: 500;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.wbc-st-running {
+  color: #d4704f;
+}
+
+.wbc-st-done {
+  color: var(--green);
+}
+
+.wbc-st-failed {
+  color: var(--red);
+}
+
+.wbc-st-killed {
+  color: var(--wb-term-dim);
+}
+
+.wbc-bg {
+  display: flex;
+  margin-bottom: 6px;
+}
+
+.wbc-bg-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 26px;
+  padding: 0 10px;
+  border: 1px solid var(--wbc-line);
+  border-radius: 13px;
+  background: var(--wbc-card);
+  color: var(--wb-term-dim);
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.wbc-bg-chip.is-running {
+  border-color: color-mix(in srgb, #d4704f 40%, transparent);
+  color: var(--wb-term-text);
+}
+
+.wbc-bg-chip.is-running > .i:first-child {
+  color: #d4704f;
+}
+
+.wbc-bg-pop {
+  max-height: 360px;
+  overflow-y: auto;
+}
+
+.wbc-bg-row {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  padding: 7px 10px;
+  border-radius: 7px;
+}
+
+.wbc-bg-row > .i {
+  flex: none;
+  margin-top: 2px;
+}
+
+.wbc-bg-row.is-done {
+  opacity: 0.7;
+}
+
+.wbc-bg-kind {
+  color: var(--text-3, var(--wb-term-dim));
+}
+
+.wbc-bg-text {
+  display: flex;
+  flex: 1 1 auto;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.wbc-bg-title {
+  overflow: hidden;
+  font-size: 12.5px;
+  font-weight: 500;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.wbc-bg-title em {
+  margin-right: 6px;
+  color: var(--wbc-violet);
+  font-style: normal;
+}
+
+.wbc-bg-sum {
+  color: var(--text-3, var(--wb-term-dim));
+  font-size: 11.5px;
+}
+
+.wbc-bg-time {
+  flex: none;
+  color: var(--text-4, var(--wb-term-dim));
+  font-family: var(--mono);
+  font-size: 11px;
+}
+
+/* ---- background tray (owner feedback 2026-11-23) ------------------- */
+
+/* Inside the composer shell, above the field: one card, nothing sticks out. */
+.wbc-tray {
+  margin: -2px 0 6px;
+}
+
+.wbc-tray-head {
+  display: flex;
+  align-items: center;
+  justify-content: flex-start;
+  gap: 8px;
+  width: 100%;
+  height: 28px;
+  padding: 0 8px;
+  border: 0;
+  border-radius: 9px;
+  background: none;
+  color: var(--wb-term-dim);
+  font-size: 12px;
+  text-align: left;
+  cursor: pointer;
+}
+
+.wbc-tray-head:hover {
+  background: var(--wb-btn-hover);
+}
+
+.wbc-tray-title {
+  color: var(--wb-term-text);
+  font-weight: 500;
+}
+
+.wbc-tray-sub {
+  color: var(--wb-term-dim);
+}
+
+.wbc-tray-peek {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--wb-term-dim);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.wbc-tray-list {
+  max-height: min(220px, 28vh);
+  margin-top: 4px;
+  padding: 2px 0;
+  overflow-y: auto;
+}
+
+/* Messages fade out under the dock instead of being cut by a hard edge. */
+.wbc-dock {
+  position: relative;
+}
+
+.wbc-dock::before {
+  content: "";
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 100%;
+  height: 18px;
+  background: linear-gradient(to bottom, transparent, var(--wb-term));
+  pointer-events: none;
+}
+
+.wbc-fresh {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+  margin: 18vh auto 0;
+  text-align: center;
+}
+
+.wbc-fresh .wbc-head-tile {
+  width: 28px;
+  height: 28px;
+}
+
+.wbc-fresh-title {
+  font-size: 15px;
+  font-weight: 600;
+}
+
+.wbc-fresh-text {
+  color: var(--wb-term-dim);
+  font-size: 12.5px;
+}
+
+.wbc-tab {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  height: 24px;
+  padding: 0 10px;
+  border: 1px solid var(--wbc-line);
+  border-radius: 7px;
+  color: var(--wb-term-dim);
+  font-size: 12px;
+}
+
+.wbc-tab.is-done {
+  border-color: color-mix(in srgb, var(--tone) 60%, transparent);
+  color: var(--wb-term-text);
+}
+
+/* The cursor row (multi-select) gets the same quiet highlight as a hover. */
+.wbc-q-option.is-cursor:not(.is-on) {
+  border-color: color-mix(in srgb, var(--tone) 40%, transparent);
+}
+
+/* AskUserQuestion with previews: options left, the preview of the option
+   under the cursor right; stacked on narrow panes. */
+.wbc-q-split {
+  display: grid;
+  grid-template-columns: minmax(200px, 1fr) minmax(0, 1.3fr);
+  gap: 12px;
+  align-items: start;
+}
+
+.wbc-q-preview {
+  margin: 0;
+  padding: 12px 14px;
+  overflow: auto;
+  border: 1px solid var(--wbc-line);
+  border-radius: 9px;
+  background: var(--wbc-out);
+  color: var(--wb-term-text);
+  font-family: var(--mono);
+  font-size: 12px;
+  line-height: 1.18;
+  white-space: pre;
+}
+
+.wbc.is-compact .wbc-q-split {
+  grid-template-columns: 1fr;
+}
+
+.wbc-pop-tag {
+  margin-left: 6px;
+  padding: 0 5px;
+  border-radius: 4px;
+  background: color-mix(in srgb, var(--wbc-violet) 16%, transparent);
+  color: var(--wbc-violet);
+  font-size: 10.5px;
+  font-style: normal;
+  font-weight: 600;
+}

@@ -136,6 +136,8 @@ func (s *Server) registerWorkbenchRoutes() {
 	s.registerWorkbenchGitRoutes()
 	// The FigCraft viewer routes of spec 67 (REQ-FV-020).
 	s.registerWorkbenchFigcraftRoutes()
+	// The Claude Code chat routes of spec 71 (REQ-WC-040).
+	s.registerWorkbenchChatRoutes()
 }
 
 // handleWorkbenchList serves the GET of REQ-WB-040.

@@ -1,0 +1,39 @@
+
+ ▐▛███▛█   Claude Code v2.1.330
+▝▜██████▀  Haiku 5.5 · Claude Pro
+ ▝▝   ▝▝   /…/dcc140d4-0b5b-473d-bb8b-e7f2727bbf4e/scratchpad/live-proj
+
+
+❯ Use the AskUserQuestion tool once with three questions: (1) header Color, single select: Red,
+  Blue, Green; (2) header Toppings, multiSelect true: Cheese, Mushroom, Olive, Pepper; (3) header
+  Size, single select: Small, Large. Give each option a short description and mark one option
+  Recommended.
+────────────────────────────────────────────────────────────────────────────────────────────────────
+←  ☒ Color  ☒ Toppings  ☐ Size  ✔ Submit  →
+
+Pick your toppings.
+
+  1. [✔] Cheese (Recommended)
+         Classic, melty base topping
+❯ 2. [✔] Mushroom
+         Earthy, savory flavor
+  3. [ ] Olive
+         Salty, briny bite
+  4. [ ] Pepper
+         Sweet or spicy crunch
+  5. [ ] Type something
+     Next
+────────────────────────────────────────────────────────────────────────────────────────────────────
+  6. Chat about this
+
+Enter to select · Tab/Arrow keys to navigate · Esc to cancel
+
+
+
+
+
+
+
+
+
+

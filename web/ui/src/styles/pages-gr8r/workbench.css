@@ -1213,15 +1213,81 @@
   margin-right: 2px;
 }
 
-.wb-tabs-space {
+.wb-tabs-space-wrap {
   display: inline-flex;
   flex: none;
+  margin-right: 4px;
+}
+
+.wb-tabs-space {
+  display: inline-flex;
   align-items: center;
   gap: 7px;
-  margin-right: 6px;
+  max-width: 220px;
+  padding: 5px 6px 5px 6px;
+  border: 0;
+  border-radius: 8px;
+  background: transparent;
   color: var(--text-2);
+  font: inherit;
   font-size: var(--fs-sm);
   font-weight: 500;
+  cursor: pointer;
+}
+
+.wb-tabs-space:hover,
+.wb-tabs-space.is-open {
+  background: var(--wb-btn-hover);
+  color: var(--text);
+}
+
+.wb-tabs-space-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.wb-tabs-space-chev {
+  flex: none;
+  opacity: 0.6;
+  transition: transform 0.15s ease;
+}
+
+.wb-tabs-space.is-open .wb-tabs-space-chev {
+  transform: rotate(180deg);
+}
+
+.wb-space-menu {
+  max-height: min(420px, 70vh);
+}
+
+.wb-space-mi .trunc {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.wb-space-mi .wb-tile {
+  flex: none;
+  font-size: 10px;
+}
+
+.wb-space-mi-r {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.wb-space-mi-n {
+  color: var(--text-3);
+  font-size: var(--fs-xs);
+}
+
+.wb-space-mi-ck {
+  display: inline-flex;
+  width: 14px;
+  color: var(--text);
 }
 
 .wb-workspace {
