@@ -1825,7 +1825,7 @@
   color: var(--wb-term-text);
   font-family: var(--mono);
   font-size: 12px;
-  line-height: 1.45;
+  line-height: 1.18;
   white-space: pre;
 }
 

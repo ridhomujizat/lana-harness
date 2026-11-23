@@ -270,8 +270,10 @@ export function ScreenQuestionCard({ dialog, actions }: { dialog: ChatDialog; ac
   const [other, setOther] = useState("");
   const typeAt = dialog.options.findIndex((o) => /^type something/i.test(o.label));
   const chatAt = dialog.options.findIndex((o) => /^chat about this/i.test(o.label));
-  const multi = dialog.options.some((o) => o.checked !== undefined && o.checked);
-  const choices = dialog.options.map((o, i) => ({ o, i })).filter(({ i }) => i !== typeAt && i !== chatAt);
+  const multi = !!dialog.multi || dialog.options.some((o) => !!o.checked);
+  /* Multi-select lists end with a keyless "Next" row; it is the Next button. */
+  const nextAt = dialog.options.findIndex((o) => !o.key && /^(next|submit)$/i.test(o.label.trim()));
+  const choices = dialog.options.map((o, i) => ({ o, i })).filter(({ i }) => i !== typeAt && i !== chatAt && i !== nextAt);
   /* With a preview, a click moves the cursor (the preview follows it) and
      Choose answers; without one, a click answers at once. */
   const preview = dialog.preview || "";
@@ -351,7 +353,7 @@ export function ScreenQuestionCard({ dialog, actions }: { dialog: ChatDialog; ac
       </div>
       <div className="wbc-card-foot">
         <span>
-          Read from the terminal screen
+          {multi ? "Pick any, then Next · " : ""}Read from the terminal screen
           {chatAt >= 0 ? (
             <>
               {" · "}
@@ -370,7 +372,11 @@ export function ScreenQuestionCard({ dialog, actions }: { dialog: ChatDialog; ac
               Choose {dialog.options[cursorAt]?.label.replace(/\s*\(Recommended\)\s*$/i, "") || ""}
             </button>
           ) : null}
-          {dialog.tabs && dialog.tabs.length > 1 ? (
+          {nextAt >= 0 ? (
+            <button type="button" className="wbc-btn wbc-btn-primary" disabled={actions.disabled} onClick={() => actions.keys(pickKeys(dialog, nextAt))}>
+              {dialog.options[nextAt]!.label.trim()}
+            </button>
+          ) : dialog.tabs && dialog.tabs.length > 1 ? (
             <button type="button" className="wbc-btn wbc-btn-primary" disabled={actions.disabled} onClick={() => actions.keys(["tab"])}>
               Next
             </button>

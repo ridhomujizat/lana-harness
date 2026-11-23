@@ -141,6 +141,8 @@ export interface ChatDialog {
   tabs?: ChatDialogTab[];
   /* The preview Claude Code shows next to the option under the cursor. */
   preview?: string;
+  /* Checkbox options (multi-select). */
+  multi?: boolean;
 }
 
 export interface ChatLive {
