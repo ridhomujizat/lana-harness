@@ -7,6 +7,28 @@ but their config keys, events, and tools may still change between betas.
 
 ## [Unreleased]
 
+### Added
+
+- Workbench chat: a multi-question dialog moves between questions from its chips (the one on screen is highlighted, as in the terminal) and a Prev button. The review step lists each question with its answer before Submit answers / Cancel.
+- Workbench chat: file paths in Claude's replies, in your messages and in Read/Edit/Write steps open in Files on click, like ⌘+click in the terminal.
+- Workbench chat: a copy button under each of your messages and each of Claude's replies.
+- Workbench chat: pasted text in a message shows as a "Pasted text" block instead of raw `<pasted_content>` tags.
+
+### Changed
+
+- Workbench chat: no violet by default; the question card, buttons, send button and context donut follow the input's colours (violet stays for subagents). Finished steps start folded.
+- Workbench: the Terminal ⇄ Chat button sits with the pane tools on the right of the pane header instead of mid-header.
+- Workbench on a phone: the active tab chip looks like the active desktop tab instead of a violet pill.
+
+### Fixed
+
+- Workbench chat: switching tab or space no longer carries one pane's chat (pending message, draft, attachments) into another pane.
+- Workbench chat: after a pane resize (opening Files, resizing the window) the chat reads the terminal again instead of showing "can't be read from the screen".
+- Workbench chat: a question left with Esc no longer comes back as an open card.
+- Workbench chat: the message field shows one border when focused, not a second ring inside it.
+- Workbench: paths with spaces (`…/00 Inbox/Task VA.md`, quoted paths) open from the terminal and the chat.
+- Workbench: the "Tell Claude Code it runs in the Workbench" switch in Accounts wraps its text instead of scrolling sideways.
+
 ## [0.6.0-beta.6] - 2026-11-23
 
 ### Added

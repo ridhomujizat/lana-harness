@@ -1,7 +1,8 @@
 import { describe, expect, it } from "vitest";
 import { mergeItems, type ChatItem } from "../api/workbench-chat";
-import { answerPairs, answerText, dedupeTools, planTextFor, toBlocks } from "./workbench-chat";
+import { answerPairs, answerText, chatCodePath, chatPathMatches, dedupeTools, planTextFor, plainUserText, toBlocks, userParts } from "./workbench-chat";
 import { modelLabel } from "./workbench-chat-composer";
+import { tabKeys } from "./workbench-chat-cards";
 
 const u = (id: string, text: string): ChatItem => ({ id, kind: "user", text });
 const a = (id: string, text: string): ChatItem => ({ id, kind: "assistant", text, model: "claude-opus-5-5" });
@@ -85,5 +86,48 @@ describe("answerPairs", () => {
   it("splits a multi-question answer", () => {
     const item: ChatItem = { id: "q", kind: "question", answer: 'User has answered your questions: "Pick a color."="Blue", "Pick a size."="Large". You can now continue.' };
     expect(answerPairs(item)).toEqual([["Pick a color.", "Blue"], ["Pick a size.", "Large"]]);
+  });
+});
+
+describe("tabKeys", () => {
+  it("moves between question tabs with arrows", () => {
+    expect(tabKeys(0, 2)).toEqual(["right", "right"]);
+    expect(tabKeys(3, 1)).toEqual(["left", "left"]);
+    expect(tabKeys(1, 1)).toEqual([]);
+    expect(tabKeys(-1, 2)).toEqual([]);
+  });
+});
+
+describe("userParts", () => {
+  it("splits pasted text out of a user message", () => {
+    const text = 'see this\n\n<pasted_content id="ad5d">\nline one\nline two\n</pasted_content id="ad5d">\nand fix it';
+    expect(userParts(text)).toEqual([
+      { kind: "text", text: "see this" },
+      { kind: "pasted", text: "line one\nline two" },
+      { kind: "text", text: "and fix it" },
+    ]);
+    expect(plainUserText(text)).toBe("see this\n\nline one\nline two\n\nand fix it");
+  });
+
+  it("reads a message that is one paste as plain text", () => {
+    expect(userParts('\n\n<pasted_content id="2d1b">\nReply OK.\nline two\n</pasted_content id="2d1b">\n')).toEqual([{ kind: "text", text: "Reply OK.\nline two" }]);
+  });
+
+  it("keeps a message without pastes whole", () => {
+    expect(userParts("hello")).toEqual([{ kind: "text", text: "hello" }]);
+  });
+});
+
+describe("chat path links", () => {
+  it("links paths with a slash in plain text only", () => {
+    expect(chatPathMatches("see /tmp/a/c1.png and web/ui/x.tsx:12, not 0.6.0-beta.6 or e.g").map((m) => m.text)).toEqual(["/tmp/a/c1.png", "web/ui/x.tsx:12"]);
+    expect(chatPathMatches("visit https://example.com/a/b now")).toEqual([]);
+  });
+
+  it("links a code span that is one path or file name", () => {
+    expect(chatCodePath("internal/workbench/claudechat/parse.go:462")).toBe("internal/workbench/claudechat/parse.go:462");
+    expect(chatCodePath("CHANGELOG.md")).toBe("CHANGELOG.md");
+    expect(chatCodePath("0.6.0-beta.6")).toBeNull();
+    expect(chatCodePath("git push origin")).toBeNull();
   });
 });

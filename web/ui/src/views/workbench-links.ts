@@ -12,6 +12,9 @@ export interface LinkMatch {
   /* The :line and :line:col suffix, when the path carried one. */
   line?: number;
   col?: number;
+  /* For a path that runs over spaces: the first word alone, tried when the
+     long path does not exist. */
+  short?: string;
 }
 
 /* A URI scheme, so http(s) and every other scheme:// URL is never read as a
@@ -50,6 +53,47 @@ function parseToken(token: string): { text: string; line?: number; col?: number 
 }
 
 /* Every file path in one line of text, in order. */
+/* A file name ending: a letter-led extension, with an optional :line[:col]. */
+const FILE_END = /\.[A-Za-z][A-Za-z0-9]{0,7}(?::\d+(?::\d+)?)?$/;
+/* How many words a path with spaces may run over. */
+const MAX_SPACED_WORDS = 10;
+
+function trimTrail(s: string): string {
+  let to = s.length;
+  while (to > 0 && (s[to - 1] === "." || TRAIL.includes(s[to - 1]!))) to--;
+  return s.slice(0, to);
+}
+
+/* Owner, 2026-11-23: paths with spaces ("…/00 Inbox/Task VA.md",
+   "…/Screenshot 2026-10-10 at 20.12.00.png") are links too. A quoted path
+   runs to its closing quote; an absolute or ~/ path without an extension runs
+   on word by word until a word ends in a file extension. */
+function spacedPath(line: string, start: number, token: string): { text: string; end: number } | null {
+  const quote = line[start - 1];
+  if (quote === "'" || quote === '"') {
+    const close = line.indexOf(quote, start);
+    if (close > start) {
+      const inner = line.slice(start, close);
+      if (inner.includes(" ") && !inner.includes("  ") && parseToken(inner.trim())) return { text: inner.trim(), end: close };
+    }
+    return null;
+  }
+  if (!(token.startsWith("/") || token.startsWith("~/")) || FILE_END.test(token)) return null;
+  const rest = /(?: (\S+))/y;
+  let at = start + token.length;
+  for (let n = 0; n < MAX_SPACED_WORDS; n++) {
+    rest.lastIndex = at;
+    const m = rest.exec(line);
+    if (!m) return null;
+    const next = m[1]!;
+    if (next.startsWith("/") || next.startsWith("~/") || LEAD.includes(next[0]!)) return null;
+    at = rest.lastIndex;
+    const cand = trimTrail(line.slice(start, at));
+    if (FILE_END.test(cand)) return { text: cand, end: start + cand.length };
+  }
+  return null;
+}
+
 export function matchLinksInLine(line: string): LinkMatch[] {
   const links: LinkMatch[] = [];
   const words = /\S+/g;
@@ -71,6 +115,15 @@ export function matchLinksInLine(line: string): LinkMatch[] {
     const parsed = parseToken(token);
     if (!parsed) continue;
     const start = word.index + from;
+    const spaced = spacedPath(line, start, token);
+    if (spaced) {
+      const sp = parseToken(spaced.text);
+      if (sp) {
+        links.push({ start, end: spaced.end, text: sp.text, line: sp.line, col: sp.col, short: parsed.text });
+        words.lastIndex = Math.max(words.lastIndex, spaced.end);
+        continue;
+      }
+    }
     links.push({ start, end: start + token.length, text: parsed.text, line: parsed.line, col: parsed.col });
   }
   return links;

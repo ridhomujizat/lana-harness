@@ -3,14 +3,18 @@
    so it follows the light and dark themes. */
 
 .wbc {
-  --wbc-send: #1a1831;
+  /* The chat's accent is the text colour, like the composer (owner,
+     2026-11-23: no violet by default); violet marks subagents only. */
+  --wbc-accent: var(--wb-term-text);
+  --wbc-send: var(--wb-term-text);
+  --wbc-on: var(--wb-term);
   --wbc-col: 760px;
   --wbc-bubble: color-mix(in srgb, var(--wb-term-text) 7%, var(--wb-term));
   --wbc-card: color-mix(in srgb, var(--wb-term-text) 3%, var(--wb-term));
   --wbc-line: color-mix(in srgb, var(--wb-term-text) 12%, transparent);
   --wbc-line-strong: color-mix(in srgb, var(--wb-term-text) 20%, transparent);
   --wbc-out: color-mix(in srgb, var(--wb-term-text) 5%, var(--wb-term));
-  --wbc-violet: #6c68c8;
+  --wbc-agent: #6c68c8;
   position: absolute;
   inset: 0;
   display: flex;
@@ -22,14 +26,12 @@
 }
 
 :root[data-theme="dark"] .wbc {
-  --wbc-send: #49447e;
-  --wbc-violet: #b9b6f0;
+  --wbc-agent: #b9b6f0;
 }
 
 @media (prefers-color-scheme: dark) {
   :root:not([data-theme="light"]) .wbc {
-    --wbc-send: #49447e;
-    --wbc-violet: #b9b6f0;
+    --wbc-agent: #b9b6f0;
   }
 }
 
@@ -78,15 +80,15 @@
   align-items: center;
   gap: 8px;
   padding: 8px 12px;
-  border: 1px solid color-mix(in srgb, var(--wbc-violet) 45%, transparent);
+  border: 1px solid color-mix(in srgb, var(--wbc-accent) 45%, transparent);
   border-radius: 8px;
-  background: color-mix(in srgb, var(--wbc-violet) 8%, var(--wb-term));
+  background: color-mix(in srgb, var(--wbc-accent) 8%, var(--wb-term));
   color: var(--wb-term-text);
   font-size: 12.5px;
 }
 
 .wbc-banner .i {
-  color: var(--wbc-violet);
+  color: var(--wbc-accent);
 }
 
 .wbc-older,
@@ -242,6 +244,75 @@
   color: var(--wb-term-text);
 }
 
+/* Copy under each message (owner, 2026-11-23): always there, quiet until
+   the message is hovered. */
+.wbc-msg-actions {
+  display: flex;
+  gap: 2px;
+  margin-top: 2px;
+  opacity: 0.45;
+  transition: opacity 0.15s;
+}
+
+.wbc-user:hover .wbc-msg-actions,
+.wbc-text:hover > .wbc-msg-actions,
+.wbc-msg-actions:focus-within {
+  opacity: 1;
+}
+
+.wbc-text > .wbc-msg-actions {
+  margin-top: 4px;
+  margin-left: -4px;
+}
+
+.wbc-bubble {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+/* Pasted text inside a user message. */
+.wbc-pasted {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+  padding: 6px 10px 8px;
+  border: 1px solid var(--wbc-line);
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--wb-term) 55%, transparent);
+}
+
+.wbc-pasted-head {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: auto;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--wb-term-dim);
+  font: inherit;
+  font-size: 11.5px;
+  font-weight: 500;
+  cursor: pointer;
+  justify-content: flex-start;
+}
+
+.wbc-pasted-text {
+  font-size: 13px;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.wbc-pasted-text.is-clipped {
+  display: -webkit-box;
+  overflow: hidden;
+  color: var(--wb-term-dim);
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 3;
+}
+
 .wbc-answered {
   display: flex;
   flex-direction: column;
@@ -365,7 +436,7 @@
 }
 
 .tone-violet {
-  color: var(--wbc-violet);
+  color: var(--wbc-agent);
 }
 
 .wbc-target {
@@ -469,8 +540,71 @@
   background: color-mix(in srgb, var(--tone) 7%, var(--wb-term));
 }
 
-.wbc-card-violet {
-  --tone: var(--wbc-violet);
+/* Questions read like the composer: its surface, lines and radius, the
+   text colour as accent (owner, 2026-11-23). */
+.wbc-card-ask {
+  --tone: var(--wbc-accent);
+  border-color: var(--wbc-line);
+  border-radius: 16px;
+  background: var(--wbc-card);
+}
+
+.wbc-card-ask > .wbc-card-head > .i {
+  color: var(--wb-term-dim);
+}
+
+.wbc-card-ask .wbc-q-option.is-on,
+.wbc-card-ask .wbc-q-option:hover:not(:disabled):not(.is-other) {
+  border-color: var(--wbc-line-strong);
+  background: var(--wbc-bubble);
+}
+
+.wbc-card-ask .wbc-q-option.is-cursor:not(.is-on) {
+  border-color: var(--wbc-line-strong);
+}
+
+.wbc-card-ask .wbc-tag {
+  background: var(--wbc-line);
+  color: var(--wb-term-dim);
+}
+
+/* The question on screen: a filled chip, like Claude Code's highlight. */
+.wbc-card-ask .wbc-tabs button.is-active,
+.wbc-card-ask .wbc-tab.is-active,
+.wbc-card-ask .wbc-tab.is-active:hover {
+  border-color: transparent;
+  background: var(--wbc-accent);
+  color: var(--wbc-on);
+  font-weight: 600;
+  cursor: default;
+}
+
+/* The review step lists each question and its answer. */
+.wbc-q-review {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 10px 14px;
+  border-radius: 9px;
+  background: var(--wbc-out);
+  font-size: 13px;
+}
+
+.wbc-q-review-q {
+  color: var(--wb-term-text);
+}
+
+.wbc-q-review-q + .wbc-q-review-q {
+  margin-top: 6px;
+}
+
+.wbc-q-review-a {
+  padding-left: 14px;
+  color: var(--green, #4fae6b);
+}
+
+.wbc-card-ask .wbc-tab.is-done {
+  border-color: var(--wbc-line-strong);
 }
 
 .wbc-card-blue {
@@ -628,7 +762,7 @@
 .wbc-btn-primary {
   border-color: transparent;
   background: var(--wbc-send);
-  color: #fff;
+  color: var(--wbc-on);
 }
 
 .wbc-btn:disabled {
@@ -747,7 +881,7 @@
 
 .is-on > .wbc-check {
   background: var(--tone);
-  color: #fff;
+  color: var(--wbc-on);
 }
 
 .wbc-q-body {
@@ -848,14 +982,14 @@
   align-items: center;
   justify-content: center;
   gap: 6px;
-  border: 1.5px dashed var(--wbc-violet);
+  border: 1.5px dashed var(--wbc-accent);
   border-radius: 12px;
-  background: color-mix(in srgb, var(--wbc-violet) 12%, color-mix(in srgb, var(--wb-term) 92%, transparent));
+  background: color-mix(in srgb, var(--wbc-accent) 12%, color-mix(in srgb, var(--wb-term) 92%, transparent));
   pointer-events: none;
 }
 
 .wbc-drop .i {
-  color: var(--wbc-violet);
+  color: var(--wbc-accent);
 }
 
 .wbc-drop-title {
@@ -920,9 +1054,11 @@
   transition: border-color 0.15s, box-shadow 0.15s;
 }
 
+/* Focus only firms up the field's own line: a ring around it read as a
+   second border inside the shell (owner, 2026-11-23). */
 .wbc-field:focus-within {
-  border-color: color-mix(in srgb, var(--wbc-violet) 70%, transparent);
-  box-shadow: 0 0 0 3px color-mix(in srgb, var(--wbc-violet) 14%, transparent);
+  border-color: color-mix(in srgb, var(--wbc-accent) 28%, transparent);
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.06);
 }
 
 .wbc-field.is-locked {
@@ -958,6 +1094,16 @@
   resize: none;
 }
 
+/* The app-wide textarea hover and focus ring would draw a second box inside
+   the field; the field's own border shows focus. */
+.wbc-field textarea:hover,
+.wbc-field textarea:focus,
+.wbc-field textarea:focus-visible {
+  border: 0;
+  outline: 0;
+  box-shadow: none;
+}
+
 .wbc-field textarea::placeholder {
   color: var(--wb-term-dim);
 }
@@ -971,7 +1117,7 @@
   border: 0;
   border-radius: 50%;
   background: var(--wbc-send);
-  color: #fff;
+  color: var(--wbc-on);
   cursor: pointer;
 }
 
@@ -1071,7 +1217,7 @@
   width: 40%;
   height: 100%;
   border-radius: 2px;
-  background: var(--wbc-violet);
+  background: var(--wbc-accent);
   animation: wbc-progress 1.2s ease-in-out infinite;
 }
 
@@ -1179,7 +1325,7 @@
 }
 
 .wbc-donut-fill {
-  stroke: var(--wbc-violet);
+  stroke: var(--wbc-accent);
   stroke-linecap: round;
 }
 
@@ -1238,7 +1384,7 @@
 
 .wbc-pop-row > .i {
   margin-left: auto;
-  color: var(--wbc-violet);
+  color: var(--wbc-accent);
 }
 
 .wbc-pop-text {
@@ -1296,7 +1442,7 @@
 
 .wbc-seg button.is-on {
   background: var(--wbc-send);
-  color: #fff;
+  color: var(--wbc-on);
 }
 
 .wbc-ctx-head {
@@ -1343,7 +1489,7 @@
   border-top: 1px solid var(--wbc-line);
   border-radius: 0 0 12px 12px;
   background: none;
-  color: var(--wbc-violet);
+  color: var(--wbc-accent);
   font-size: 12px;
   font-weight: 500;
   cursor: pointer;
@@ -1530,19 +1676,27 @@
   color: var(--wb-term-text);
 }
 
+.wb-pane-tools-sep {
+  align-self: center;
+  width: 1px;
+  height: 14px;
+  margin: 0 4px;
+  background: var(--wb-term-line);
+}
+
 /* ---- subagents and background tasks (REQ-WC-061, 062) -------------- */
 
 .wbc-agent-ic {
   flex: none;
-  color: var(--wbc-violet);
+  color: var(--wbc-agent);
 }
 
 .wbc-agent-type {
   flex: none;
   padding: 0 6px;
   border-radius: 5px;
-  background: color-mix(in srgb, var(--wbc-violet) 14%, transparent);
-  color: var(--wbc-violet);
+  background: color-mix(in srgb, var(--wbc-agent) 14%, transparent);
+  color: var(--wbc-agent);
   font-size: 11px;
 }
 
@@ -1559,7 +1713,7 @@
 .wbc-agent-body {
   margin: 2px 12px 8px 36px;
   padding: 8px 10px;
-  border-left: 2px solid color-mix(in srgb, var(--wbc-violet) 40%, transparent);
+  border-left: 2px solid color-mix(in srgb, var(--wbc-agent) 40%, transparent);
 }
 
 .wbc-agent-steps {
@@ -1683,7 +1837,7 @@
 
 .wbc-bg-title em {
   margin-right: 6px;
-  color: var(--wbc-violet);
+  color: var(--wbc-agent);
   font-style: normal;
 }
 
@@ -1799,8 +1953,20 @@
   padding: 0 10px;
   border: 1px solid var(--wbc-line);
   border-radius: 7px;
+  background: none;
   color: var(--wb-term-dim);
+  font: inherit;
   font-size: 12px;
+  cursor: pointer;
+}
+
+.wbc-tab:hover:not(:disabled) {
+  background: var(--wbc-bubble);
+  color: var(--wb-term-text);
+}
+
+.wbc-tab:disabled {
+  cursor: default;
 }
 
 .wbc-tab.is-done {
@@ -1844,9 +2010,87 @@
   margin-left: 6px;
   padding: 0 5px;
   border-radius: 4px;
-  background: color-mix(in srgb, var(--wbc-violet) 16%, transparent);
-  color: var(--wbc-violet);
+  background: color-mix(in srgb, var(--wbc-accent) 16%, transparent);
+  color: var(--wbc-accent);
   font-size: 10.5px;
   font-style: normal;
   font-weight: 600;
+}
+
+/* File paths open the Files panel (owner, 2026-11-23). */
+.wbc-path {
+  border-radius: 3px;
+  cursor: pointer;
+  text-decoration: underline;
+  text-decoration-color: color-mix(in srgb, var(--wb-term-text) 30%, transparent);
+  text-decoration-style: dotted;
+  text-underline-offset: 3px;
+}
+
+.wbc-path:hover,
+.wbc-path:focus-visible {
+  color: var(--wb-term-text);
+  text-decoration-color: currentColor;
+  text-decoration-style: solid;
+  outline: none;
+}
+
+.wbc-path > .md-inline-code {
+  cursor: pointer;
+}
+
+.wbc-tool-head {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  min-width: 0;
+}
+
+.wbc-tool-head > .wbc-tool-line {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.wbc-tool-open {
+  display: inline-grid;
+  flex: none;
+  place-items: center;
+  width: 24px;
+  height: 24px;
+  border: 0;
+  border-radius: 6px;
+  background: none;
+  color: var(--wb-term-dim);
+  cursor: pointer;
+  opacity: 0;
+  transition: opacity 0.15s;
+}
+
+.wbc-tool-row:hover .wbc-tool-open,
+.wbc-tool-open:focus-visible {
+  opacity: 1;
+}
+
+.wbc-tool-open:hover {
+  background: var(--wb-btn-hover);
+  color: var(--wb-term-text);
+}
+
+@media (hover: none) {
+  .wbc-tool-open {
+    opacity: 1;
+  }
+}
+
+/* Inputs inside the chat (Other answers, plan feedback, menu search) take
+   the chat's quiet focus instead of the app-wide accent ring. */
+.wbc input:not([type="checkbox"], [type="radio"]):focus,
+.wbc textarea:focus {
+  border-color: color-mix(in srgb, var(--wbc-accent) 30%, transparent);
+  box-shadow: none;
+  outline: none;
+}
+
+.wbc .wbc-field textarea:focus {
+  border: 0;
 }

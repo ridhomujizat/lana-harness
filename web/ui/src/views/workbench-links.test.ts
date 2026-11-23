@@ -161,3 +161,26 @@ describe("wrappedLink", () => {
     expect(at(punct, 0)?.text).toBe("/Users/me/code/project/src/views/workbench.tsx");
   });
 });
+
+describe("paths with spaces", () => {
+  it("runs an absolute path on to its file name", () => {
+    const [m] = matchLinksInLine("  /Users/r/Documents/ridho-note/00 Inbox/Task Infomedia Imporve VA.md");
+    expect(m?.text).toBe("/Users/r/Documents/ridho-note/00 Inbox/Task Infomedia Imporve VA.md");
+    expect(m?.short).toBe("/Users/r/Documents/ridho-note/00");
+  });
+
+  it("stops at the first file name and keeps what follows", () => {
+    const links = matchLinksInLine("/Users/r/Documents/screenshot/Screenshot 2026-10-10 at 20.12.00.png (folder in /tmp/x.md)");
+    expect(links.map((l) => l.text)).toEqual(["/Users/r/Documents/screenshot/Screenshot 2026-10-10 at 20.12.00.png", "/tmp/x.md"]);
+  });
+
+  it("reads a quoted path with spaces whole", () => {
+    const [m] = matchLinksInLine("open '/Users/r/Downloads/WhatsApp Image 2026-11-20 at 00.06.33.jpeg' now");
+    expect(m?.text).toBe("/Users/r/Downloads/WhatsApp Image 2026-11-20 at 00.06.33.jpeg");
+  });
+
+  it("leaves a path with an extension and plain words alone", () => {
+    expect(matchLinksInLine("/a/b.md and c.md").map((l) => l.text)).toEqual(["/a/b.md", "c.md"]);
+    expect(matchLinksInLine("/usr/bin is a folder").map((l) => l.text)).toEqual(["/usr/bin"]);
+  });
+});
