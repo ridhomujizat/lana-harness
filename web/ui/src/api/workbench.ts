@@ -184,7 +184,9 @@ export function clearWorktreeReport(id: string): Promise<void> {
   return request("DELETE", "/v1/workbench/sessions/" + encodeURIComponent(id) + "/worktree");
 }
 
-/* Spec 69 REQ-WA-014: the Claude Code SessionStart hook switch. */
+/* Spec 69 REQ-WA-014: the Claude Code hooks switch (SessionStart + PreToolUse
+   pre-edit). The hooks are installed only by the owner's action: "unset" means
+   never asked, so the Workbench shows the install notice while needs_install. */
 export interface AgentHookFolder {
   dir: string;
   account: string;
@@ -194,6 +196,8 @@ export interface AgentHookFolder {
 
 export interface AgentHookState {
   enabled: boolean;
+  state?: "unset" | "on" | "off";
+  needs_install?: boolean;
   folders: AgentHookFolder[];
 }
 

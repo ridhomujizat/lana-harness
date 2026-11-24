@@ -11,8 +11,22 @@ import (
 	"github.com/ridhomujizat/lana-harness/internal/workbench/agenthook"
 )
 
+// agentHookState is the three-state hook setting: the owner was never asked
+// ("unset"), consented ("on"), or declined ("off").
+type agentHookState string
+
+const (
+	// agentHookUnset is the switch the owner never answered.
+	agentHookUnset agentHookState = "unset"
+	// agentHookOn is the owner's yes: the daemon installs and keeps the hooks.
+	agentHookOn agentHookState = "on"
+	// agentHookOff is the owner's no: the daemon removes and never re-adds them.
+	agentHookOff agentHookState = "off"
+)
+
 // AgentHookFolder is one Claude Code config folder the daemon installs the
-// Workbench SessionStart hook into (spec 69 REQ-WA-013).
+// Workbench hooks into (spec 69 REQ-WA-013, REQ-WA-014). The hooks are
+// installed only by the owner's action.
 type AgentHookFolder struct {
 	// Dir is the folder that holds settings.json.
 	Dir string
@@ -50,10 +64,11 @@ var (
 	agentHooks   = map[*Server]AgentHookConfig{}
 )
 
-// SetAgentHook installs the Workbench agent hook settings (spec 69 REQ-WA-013).
-// With Allowed and the switch on, it also installs into every folder in the
-// background; errors are logged. A daemon that is not allowed, or whose switch
-// is off, waits for the owner to use the routes.
+// SetAgentHook installs the Workbench agent hook settings (spec 69 REQ-WA-013,
+// REQ-WA-014). The hooks are installed only by the owner's action. With Allowed
+// and the switch on, it also installs into every folder in the background;
+// errors are logged. A daemon that is not allowed, or whose switch is unset or
+// off, waits for the Workbench Install / Not now notice.
 func (s *Server) SetAgentHook(cfg AgentHookConfig) {
 	agentHooksMu.Lock()
 	agentHooks[s] = cfg
@@ -74,26 +89,29 @@ func (s *Server) agentHookConfig() (AgentHookConfig, bool) {
 }
 
 // installAgentHook installs the hook into every folder while the switch is on.
-// It runs in the background, so a failure is only logged.
+// It runs in the background, so a failure is only logged. An unset or off
+// switch installs nothing: the owner has not asked.
 func (s *Server) installAgentHook(cfg AgentHookConfig) {
-	enabled, err := s.agentHookEnabled()
+	state, err := s.agentHookState()
 	if err != nil {
 		s.logger.Warn("web: read agent hook setting", "error", err)
 		return
 	}
-	if !enabled {
+	if state != agentHookOn {
 		return
 	}
 	for _, folder := range agentHookFolders(cfg) {
 		if _, err := agenthook.Install(agentHookSettingsPath(folder.Dir), cfg.Binary); err != nil {
-			s.logger.Warn("web: install Claude Code SessionStart hook", "dir", folder.Dir, "error", err)
+			s.logger.Warn("web: install Claude Code hooks", "dir", folder.Dir, "error", err)
 		}
 	}
 }
 
-// registerWorkbenchAgentHookRoutes registers the Workbench settings switch of
-// spec 69 REQ-WA-014. They go through Handle, so the host, origin, cookie and
-// CSRF checks apply like the other /v1/workbench routes.
+// registerWorkbenchAgentHookRoutes registers the hook routes of spec 69
+// REQ-WA-013, REQ-WA-014. They go through Handle, so the host, origin, cookie
+// and CSRF checks apply like the other /v1/workbench routes. The Workbench
+// reads GET to show the Install / Not now notice, and PUT stores the owner's
+// choice.
 func (s *Server) registerWorkbenchAgentHookRoutes() {
 	s.Handle("GET /v1/workbench/agent-hook", http.HandlerFunc(s.handleAgentHookGet))
 	s.Handle("PUT /v1/workbench/agent-hook", http.HandlerFunc(s.handleAgentHookPut))
@@ -109,20 +127,23 @@ type agentHookFolderView struct {
 
 // agentHookResponse is the GET and PUT answer of the hook setting.
 type agentHookResponse struct {
-	Enabled bool                  `json:"enabled"`
-	Folders []agentHookFolderView `json:"folders"`
+	Enabled      bool                  `json:"enabled"`
+	State        agentHookState        `json:"state"`
+	NeedsInstall bool                  `json:"needs_install"`
+	Folders      []agentHookFolderView `json:"folders"`
 }
 
-// handleAgentHookGet answers GET /v1/workbench/agent-hook. While the switch is
-// on it (re)installs into every folder first, so a newly added account gets the
-// hook the next time the switch is shown. It then reports each folder.
+// handleAgentHookGet answers GET /v1/workbench/agent-hook. It never writes the
+// switch. While the switch is on it (re)installs into every folder first, so a
+// newly added account gets the hook the next time the switch is shown. It then
+// reports each folder and, after the install, whether any of them needs it.
 func (s *Server) handleAgentHookGet(w http.ResponseWriter, r *http.Request) {
 	cfg, ok := s.agentHookConfig()
 	if !ok || !cfg.Allowed {
 		writeJSON(w, http.StatusOK, agentHookNotAllowedResponse(cfg))
 		return
 	}
-	enabled, err := s.agentHookEnabled()
+	state, err := s.agentHookState()
 	if err != nil {
 		s.logger.Error("web: read agent hook setting", "error", err)
 		writeAPIError(w, http.StatusInternalServerError, "internal_error", "internal server error")
@@ -133,7 +154,7 @@ func (s *Server) handleAgentHookGet(w http.ResponseWriter, r *http.Request) {
 	for _, folder := range folders {
 		path := agentHookSettingsPath(folder.Dir)
 		view := agentHookFolderView{Dir: folder.Dir, Account: folder.Account}
-		if enabled {
+		if state == agentHookOn {
 			if _, err := agenthook.Install(path, cfg.Binary); err != nil {
 				view.Error = agentHookErrorText(err)
 			}
@@ -141,13 +162,14 @@ func (s *Server) handleAgentHookGet(w http.ResponseWriter, r *http.Request) {
 		view.Installed = agentHookInstalled(path, cfg.Binary, &view)
 		views = append(views, view)
 	}
-	writeJSON(w, http.StatusOK, agentHookResponse{Enabled: enabled, Folders: views})
+	writeJSON(w, http.StatusOK, agentHookAnswerOf(state, views))
 }
 
 // handleAgentHookPut answers PUT /v1/workbench/agent-hook. It saves the switch,
-// then installs into every folder (on) or removes from every folder (off). A
-// per-folder error goes into the folder's error field and never fails the whole
-// call.
+// then installs into every folder (on) or removes from every folder (off). It
+// works from unset too: Remove is a no-op and the stored off stops the notice.
+// A per-folder error goes into the folder's error field and never fails the
+// whole call.
 func (s *Server) handleAgentHookPut(w http.ResponseWriter, r *http.Request) {
 	cfg, ok := s.agentHookConfig()
 	if !ok || !cfg.Allowed {
@@ -164,6 +186,10 @@ func (s *Server) handleAgentHookPut(w http.ResponseWriter, r *http.Request) {
 		s.logger.Error("web: save agent hook setting", "error", err)
 		writeAPIError(w, http.StatusInternalServerError, "internal_error", "internal server error")
 		return
+	}
+	state := agentHookOff
+	if body.Enabled {
+		state = agentHookOn
 	}
 	folders := agentHookFolders(cfg)
 	views := make([]agentHookFolderView, 0, len(folders))
@@ -182,11 +208,32 @@ func (s *Server) handleAgentHookPut(w http.ResponseWriter, r *http.Request) {
 		view.Installed = agentHookInstalled(path, cfg.Binary, &view)
 		views = append(views, view)
 	}
-	writeJSON(w, http.StatusOK, agentHookResponse{Enabled: body.Enabled, Folders: views})
+	writeJSON(w, http.StatusOK, agentHookAnswerOf(state, views))
+}
+
+// agentHookAnswerOf builds the route answer of a state and its folder views.
+// needs_install is true when any folder is not installed, whatever the state.
+func agentHookAnswerOf(state agentHookState, views []agentHookFolderView) agentHookResponse {
+	return agentHookResponse{
+		Enabled:      state == agentHookOn,
+		State:        state,
+		NeedsInstall: agentHookNeedsInstall(views),
+		Folders:      views,
+	}
+}
+
+// agentHookNeedsInstall reports whether any folder is missing a hook.
+func agentHookNeedsInstall(views []agentHookFolderView) bool {
+	for _, view := range views {
+		if !view.Installed {
+			return true
+		}
+	}
+	return false
 }
 
 // agentHookNotAllowedResponse lists the folders of a daemon that may not manage
-// the hook, each with the reason.
+// the hook, each with the reason. It reports off and no install need.
 func agentHookNotAllowedResponse(cfg AgentHookConfig) agentHookResponse {
 	folders := agentHookFolders(cfg)
 	views := make([]agentHookFolderView, 0, len(folders))
@@ -195,7 +242,7 @@ func agentHookNotAllowedResponse(cfg AgentHookConfig) agentHookResponse {
 			Dir: folder.Dir, Account: folder.Account, Error: agentHookNotAllowed,
 		})
 	}
-	return agentHookResponse{Enabled: false, Folders: views}
+	return agentHookResponse{Enabled: false, State: agentHookOff, Folders: views}
 }
 
 // agentHookInstalled reports whether the hook runs cfg.Binary in the folder,
@@ -242,26 +289,31 @@ func (s *Server) agentHookEnabledPath() string {
 	return filepath.Join(s.cfg.Home, "workbench", "agent-hook.json")
 }
 
-// agentHookEnabled reads the switch; a missing file means on.
-func (s *Server) agentHookEnabled() (bool, error) {
+// agentHookState reads the switch: {"enabled": true} is on, {"enabled": false}
+// is off. A missing file, an empty Home path, or JSON without a boolean enabled
+// key is unset, so the owner was never asked. Any other read error is returned.
+func (s *Server) agentHookState() (agentHookState, error) {
 	path := s.agentHookEnabledPath()
 	if path == "" {
-		return true, nil
+		return agentHookUnset, nil
 	}
 	data, err := os.ReadFile(path)
 	if errors.Is(err, os.ErrNotExist) {
-		return true, nil
+		return agentHookUnset, nil
 	}
 	if err != nil {
-		return false, err
+		return agentHookUnset, err
 	}
 	var doc struct {
 		Enabled *bool `json:"enabled"`
 	}
 	if err := json.Unmarshal(data, &doc); err != nil || doc.Enabled == nil {
-		return true, nil
+		return agentHookUnset, nil
 	}
-	return *doc.Enabled, nil
+	if *doc.Enabled {
+		return agentHookOn, nil
+	}
+	return agentHookOff, nil
 }
 
 // saveAgentHookEnabled writes the switch.

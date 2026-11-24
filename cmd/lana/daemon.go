@@ -381,10 +381,12 @@ func runDaemonLocked(ctx context.Context, stderr io.Writer, signals <-chan os.Si
 		// its sessions outlive the daemon (REQ-WB-002, REQ-WB-003).
 		wbBackend := newWorkbenchBackend(home)
 		webServer.SetWorkbench(wbBackend)
-		// Spec 69 REQ-WA-013: install the Claude Code SessionStart hook into
-		// every Claude Code config folder the daemon knows, behind the
-		// Workbench settings switch. Only the main daemon on the owner's
-		// default home touches the real Claude settings.
+		// Spec 69 REQ-WA-013, REQ-WA-014: manage the Claude Code hooks (the
+		// SessionStart hook and the PreToolUse pre-edit hook) of every Claude
+		// Code config folder the daemon knows. The hooks are installed only by
+		// the owner's action; the Workbench shows an Install / Not now notice.
+		// Only the main daemon on the owner's default home touches the real
+		// Claude settings.
 		webServer.SetAgentHook(web.AgentHookConfig{
 			Binary:  lanaBinaryPath(),
 			Folders: claudeHookFolders(home),

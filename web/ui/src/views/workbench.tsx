@@ -77,7 +77,7 @@ import { emitGitRootEvent } from "../api/workbench-git";
 import { baseName, isUnder, repoDisplay } from "./workbench-git-model";
 import { AgentLogo } from "./agent-logo";
 import { ProgramTile, TabTiles } from "./workbench-tile";
-import { ClaudeAccountsPanel, ClaudeAccountsPopover, type AccountActions } from "./workbench-accounts";
+import { AgentHookNotice, ClaudeAccountsPanel, ClaudeAccountsPopover, type AccountActions } from "./workbench-accounts";
 import { toolReady, usePluginTool } from "./plugins";
 import { chime, setSoundEnabled, soundEnabled, unlockAudio } from "./workbench-sound";
 import { ActionMenu, CloseSpaceDialog, RenameDialog, longPress, type DialogState, type MenuTarget } from "./workbench-actions";
@@ -2465,6 +2465,7 @@ export function WorkbenchPage() {
       <PaneAccessContext.Provider value={paneAccess}>
       <WbGitContext.Provider value={git.context}>
         {banner}
+        <AgentHookNotice />
         {overlays}
         {accountsOverlay}
         <PhoneWorkbench
@@ -2511,6 +2512,7 @@ export function WorkbenchPage() {
       {panelOpen ? panel : null}
       <section className="wb-main">
         {banner}
+        <AgentHookNotice />
         <div className="wb-tabs" role="tablist">
           {!panelOpen ? (
             <button
