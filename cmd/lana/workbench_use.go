@@ -143,20 +143,21 @@ func cmdWorkbenchUse(args []string) int {
 
 	switch {
 	case opts.newBranch != "":
-		return workbenchUseNew(stored, id, cwd, opts)
+		return workbenchUseNew(stored, id, cwd, home, opts)
 	case opts.clear:
-		return workbenchUseClear(stored, id)
+		return workbenchUseClear(stored, id, home)
 	}
 
 	path, clear := workbenchUseDotTarget(opts.path, cwd)
 	if clear {
-		return workbenchUseClear(stored, id)
+		return workbenchUseClear(stored, id, home)
 	}
 	answer, err := workbenchUseReport(stored.Addr, stored.Secret, id, path)
 	if err != nil {
 		return workbenchUseFail(err)
 	}
 	workbenchUsePrint(answer)
+	workbenchHookStateRemember(home, id, answer.Worktree.Worktree)
 	return 0
 }
 
@@ -250,7 +251,7 @@ func workbenchUseDotTarget(arg, cwd string) (path string, clear bool) {
 // the worktree root of the working directory; an existing branch is used as is
 // and a new one is branched from the default base. A branch that already has a
 // worktree is reported with its path so the agent can `use` it (REQ-WA-023).
-func workbenchUseNew(stored daemonSecretFile, id, cwd string, opts workbenchUseOptions) int {
+func workbenchUseNew(stored daemonSecretFile, id, cwd, home string, opts workbenchUseOptions) int {
 	repo, ok := workbenchUseRepoRoot(cwd)
 	if !ok {
 		fmt.Fprintln(os.Stderr, "not a git repository")
@@ -318,6 +319,7 @@ func workbenchUseNew(stored daemonSecretFile, id, cwd string, opts workbenchUseO
 		return workbenchUseFail(err)
 	}
 	workbenchUsePrint(answer)
+	workbenchHookStateRemember(home, id, answer.Worktree.Worktree)
 	_, _ = fmt.Fprintf(os.Stdout, "Created %s\n", created.Path)
 	return 0
 }
@@ -370,11 +372,17 @@ func workbenchUseRepoRoot(dir string) (string, bool) {
 // workbenchUseReport PUTs a path report and returns the daemon's answer
 // (REQ-WA-020).
 func workbenchUseReport(addr, secret, id, path string) (workbenchUseAnswer, error) {
+	return workbenchUseReportTimeout(addr, secret, id, path, workbenchUseTimeout)
+}
+
+// workbenchUseReportTimeout PUTs a path report with an explicit timeout, so the
+// pre-edit hook can use a shorter one than the `use` command (spec 69).
+func workbenchUseReportTimeout(addr, secret, id, path string, timeout time.Duration) (workbenchUseAnswer, error) {
 	body, err := json.Marshal(map[string]string{"path": path})
 	if err != nil {
 		return workbenchUseAnswer{}, err
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), workbenchUseTimeout)
+	ctx, cancel := context.WithTimeout(context.Background(), timeout)
 	defer cancel()
 	status, data, err := workbenchUseDo(ctx, http.MethodPut, workbenchUseReportURL(addr, id), secret, body)
 	if err != nil {
@@ -391,18 +399,29 @@ func workbenchUseReport(addr, secret, id, path string) (workbenchUseAnswer, erro
 }
 
 // workbenchUseClear removes the session's report (REQ-WA-021).
-func workbenchUseClear(stored daemonSecretFile, id string) int {
-	ctx, cancel := context.WithTimeout(context.Background(), workbenchUseTimeout)
-	defer cancel()
-	status, data, err := workbenchUseDo(ctx, http.MethodDelete, workbenchUseReportURL(stored.Addr, id), stored.Secret, nil)
-	if err != nil {
+func workbenchUseClear(stored daemonSecretFile, id, home string) int {
+	if err := workbenchUseClearReport(stored.Addr, stored.Secret, id, workbenchUseTimeout); err != nil {
 		return workbenchUseFail(err)
 	}
-	if status != http.StatusNoContent && status != http.StatusOK {
-		return workbenchUseFail(workbenchUseAnswerError(status, data, ""))
-	}
+	workbenchHookStateRemember(home, id, "")
 	_, _ = fmt.Fprintln(os.Stdout, "Workbench: following the pane's own folder again")
 	return 0
+}
+
+// workbenchUseClearReport DELETE-s the session's report with an explicit
+// timeout, without printing; the pre-edit hook uses it with a shorter timeout
+// (spec 69).
+func workbenchUseClearReport(addr, secret, id string, timeout time.Duration) error {
+	ctx, cancel := context.WithTimeout(context.Background(), timeout)
+	defer cancel()
+	status, data, err := workbenchUseDo(ctx, http.MethodDelete, workbenchUseReportURL(addr, id), secret, nil)
+	if err != nil {
+		return err
+	}
+	if status != http.StatusNoContent && status != http.StatusOK {
+		return workbenchUseAnswerError(status, data, "")
+	}
+	return nil
 }
 
 // workbenchUseDo runs one daemon request with the local secret and returns the

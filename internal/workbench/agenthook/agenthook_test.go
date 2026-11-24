@@ -55,6 +55,199 @@ func TestCommandQuotesTheBinary(t *testing.T) {
 	}
 }
 
+// readHookCommands returns every hook command of one event in settings.json.
+func readHookCommands(t *testing.T, path, event string) []string {
+	t.Helper()
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var doc struct {
+		Hooks map[string][]struct {
+			Hooks []struct {
+				Command string `json:"command"`
+			} `json:"hooks"`
+		} `json:"hooks"`
+	}
+	if err := json.Unmarshal(data, &doc); err != nil {
+		t.Fatalf("settings.json is not valid JSON: %v\n%s", err, data)
+	}
+	var commands []string
+	for _, entry := range doc.Hooks[event] {
+		for _, hook := range entry.Hooks {
+			commands = append(commands, hook.Command)
+		}
+	}
+	return commands
+}
+
+func TestPreEditCommandQuotesTheBinary(t *testing.T) {
+	got := PreEditCommand("/Users/me/.local/bin/lana")
+	want := `[ -n "$LANA_WORKBENCH_SESSION" ] && exec '/Users/me/.local/bin/lana' workbench hook pre-edit; exit 0`
+	if got != want {
+		t.Fatalf("PreEditCommand = %q, want %q", got, want)
+	}
+	const quoted = "/Users/o'brien/bin/lana"
+	if got := PreEditCommand(quoted); !strings.Contains(got, `'\''`) {
+		t.Fatalf("PreEditCommand %q does not escape the single quote", got)
+	}
+}
+
+func TestInstallAddsBothHooks(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "settings.json")
+	const bin = "/opt/lana/lana"
+
+	changed, err := Install(path, bin)
+	if err != nil || !changed {
+		t.Fatalf("Install = %v, %v", changed, err)
+	}
+	if got := readHookCommands(t, path, "SessionStart"); len(got) != 1 || got[0] != Command(bin) {
+		t.Fatalf("SessionStart commands = %q", got)
+	}
+	if got := readHookCommands(t, path, "PreToolUse"); len(got) != 1 || got[0] != PreEditCommand(bin) {
+		t.Fatalf("PreToolUse commands = %q", got)
+	}
+	if installed, err := Installed(path, bin); err != nil || !installed {
+		t.Fatalf("Installed = %v, %v", installed, err)
+	}
+	if changed, err := Install(path, bin); err != nil || changed {
+		t.Fatalf("second Install = %v, %v, want no change", changed, err)
+	}
+}
+
+func TestInstallUpgradesSessionStartOnly(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "settings.json")
+	const bin = "/opt/lana/lana"
+	writeFile(t, path, `{"hooks":{"SessionStart":[{"hooks":[{"type":"command","command":`+jsonStringForTest(Command(bin))+`}]}]}}`, 0o600)
+
+	if installed, err := Installed(path, bin); err != nil || installed {
+		t.Fatalf("Installed with only SessionStart = %v, %v, want false", installed, err)
+	}
+	changed, err := Install(path, bin)
+	if err != nil || !changed {
+		t.Fatalf("Install = %v, %v", changed, err)
+	}
+	if got := readHookCommands(t, path, "PreToolUse"); len(got) != 1 || got[0] != PreEditCommand(bin) {
+		t.Fatalf("PreToolUse commands = %q", got)
+	}
+	if installed, err := Installed(path, bin); err != nil || !installed {
+		t.Fatalf("Installed after upgrade = %v, %v", installed, err)
+	}
+	if changed, err := Install(path, bin); err != nil || changed {
+		t.Fatalf("second Install = %v, %v, want no change", changed, err)
+	}
+}
+
+func TestInstallKeepsRtkPreToolUseEntry(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "settings.json")
+	const bin = "/opt/lana/lana"
+	const original = `{
+  "hooks": {
+    "PreToolUse": [
+      {"matcher": "Bash", "hooks": [{"type": "command", "command": "rtk hook bash"}]}
+    ]
+  }
+}
+`
+	writeFile(t, path, original, 0o600)
+
+	if changed, err := Install(path, bin); err != nil || !changed {
+		t.Fatalf("Install = %v, %v", changed, err)
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	out := string(data)
+	if !strings.Contains(out, `"matcher": "Bash"`) || !strings.Contains(out, "rtk hook bash") {
+		t.Fatalf("the rtk entry changed:\n%s", out)
+	}
+	if !strings.Contains(out, `"matcher": "Edit|Write|MultiEdit|NotebookEdit"`) {
+		t.Fatalf("the Lana matcher is missing:\n%s", out)
+	}
+	if strings.Index(out, "rtk hook bash") >= strings.Index(out, "workbench hook pre-edit") {
+		t.Fatalf("the rtk entry moved after Lana's:\n%s", out)
+	}
+	if got := readHookCommands(t, path, "PreToolUse"); len(got) != 2 || got[0] != "rtk hook bash" || got[1] != PreEditCommand(bin) {
+		t.Fatalf("PreToolUse commands = %q", got)
+	}
+}
+
+func TestInstallFixesBothCommandsWhenTheBinaryMoved(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "settings.json")
+	if _, err := Install(path, "/old/lana"); err != nil {
+		t.Fatal(err)
+	}
+	changed, err := Install(path, "/new/lana")
+	if err != nil || !changed {
+		t.Fatalf("Install = %v, %v", changed, err)
+	}
+	if got := readHookCommands(t, path, "SessionStart"); len(got) != 1 || got[0] != Command("/new/lana") {
+		t.Fatalf("SessionStart commands = %q", got)
+	}
+	if got := readHookCommands(t, path, "PreToolUse"); len(got) != 1 || got[0] != PreEditCommand("/new/lana") {
+		t.Fatalf("PreToolUse commands = %q", got)
+	}
+	if installed, _ := Installed(path, "/new/lana"); !installed {
+		t.Fatal("Installed is false for the new binary")
+	}
+	if installed, _ := Installed(path, "/old/lana"); installed {
+		t.Fatal("Installed is true for the old binary")
+	}
+}
+
+func TestRemoveRemovesBothKeepsRtk(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "settings.json")
+	const bin = "/opt/lana/lana"
+	const original = `{
+  "hooks": {
+    "PreToolUse": [
+      {"matcher": "Bash", "hooks": [{"type": "command", "command": "rtk hook bash"}]}
+    ]
+  }
+}
+`
+	writeFile(t, path, original, 0o600)
+	if _, err := Install(path, bin); err != nil {
+		t.Fatal(err)
+	}
+	changed, err := Remove(path)
+	if err != nil || !changed {
+		t.Fatalf("Remove = %v, %v", changed, err)
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	out := string(data)
+	if strings.Contains(out, "workbench hook session-start") || strings.Contains(out, "workbench hook pre-edit") {
+		t.Fatalf("Remove left a Lana hook:\n%s", out)
+	}
+	if got := readHookCommands(t, path, "PreToolUse"); len(got) != 1 || got[0] != "rtk hook bash" {
+		t.Fatalf("PreToolUse commands = %q, want the rtk entry", got)
+	}
+	if installed, _ := Installed(path, bin); installed {
+		t.Fatal("Installed is true after Remove")
+	}
+}
+
+func TestInstalledFalseWithOnlyOneHook(t *testing.T) {
+	const bin = "/opt/lana/lana"
+	for name, body := range map[string]string{
+		"session-start only": `{"hooks":{"SessionStart":[{"hooks":[{"type":"command","command":` + jsonStringForTest(Command(bin)) + `}]}]}}`,
+		"pre-edit only":      `{"hooks":{"PreToolUse":[{"matcher":"Edit","hooks":[{"type":"command","command":` + jsonStringForTest(PreEditCommand(bin)) + `}]}]}}`,
+	} {
+		t.Run(name, func(t *testing.T) {
+			path := filepath.Join(t.TempDir(), "settings.json")
+			writeFile(t, path, body, 0o600)
+			installed, err := Installed(path, bin)
+			if err != nil || installed {
+				t.Fatalf("Installed = %v, %v, want false", installed, err)
+			}
+		})
+	}
+}
+
 func TestCommandQuotesASingleQuoteInThePath(t *testing.T) {
 	const dir = "/Users/o'brien/bin/lana"
 	got := Command(dir)

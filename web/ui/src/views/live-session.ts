@@ -56,6 +56,8 @@ export interface LiveSession {
   liveTurnId: string;
   streamText: string;
   thinking: boolean;
+  /* The streamed text of the thought in progress. */
+  liveThought: string;
   queued: boolean;
   pending: PendingMessage | null;
   /* Shows the owner's message before the log has it. */
@@ -107,6 +109,7 @@ export function useLiveSession(id: string, options: LiveSessionOptions = {}): Li
   const [liveStartedAt, setLiveStartedAt] = useState(0);
   const [streamText, setStreamText] = useState("");
   const [thinking, setThinking] = useState(false);
+  const [liveThought, setLiveThought] = useState("");
   const [queued, setQueued] = useState(false);
   const [pending, setPendingState] = useState<PendingMessage | null>(null);
   const [cancelling, setCancelling] = useState(false);
@@ -188,6 +191,7 @@ export function useLiveSession(id: string, options: LiveSessionOptions = {}): Li
       setCancelling(false);
       setStreamText("");
       setThinking(false);
+      setLiveThought("");
       setQueued(false);
       setLiveTurnId("");
       setLiveStartedAt(0);
@@ -217,6 +221,7 @@ export function useLiveSession(id: string, options: LiveSessionOptions = {}): Li
     setLiveStartedAt(0);
     setStreamText("");
     setThinking(false);
+    setLiveThought("");
     setQueued(false);
     setCancelling(false);
     setActionError("");
@@ -290,6 +295,7 @@ export function useLiveSession(id: string, options: LiveSessionOptions = {}): Li
         if (event.kind === "assistant/message" || event.kind === "tool/call") {
           setStreamText("");
           setThinking(false);
+          setLiveThought("");
         }
         if (event.kind === "approval/decided") {
           markDecided(stringOf(payload.request_id), stringOf(payload.outcome) || "unavailable");
@@ -316,13 +322,18 @@ export function useLiveSession(id: string, options: LiveSessionOptions = {}): Li
         }
         if (frame.kind === "text_delta" && frame.text) {
           setThinking(false);
+          setLiveThought("");
           setStreamText((current) => current + String(frame.text));
         }
         if (frame.kind === "thinking_delta") {
           setThinking(true);
+          if (frame.text) {
+            setLiveThought((current) => current + String(frame.text));
+          }
         }
         if (frame.kind === "tool_call" || frame.kind === "tool_result" || frame.kind === "step_retry") {
           setThinking(false);
+          setLiveThought("");
           setStreamText("");
         }
       },
@@ -455,6 +466,7 @@ export function useLiveSession(id: string, options: LiveSessionOptions = {}): Li
       }
       setStreamText("");
       setThinking(false);
+      setLiveThought("");
     }
     runningRef.current = true;
     setRunning(true);
@@ -601,6 +613,7 @@ export function useLiveSession(id: string, options: LiveSessionOptions = {}): Li
     liveTurnId,
     streamText,
     thinking,
+    liveThought,
     queued,
     pending,
     setPending,

@@ -41,6 +41,15 @@ func TestWorkbenchHookInsidePane(t *testing.T) {
 	if !strings.Contains(text, "/repo") {
 		t.Errorf("context = %q, want the worktree root", text)
 	}
+	if !strings.Contains(text, "reported automatically") {
+		t.Errorf("context = %q, want the automatic-report sentence", text)
+	}
+	if !strings.Contains(text, "`lana workbench use --new <branch>`") {
+		t.Errorf("context = %q, want the create-worktree line", text)
+	}
+	if !strings.Contains(text, "Subagents do not need to report.") {
+		t.Errorf("context = %q, want the subagent line", text)
+	}
 }
 
 func TestWorkbenchHookOutsidePane(t *testing.T) {

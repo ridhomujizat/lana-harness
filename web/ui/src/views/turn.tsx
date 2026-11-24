@@ -719,33 +719,6 @@ function ThoughtRow({ text }: { text: string }) {
   );
 }
 
-/* Text the agent wrote between tool calls ("Let me check the config…"). It is
-   part of the process, not the answer. */
-function NoteRow({
-  text,
-  source,
-  sourceName,
-}: {
-  text: string;
-  source?: string;
-  sourceName?: string;
-}) {
-  const via = messageSourceLabel(source, sourceName);
-  return (
-    <li className="tp-step tp-note">
-      <span className="tp-row tp-row-static">
-        <span className="tp-ico" aria-hidden="true">
-          <Ic name="message-square" size={14} />
-        </span>
-        <span className="tp-note-text">
-          {via ? <span className="turn-via muted">{via}</span> : null}
-          <Markdown text={text} />
-        </span>
-      </span>
-    </li>
-  );
-}
-
 /* Splits a turn's groups into the process (thinking, tool calls and the text
    between them) and the answer: the text after the last process group. */
 export function splitTurn(groups: TurnGroup[] | undefined): { process: TurnGroup[]; answer: TurnGroup[] } {
@@ -757,6 +730,52 @@ export function splitTurn(groups: TurnGroup[] | undefined): { process: TurnGroup
     }
   });
   return { process: list.slice(0, last + 1), answer: list.slice(last + 1) };
+}
+
+/* A part of a turn's process: a run of thinking and tool steps, or a message
+   the agent wrote between tool calls ("Let me check the config…"). */
+export type ProcessSegment =
+  | { kind: "steps"; key: string; groups: TurnGroup[] }
+  | { kind: "note"; key: string; group: TurnGroup };
+
+/* Splits the process at the agent's messages (owner request 2026-11-24): a
+   message between tool calls shows in the chat like the answer, so the owner
+   sees the agent talk while it works, and each run of steps between messages
+   folds into its own process line. */
+export function segmentProcess(groups: TurnGroup[]): ProcessSegment[] {
+  const segments: ProcessSegment[] = [];
+  let run: TurnGroup[] = [];
+  const flush = () => {
+    if (run.length > 0) {
+      segments.push({ kind: "steps", key: "steps-" + (run[0]?.key || segments.length), groups: run });
+      run = [];
+    }
+  };
+  for (const group of groups) {
+    if (group.kind !== "text") {
+      run.push(group);
+      continue;
+    }
+    if (!(group.text || "").trim()) {
+      continue;
+    }
+    flush();
+    segments.push({ kind: "note", key: group.key, group });
+  }
+  flush();
+  return segments;
+}
+
+/* The end of a thought, for the live line under the process head: the last
+   words are what the model is about to do. */
+export function thoughtTail(text: string, max = 160): string {
+  const flat = text.replace(/\s+/g, " ").trim();
+  if (flat.length <= max) {
+    return flat;
+  }
+  const tail = flat.slice(flat.length - max);
+  const space = tail.indexOf(" ");
+  return "…" + (space > 0 && space < 30 ? tail.slice(space + 1) : tail);
 }
 
 /* The live line while a turn runs: what is happening right now. */
@@ -784,6 +803,7 @@ function TurnProcess({
   streaming,
   waitingForInput,
   turnKey,
+  liveThought = "",
 }: {
   groups: TurnGroup[];
   running: boolean;
@@ -791,6 +811,9 @@ function TurnProcess({
   streaming: boolean;
   waitingForInput: boolean;
   turnKey: string;
+  /* The streamed text of the thought in progress, when the provider streams
+     thinking deltas. */
+  liveThought?: string;
 }) {
   const [open, setOpen] = useState(false);
   const steps = groups.flatMap((group) => (group.kind === "activity" ? group.steps || [] : []));
@@ -810,6 +833,14 @@ function TurnProcess({
   }
   const done = steps.filter((step) => !stepIsRunning(step)).length;
   const listId = "process-" + turnKey.replace(/[^a-zA-Z0-9_-]/g, "-");
+  /* While the turn works, the line under the head shows what the model is
+     thinking: the streamed thought, else the end of its last thought. Models
+     that keep their narration in thinking (DeepSeek) talk to the owner here. */
+  let thought = "";
+  if (live && !waitingForInput) {
+    const lastThought = [...groups].reverse().find((group) => group.kind === "thinking");
+    thought = thoughtTail((thinking && liveThought) || lastThought?.text || "");
+  }
   return (
     <div className={"turn-process" + (live ? " is-live" : "") + (open ? " is-open" : "") + (waitingApproval ? " is-waiting" : "")}>
       <button
@@ -832,6 +863,7 @@ function TurnProcess({
           <span className="tp-head-text">{parts.join(" · ")}</span>
         )}
       </button>
+      {thought ? <p className="tp-live-thought">{thought}</p> : null}
       {open ? (
         <ol className="tp-list" id={listId}>
           {groups.map((group) =>
@@ -839,14 +871,7 @@ function TurnProcess({
               <ThoughtRow key={group.key} text={group.text || ""} />
             ) : group.kind === "activity" ? (
               (group.steps || []).map((step) => <StepRow key={step.key} step={step} />)
-            ) : (
-              <NoteRow
-                key={group.key}
-                text={group.text || ""}
-                source={group.source}
-                sourceName={group.sourceName}
-              />
-            )
+            ) : null
           )}
         </ol>
       ) : null}
@@ -867,6 +892,8 @@ export interface TurnBlockProps {
   streamingText?: string;
   /* REQ-MDL-006: a live "Thinking…" note while only thinking deltas arrived. */
   thinking?: boolean;
+  /* The streamed text of the thought in progress (thinking deltas). */
+  liveThought?: string;
   waitingForInput?: boolean;
   team?: { lead: string; members: string[] } | null;
   /* teamLabels maps an agent ID to its display name for the team block. */
@@ -944,6 +971,7 @@ export const TurnBlock = memo(function TurnBlock({
   agentColor = "",
   streamingText = "",
   thinking = false,
+  liveThought = "",
   waitingForInput = false,
   team = null,
   teamLabels = EMPTY_TEAM_LABELS,
@@ -1018,6 +1046,65 @@ export const TurnBlock = memo(function TurnBlock({
 
   const statusCard = showStatusCard ? turnEndCard(turn) : null;
   const parts = splitTurn(turn.groups);
+  const segments = segmentProcess(parts.process);
+  /* Only the last run of steps is live; the runs before a message are done. */
+  const lastIsSteps = segments[segments.length - 1]?.kind === "steps";
+  const turnKey = String(turn.key || turn.id || "turn");
+  const liveProcess = (groups: TurnGroup[], key: string) => (
+    <TurnProcess
+      key={key}
+      groups={groups}
+      running={Boolean(turn.running)}
+      thinking={thinking}
+      liveThought={liveThought}
+      streaming={Boolean(streamingText) || (Boolean(turn.running) && parts.answer.length > 0)}
+      waitingForInput={waitingForInput}
+      turnKey={key}
+    />
+  );
+  /* A text segment of the turn: the answer, or a message the agent wrote
+     between tool calls. */
+  const textBlock = (segment: TurnGroup, className: string) =>
+    segment.source === "discussion" ? (
+      /* Spec 47 REQ-RDS-053: a discussion summary shared into a member's
+         room shows as a card. */
+      <DiscussionCard
+        key={segment.key}
+        team={segment.sourceName || ""}
+        text={segment.text || ""}
+        at={Number(turn.startedAt) || 0}
+      />
+    ) : (
+      <div className={className} key={segment.key}>
+        {segment.source ? (
+          <div className="turn-via muted">
+            <span className="turn-via-label">
+              {messageSourceLabel(segment.source, segment.sourceName)}
+            </span>
+            {onReply && segment.seq ? (
+              <Button
+                size="sm"
+                variant="ghost"
+                icon="reply"
+                className="turn-reply"
+                aria-label={"Reply to " + (segment.sourceName || segment.source)}
+                onClick={() =>
+                  onReply({
+                    seq: Number(segment.seq),
+                    source: segment.source || "",
+                    sourceName: segment.sourceName || "",
+                    text: segment.text || "",
+                  })
+                }
+              >
+                Reply
+              </Button>
+            ) : null}
+          </div>
+        ) : null}
+        <Markdown text={segment.text || ""} />
+      </div>
+    );
   const shownAgent = agentLabel || agent;
   const liveMood = turnMood(turn, {
     waitingForInput,
@@ -1041,58 +1128,25 @@ export const TurnBlock = memo(function TurnBlock({
           <span className="turn-time">{formatClock(startedAt)}</span>
         </div>
       )}
-      <TurnProcess
-        groups={parts.process}
-        running={Boolean(turn.running)}
-        thinking={thinking}
-        streaming={Boolean(streamingText) || (Boolean(turn.running) && parts.answer.length > 0)}
-        waitingForInput={waitingForInput}
-        turnKey={String(turn.key || turn.id || "turn")}
-      />
-      {parts.answer.map((segment) =>
-        segment.source === "discussion" ? (
-          /* Spec 47 REQ-RDS-053: a discussion summary shared into a member's
-             room shows as a card. */
-          <DiscussionCard
-            key={segment.key}
-            team={segment.sourceName || ""}
-            text={segment.text || ""}
-            at={Number(turn.startedAt) || 0}
-          />
+      {segments.map((segment, index) =>
+        segment.kind === "note" ? (
+          textBlock(segment.group, "turn-text turn-note")
+        ) : index === segments.length - 1 ? (
+          liveProcess(segment.groups, turnKey + "-" + index)
         ) : (
-        <div className="turn-text turn-answer" key={segment.key}>
-          {segment.source ? (
-            <div className="turn-via muted">
-              <span className="turn-via-label">
-                {messageSourceLabel(segment.source, segment.sourceName)}
-              </span>
-              {onReply && segment.seq ? (
-                <Button
-                  size="sm"
-                  variant="ghost"
-                  icon="reply"
-                  className="turn-reply"
-                  aria-label={
-                    "Reply to " + (segment.sourceName || segment.source)
-                  }
-                  onClick={() =>
-                    onReply({
-                      seq: Number(segment.seq),
-                      source: segment.source || "",
-                      sourceName: segment.sourceName || "",
-                      text: segment.text || "",
-                    })
-                  }
-                >
-                  Reply
-                </Button>
-              ) : null}
-            </div>
-          ) : null}
-          <Markdown text={segment.text || ""} />
-        </div>
+          <TurnProcess
+            key={turnKey + "-" + index}
+            groups={segment.groups}
+            running={false}
+            thinking={false}
+            streaming={false}
+            waitingForInput={false}
+            turnKey={turnKey + "-" + index}
+          />
         )
       )}
+      {lastIsSteps ? null : liveProcess([], turnKey)}
+      {parts.answer.map((segment) => textBlock(segment, "turn-text turn-answer"))}
       {sessionId && (turn.sentFiles || []).length > 0 ? (
         <AgentFiles
           sessionId={sessionId}

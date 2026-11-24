@@ -48,8 +48,10 @@ interface AccountList {
 }
 
 export interface AccountActions {
-  /* Opens `argv` in a new tab of the current space, in the focused folder. */
-  newTab: (argv: string[], title: string) => void;
+  /* Opens `argv` in a new tab of the current space, in the focused folder.
+     Without a title the tab and its session follow the terminal's window
+     title, so a Claude Code tab shows its task or /rename name. */
+  newTab: (argv: string[], title?: string) => void;
   /* Opens `argv` beside the focused pane (a new tab when there is none). */
   beside: (argv: string[]) => void;
 }
@@ -285,7 +287,7 @@ export function ClaudeAccountsPanel({
                   type="button"
                   className="wb-acc-act"
                   onClick={() => {
-                    actions.newTab([binary, "run", String(a.number)], "claude · " + a.number);
+                    actions.newTab([binary, "run", String(a.number)]);
                     onClose();
                   }}
                 >
@@ -317,8 +319,84 @@ export function ClaudeAccountsPanel({
   );
 }
 
-/* Spec 69 REQ-WA-014: the switch for the Claude Code SessionStart hook that
-   tells an agent it runs in a Workbench pane, so it reports its worktree. */
+/* Spec 69: the notice the Workbench shows when it opens while the Claude Code
+   hooks are not installed and the owner was never asked (state "unset").
+   Lana writes settings.json only on Install. "Not now" hides it until the
+   Workbench opens again; "Don't ask again" stores off, so it never returns
+   (the switch in Claude accounts can still turn the hooks on). */
+export function AgentHookNotice() {
+  const [state, setState] = useState<AgentHookState | null>(null);
+  const [hidden, setHidden] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState("");
+  useEffect(() => {
+    let cancelled = false;
+    getAgentHook()
+      .then((s) => !cancelled && setState(s))
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+  if (!state || hidden) return null;
+  const broken = state.folders.filter((f) => f.error);
+  if (state.state !== "unset" || !state.needs_install) {
+    // After Install: stay only to show a folder that failed.
+    if (state.state === "on" && broken.length > 0) {
+      return (
+        <div className="wb-hook-notice" role="status">
+          <div className="wb-hook-notice-body">
+            <b>Some Claude folders could not be updated</b>
+            {broken.map((f) => (
+              <small key={f.dir} className="wb-hook-notice-error">
+                {f.dir}: {f.error}
+              </small>
+            ))}
+          </div>
+          <div className="wb-hook-notice-actions">
+            <button type="button" className="btn btn-ghost btn-sm" onClick={() => setHidden(true)}>
+              Close
+            </button>
+          </div>
+        </div>
+      );
+    }
+    return null;
+  }
+  const choose = (enabled: boolean) => {
+    setBusy(true);
+    setError("");
+    setAgentHook(enabled)
+      .then(setState)
+      .catch((err) => setError(errorMessage(err)))
+      .finally(() => setBusy(false));
+  };
+  return (
+    <div className="wb-hook-notice" role="status">
+      <Ic name="git-branch" size={16} className="wb-hook-notice-icon" />
+      <div className="wb-hook-notice-body">
+        <b>Connect Claude Code to the Workbench</b>
+        <small>Lana adds its hooks to Claude Code's settings, so the Workbench can follow what Claude Code works on.</small>
+        {error ? <small className="wb-hook-notice-error">{error}</small> : null}
+      </div>
+      <div className="wb-hook-notice-actions">
+        <button type="button" className="btn btn-primary btn-sm" disabled={busy} onClick={() => choose(true)}>
+          {busy ? "Installing…" : "Install"}
+        </button>
+        <button type="button" className="btn btn-ghost btn-sm" disabled={busy} onClick={() => setHidden(true)}>
+          Not now
+        </button>
+        <button type="button" className="btn btn-ghost btn-sm" disabled={busy} onClick={() => choose(false)}>
+          Don't ask again
+        </button>
+      </div>
+    </div>
+  );
+}
+
+/* Spec 69 REQ-WA-014: the switch for the Claude Code hooks (SessionStart and
+   PreToolUse pre-edit) that tell an agent it runs in a Workbench pane and
+   report the worktree its edits land in. */
 function AgentHookRow() {
   const [state, setState] = useState<AgentHookState | null>(null);
   const [busy, setBusy] = useState(false);
@@ -352,9 +430,9 @@ function AgentHookRow() {
         }}
       >
         <span className="wb-acc-hook-text">
-          <b>Tell Claude Code it runs in the Workbench</b>
+          <b>Connect Claude Code to the Workbench</b>
           <small>
-            Agents report the worktree they work in, so Files and Changes follow them.
+            Lana's hooks in Claude Code's settings, so the Workbench can follow what Claude Code works on.
             {state.enabled ? " Installed in " + state.folders.filter((f) => f.installed).length + " of " + state.folders.length + " Claude folders." : ""}
           </small>
         </span>

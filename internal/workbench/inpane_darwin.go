@@ -2,27 +2,29 @@
 
 package workbench
 
-import (
-	"os"
+import "golang.org/x/sys/unix"
 
-	"golang.org/x/sys/unix"
-)
-
-// selfTTYDev and statRdev are the darwin halves of InPane; variables so tests
-// can inject a controlling terminal and a path's device.
+// procTTY and statRdev are the darwin halves of InPane; variables so tests can
+// inject a process's controlling terminal and a path's device.
 var (
-	selfTTYDev = darwinSelfTTYDev
-	statRdev   = darwinStatRdev
+	procTTY  = darwinProcTTY
+	statRdev = darwinStatRdev
 )
 
-// darwinSelfTTYDev returns the device number of the process's controlling
-// terminal, read from its kinfo_proc (Eproc.Tdev).
-func darwinSelfTTYDev() (uint64, bool) {
-	proc, err := unix.SysctlKinfoProc("kern.proc.pid", os.Getpid())
+// darwinProcTTY returns the device number of pid's controlling terminal, its
+// parent pid and whether the lookup succeeded, read from the process's
+// kinfo_proc (Eproc.Ppid, Eproc.Tdev). A Tdev of NODEV (0xffffffff, that is
+// -1) means the process has no controlling terminal.
+func darwinProcTTY(pid int) (dev uint64, hasTTY bool, ppid int, ok bool) {
+	proc, err := unix.SysctlKinfoProc("kern.proc.pid", pid)
 	if err != nil {
-		return 0, false
+		return 0, false, 0, false
 	}
-	return uint64(uint32(proc.Eproc.Tdev)), true
+	ppid = int(proc.Eproc.Ppid)
+	if uint32(proc.Eproc.Tdev) == 0xffffffff {
+		return 0, false, ppid, true
+	}
+	return uint64(uint32(proc.Eproc.Tdev)), true, ppid, true
 }
 
 // darwinStatRdev returns the device number of the device node at path.
