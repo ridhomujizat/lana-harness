@@ -46,13 +46,22 @@ var (
 	hookGitRoot = gitTopLevel
 )
 
-// cmdWorkbenchHook runs `lana workbench hook <event>`.
+// cmdWorkbenchHook runs `lana workbench hook <event>`: session-start tells a
+// session it runs in a pane, and pre-edit reports the worktree an edit lands
+// in (spec 69).
 func cmdWorkbenchHook(args []string) int {
-	if len(args) == 0 || args[0] != "session-start" {
-		fmt.Fprintln(os.Stderr, "error: use lana workbench hook session-start")
+	if len(args) == 0 {
+		fmt.Fprintln(os.Stderr, "error: use lana workbench hook session-start|pre-edit")
 		return 2
 	}
-	return workbenchSessionStart(os.Stdin, os.Stdout)
+	switch args[0] {
+	case "session-start":
+		return workbenchSessionStart(os.Stdin, os.Stdout)
+	case "pre-edit":
+		return workbenchPreEdit(os.Stdin)
+	}
+	fmt.Fprintln(os.Stderr, "error: use lana workbench hook session-start|pre-edit")
+	return 2
 }
 
 // workbenchSessionStart is the Claude Code SessionStart hook program: inside a
@@ -84,10 +93,10 @@ func workbenchSessionStart(in io.Reader, out io.Writer) int {
 // (REQ-WA-011).
 func workbenchHookText(id, root string) string {
 	return "You are running inside a Lana Workbench pane (session " + id + "). The Workbench\n" +
-		"shows the files and git changes of the worktree you work in. When you start\n" +
-		"working in a git worktree other than " + root + ", run\n" +
-		"`lana workbench use <worktree path>` before your first edit there. When you\n" +
-		"go back to " + root + ", run `lana workbench use .`. To create a new worktree, run\n" +
+		"shows the files and git changes of the worktree you work in. Your edits in\n" +
+		"other worktrees of this repo are reported automatically. To show a worktree\n" +
+		"you only read (no edits), run `lana workbench use <worktree path>`; to go back\n" +
+		"to " + root + ", run `lana workbench use .`. To create a new worktree, run\n" +
 		"`lana workbench use --new <branch>`; it creates it in the repo's worktree\n" +
 		"folder and reports it. Subagents do not need to report.\n"
 }

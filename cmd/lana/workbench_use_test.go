@@ -513,3 +513,87 @@ func TestWorkbenchUseNewNotARepo(t *testing.T) {
 		t.Fatalf("exit = %d, stderr = %q", code, stderr)
 	}
 }
+
+func TestWorkbenchUseClearRefreshesHookState(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("LANA_HOME", home)
+	stubHookPane(t, "ws-1", true)
+	stubWorkbenchUsePane(t, "ws-1", true)
+	d := servePreEditDaemon(t, home)
+	repo, sibling, _ := makePreEditRepo(t)
+
+	// The hook reports the sibling worktree A and saves it as current.
+	if _, code := runPreEdit(t, preEditJSON(repo, "file_path", filepath.Join(sibling, "a.go"), "")); code != 0 {
+		t.Fatalf("hook edit code = %d", code)
+	}
+	// A manual clear must forget A in the saved state.
+	if _, code := captureStdout(t, func() int { return cmdWorkbenchUse([]string{"--clear"}) }); code != 0 {
+		t.Fatalf("clear exit = %d", code)
+	}
+	state, ok := hookPreEditReadState(hookPreEditStatePath(home, "ws-1"))
+	if !ok {
+		t.Fatal("hook state missing after clear")
+	}
+	if state.Current != "" {
+		t.Fatalf("current = %q, want empty after clear", state.Current)
+	}
+
+	// The next edit in A reports again, since current is gone.
+	d.reset()
+	if out, code := runPreEdit(t, preEditJSON(repo, "file_path", filepath.Join(sibling, "b.go"), "")); code != 0 || out != "" {
+		t.Fatalf("edit code = %d, stdout = %q", code, out)
+	}
+	reqs := d.requests()
+	if len(reqs) != 1 || reqs[0].method != http.MethodPut {
+		t.Fatalf("requests = %+v, want one PUT", reqs)
+	}
+	if got, want := preEditReportPath(t, reqs[0]), resolved(t, sibling); got != want {
+		t.Fatalf("reported path = %q, want %q", got, want)
+	}
+}
+
+func TestWorkbenchUseReportsRefreshesHookState(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("LANA_HOME", home)
+	stubHookPane(t, "ws-1", true)
+	stubWorkbenchUsePane(t, "ws-1", true)
+	d := servePreEditDaemon(t, home)
+	repo, sibling, _ := makePreEditRepo(t)
+
+	// The state is saved by an edit in the home root, so current is empty.
+	if _, code := runPreEdit(t, preEditJSON(repo, "file_path", filepath.Join(repo, "a.go"), "")); code != 0 {
+		t.Fatalf("home edit code = %d", code)
+	}
+	// A manual report of the sibling worktree B must become the state's current.
+	if _, code := captureStdout(t, func() int { return cmdWorkbenchUse([]string{sibling}) }); code != 0 {
+		t.Fatalf("use exit = %d", code)
+	}
+	state, ok := hookPreEditReadState(hookPreEditStatePath(home, "ws-1"))
+	if !ok || state.Current != resolved(t, sibling) {
+		t.Fatalf("current = %q, want %q", state.Current, resolved(t, sibling))
+	}
+
+	// An edit in B then stays local: no request.
+	d.reset()
+	if out, code := runPreEdit(t, preEditJSON(repo, "file_path", filepath.Join(sibling, "b.go"), "")); code != 0 || out != "" {
+		t.Fatalf("edit code = %d, stdout = %q", code, out)
+	}
+	if got := d.requests(); len(got) != 0 {
+		t.Fatalf("requests = %+v, want none for the current worktree", got)
+	}
+}
+
+func TestWorkbenchUseKeepsMissingHookState(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("LANA_HOME", home)
+	servePreEditDaemon(t, home)
+	stubWorkbenchUsePane(t, "ws-1", true)
+
+	// No hook state exists, so a manual report must not create one.
+	if _, code := captureStdout(t, func() int { return cmdWorkbenchUse([]string{"/repo/x"}) }); code != 0 {
+		t.Fatalf("exit = %d", code)
+	}
+	if _, err := os.Stat(hookPreEditStatePath(home, "ws-1")); !os.IsNotExist(err) {
+		t.Fatalf("hook state = %v, want it not to exist", err)
+	}
+}

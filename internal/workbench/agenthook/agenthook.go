@@ -1,7 +1,9 @@
-// Package agenthook installs the Claude Code SessionStart hook that tells a
-// session it runs in a Lana Workbench pane (spec 69, REQ-WA-012 to REQ-WA-014).
-// The hook entry lives in the settings.json of a Claude Code config folder;
-// Install and Remove merge into it and keep every other key, hook and value.
+// Package agenthook installs the Claude Code hooks that follow a Lana
+// Workbench pane (spec 69, REQ-WA-012 to REQ-WA-014): a SessionStart hook that
+// tells a session it runs in a pane, and a PreToolUse hook that reports the
+// worktree an edit lands in. The hook entries live in the settings.json of a
+// Claude Code config folder; Install and Remove merge into it and keep every
+// other key, hook and value.
 package agenthook
 
 import (
@@ -22,6 +24,14 @@ var ErrInvalidSettings = errors.New("settings.json is not valid JSON")
 // command contains this fragment (REQ-WA-013).
 const hookNeedle = "workbench hook session-start"
 
+// preEditNeedle identifies Lana's PreToolUse hook in a settings.json: its
+// command contains this fragment (spec 69).
+const preEditNeedle = "workbench hook pre-edit"
+
+// preEditMatcher is the matcher of Lana's PreToolUse entry: the tools whose
+// argument names a path whose worktree the hook reports (spec 69).
+const preEditMatcher = "Edit|Write|MultiEdit|NotebookEdit"
+
 // backupSuffix is the copy written next to settings.json before Lana's first
 // change to it (REQ-WA-013), e.g. settings.json.lana-bak.
 const backupSuffix = ".lana-bak"
@@ -35,31 +45,83 @@ const dirMode os.FileMode = 0o700
 
 // Command returns the SessionStart hook command of REQ-WA-012. It checks the
 // Workbench variable in the shell first, so outside a pane no lana process
-// runs, and it runs the installed binary by its absolute path. A single quote
-// in the path is escaped for the shell.
+// runs, and it runs the installed binary by its absolute path.
 func Command(lanaBinary string) string {
-	quoted := "'" + strings.ReplaceAll(lanaBinary, "'", `'\''`) + "'"
-	return `[ -n "$LANA_WORKBENCH_SESSION" ] && exec ` + quoted + " workbench hook session-start; exit 0"
+	return `[ -n "$LANA_WORKBENCH_SESSION" ] && exec ` + quoteBinary(lanaBinary) + " workbench hook session-start; exit 0"
 }
 
-// Install adds or updates Lana's SessionStart hook in the settings.json at
-// settingsPath (REQ-WA-013). It reports whether it changed the file; a second
-// call with the same command leaves the file untouched. A missing file starts
-// from an empty object and its folder is created. A file that is not a JSON
-// object is left alone with ErrInvalidSettings. Before the first change it
-// writes a copy next to the file as settings.json.lana-bak, once.
+// PreEditCommand returns the PreToolUse hook command of spec 69. Like Command,
+// it checks the Workbench variable in the shell first, so outside a pane no
+// lana process runs, and it runs the installed binary by its absolute path.
+func PreEditCommand(lanaBinary string) string {
+	return `[ -n "$LANA_WORKBENCH_SESSION" ] && exec ` + quoteBinary(lanaBinary) + " workbench hook pre-edit; exit 0"
+}
+
+// quoteBinary quotes a binary path for a shell command; a single quote in the
+// path is escaped.
+func quoteBinary(lanaBinary string) string {
+	return "'" + strings.ReplaceAll(lanaBinary, "'", `'\''`) + "'"
+}
+
+// Install adds or updates Lana's SessionStart and PreToolUse hooks in the
+// settings.json at settingsPath (REQ-WA-013, spec 69). It reports whether it
+// changed the file; a second call with the same commands leaves the file
+// untouched. A missing file starts from an empty object and its folder is
+// created. A file that is not a JSON object is left alone with
+// ErrInvalidSettings. Before the first change it writes a copy next to the file
+// as settings.json.lana-bak, once.
 func Install(settingsPath, lanaBinary string) (bool, error) {
 	top, existed, err := load(settingsPath)
 	if err != nil {
 		return false, err
 	}
-	want := Command(lanaBinary)
-
 	hooks, err := subObject(top, "hooks")
 	if err != nil {
 		return false, err
 	}
-	entries, err := subArray(hooks, "SessionStart")
+	changed := false
+	for _, target := range lanaTargets(lanaBinary) {
+		entryChanged, err := installEntry(hooks, target)
+		if err != nil {
+			return false, err
+		}
+		changed = changed || entryChanged
+	}
+	if !changed {
+		return false, nil
+	}
+	top.set("hooks", marshalValue(hooks))
+	if err := writeSettings(settingsPath, existed, top); err != nil {
+		return false, err
+	}
+	return true, nil
+}
+
+// hookTarget describes one of Lana's hook entries: the hooks event it lives
+// under, the matcher its entry carries ("" for none), the fragment that finds
+// its command and the command it must hold.
+type hookTarget struct {
+	event   string
+	matcher string
+	needle  string
+	command string
+}
+
+// lanaTargets is Lana's two hook entries: the SessionStart hook of REQ-WA-013
+// and the PreToolUse hook of spec 69.
+func lanaTargets(lanaBinary string) []hookTarget {
+	return []hookTarget{
+		{event: "SessionStart", needle: hookNeedle, command: Command(lanaBinary)},
+		{event: "PreToolUse", matcher: preEditMatcher, needle: preEditNeedle, command: PreEditCommand(lanaBinary)},
+	}
+}
+
+// installEntry adds or updates one Lana hook entry under target.event. An entry
+// whose hooks hold a command with target.needle is fixed in place; when none
+// does, a new entry with target.matcher is appended, so every other entry and
+// its order is kept.
+func installEntry(hooks *orderedObject, target hookTarget) (bool, error) {
+	entries, err := subArray(hooks, target.event)
 	if err != nil {
 		return false, err
 	}
@@ -81,15 +143,15 @@ func Install(settingsPath, lanaBinary string) (bool, error) {
 				continue
 			}
 			command := objectString(hook, "command")
-			if !strings.Contains(command, hookNeedle) {
+			if !strings.Contains(command, target.needle) {
 				continue
 			}
 			found = true
-			if command == want {
+			if command == target.command {
 				continue
 			}
 			// The binary moved: fix the command in place.
-			hook.set("command", marshalValue(want))
+			hook.set("command", marshalValue(target.command))
 			hookItems[j] = marshalValue(hook)
 			entryChanged = true
 		}
@@ -100,26 +162,21 @@ func Install(settingsPath, lanaBinary string) (bool, error) {
 		}
 	}
 	if !found {
-		// No matcher, so the hook runs for every SessionStart source.
-		entries = append(entries, newHookEntry(want))
+		entries = append(entries, newHookEntry(target.matcher, target.command))
 		changed = true
 	}
 	if !changed {
 		return false, nil
 	}
-	hooks.set("SessionStart", marshalRawArray(entries))
-	top.set("hooks", marshalValue(hooks))
-	if err := writeSettings(settingsPath, existed, top); err != nil {
-		return false, err
-	}
+	hooks.set(target.event, marshalRawArray(entries))
 	return true, nil
 }
 
-// Remove takes Lana's SessionStart hook out of the settings.json at
-// settingsPath. A SessionStart entry whose hooks list becomes empty is dropped,
-// and so is the SessionStart key, then the hooks key, when their containers
+// Remove takes Lana's SessionStart and PreToolUse hooks out of the
+// settings.json at settingsPath. An entry whose hooks list becomes empty is
+// dropped, and so is its event key, then the hooks key, when their containers
 // become empty. It reports whether it changed the file; a missing file or a
-// file without the hook is no change. A file that is not a JSON object is left
+// file without the hooks is no change. A file that is not a JSON object is left
 // alone with ErrInvalidSettings.
 func Remove(settingsPath string) (bool, error) {
 	top, existed, err := load(settingsPath)
@@ -134,13 +191,42 @@ func Remove(settingsPath string) (bool, error) {
 	if !ok {
 		return false, fmt.Errorf("agenthook: %q is not a JSON object", "hooks")
 	}
-	entriesRaw, ok := hooks.get("SessionStart")
+	changed := false
+	for _, event := range []struct{ event, needle string }{
+		{"SessionStart", hookNeedle},
+		{"PreToolUse", preEditNeedle},
+	} {
+		eventChanged, err := removeEntry(hooks, event.event, event.needle)
+		if err != nil {
+			return false, err
+		}
+		changed = changed || eventChanged
+	}
+	if !changed {
+		return false, nil
+	}
+	if hooks.empty() {
+		top.del("hooks")
+	} else {
+		top.set("hooks", marshalValue(hooks))
+	}
+	if err := writeSettings(settingsPath, existed, top); err != nil {
+		return false, err
+	}
+	return true, nil
+}
+
+// removeEntry takes Lana's hooks out of the event's entry list. An entry whose
+// hooks list becomes empty is dropped, and so is the event key when no entry is
+// left. It reports whether it changed anything.
+func removeEntry(hooks *orderedObject, event, needle string) (bool, error) {
+	entriesRaw, ok := hooks.get(event)
 	if !ok {
 		return false, nil
 	}
 	entries, ok := decodeArray(entriesRaw)
 	if !ok {
-		return false, fmt.Errorf("agenthook: %q is not a JSON array", "SessionStart")
+		return false, fmt.Errorf("agenthook: %q is not a JSON array", event)
 	}
 
 	changed := false
@@ -160,7 +246,7 @@ func Remove(settingsPath string) (bool, error) {
 		removed := false
 		for _, hookRaw := range hookItems {
 			hook, ok := decodeObject(hookRaw)
-			if ok && strings.Contains(objectString(hook, "command"), hookNeedle) {
+			if ok && strings.Contains(objectString(hook, "command"), needle) {
 				removed = true
 				continue
 			}
@@ -181,31 +267,23 @@ func Remove(settingsPath string) (bool, error) {
 		return false, nil
 	}
 	if len(kept) == 0 {
-		hooks.del("SessionStart")
+		hooks.del(event)
 	} else {
-		hooks.set("SessionStart", marshalRawArray(kept))
-	}
-	if hooks.empty() {
-		top.del("hooks")
-	} else {
-		top.set("hooks", marshalValue(hooks))
-	}
-	if err := writeSettings(settingsPath, existed, top); err != nil {
-		return false, err
+		hooks.set(event, marshalRawArray(kept))
 	}
 	return true, nil
 }
 
-// Installed reports whether Lana's SessionStart hook runs lanaBinary in the
-// settings.json at settingsPath. A missing file, or a hook of another binary
-// (one that moved before the daemon fixed it), is not installed; a file that is
-// not a JSON object is ErrInvalidSettings.
+// Installed reports whether both of Lana's hooks run lanaBinary in the
+// settings.json at settingsPath: an install with only the SessionStart hook is
+// not installed, so the daemon's install path upgrades it. A missing file, or a
+// hook of another binary (one that moved before the daemon fixed it), is not
+// installed; a file that is not a JSON object is ErrInvalidSettings.
 func Installed(settingsPath, lanaBinary string) (bool, error) {
 	top, _, err := load(settingsPath)
 	if err != nil {
 		return false, err
 	}
-	want := Command(lanaBinary)
 	hooksRaw, ok := top.get("hooks")
 	if !ok {
 		return false, nil
@@ -214,13 +292,20 @@ func Installed(settingsPath, lanaBinary string) (bool, error) {
 	if !ok {
 		return false, fmt.Errorf("agenthook: %q is not a JSON object", "hooks")
 	}
-	entriesRaw, ok := hooks.get("SessionStart")
+	return hasCommand(hooks, "SessionStart", Command(lanaBinary)) &&
+		hasCommand(hooks, "PreToolUse", PreEditCommand(lanaBinary)), nil
+}
+
+// hasCommand reports whether the event holds an entry with a hook whose command
+// equals command.
+func hasCommand(hooks *orderedObject, event, command string) bool {
+	entriesRaw, ok := hooks.get(event)
 	if !ok {
-		return false, nil
+		return false
 	}
 	entries, ok := decodeArray(entriesRaw)
 	if !ok {
-		return false, fmt.Errorf("agenthook: %q is not a JSON array", "SessionStart")
+		return false
 	}
 	for _, entryRaw := range entries {
 		entry, ok := decodeObject(entryRaw)
@@ -236,12 +321,12 @@ func Installed(settingsPath, lanaBinary string) (bool, error) {
 			if !ok {
 				continue
 			}
-			if objectString(hook, "command") == want {
-				return true, nil
+			if objectString(hook, "command") == command {
+				return true
 			}
 		}
 	}
-	return false, nil
+	return false
 }
 
 // load reads settingsPath into an ordered object. A missing or empty file is an
@@ -506,13 +591,17 @@ func objectString(obj *orderedObject, key string) string {
 	return value
 }
 
-// newHookEntry builds the SessionStart entry Lana appends: one command hook
-// with no matcher, so it runs for every source.
-func newHookEntry(command string) json.RawMessage {
+// newHookEntry builds the entry Lana appends: one command hook, with matcher
+// set when it is not "" (the SessionStart hook has none, so it runs for every
+// source).
+func newHookEntry(matcher, command string) json.RawMessage {
 	hook := newObject()
 	hook.set("type", marshalValue("command"))
 	hook.set("command", marshalValue(command))
 	entry := newObject()
+	if matcher != "" {
+		entry.set("matcher", marshalValue(matcher))
+	}
 	entry.set("hooks", marshalRawArray([]json.RawMessage{marshalValue(hook)}))
 	return marshalValue(entry)
 }
