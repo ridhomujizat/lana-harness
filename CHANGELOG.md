@@ -7,6 +7,20 @@ but their config keys, events, and tools may still change between betas.
 
 ## [Unreleased]
 
+## [0.6.0-beta.10] - 2026-11-24
+
+### Added
+
+- Workbench: Files and Changes now follow Claude Code into another worktree of the same repo as soon as it edits a file there, and come back when it edits the pane's own folder again. Edits outside git, in other repos, or by subagents leave the pane where it is.
+- Workbench: a notice asks once before Lana adds its hooks to Claude Code's settings (Install / Not now / Don't ask again). The hooks are no longer installed without asking; the switch stays in Claude accounts.
+- Chat: text the agent writes between tool calls shows as chat messages instead of being folded into the process timeline, and a quiet line under the live process head shows the thought in progress.
+
+### Fixed
+
+- Workbench: Claude Code never learned it ran in a Workbench pane and `lana workbench use` always said "not in a Lana Workbench pane" (Claude Code runs its hooks and shell without a terminal).
+- Workbench: Claude account tabs opened with `cswap run` follow the session title (a `/rename` name or the task) instead of a fixed "claude · N".
+- Workbench chat: long permission options and terminal text stay inside their cards instead of scrolling the thread sideways.
+
 ## [0.6.0-beta.9] - 2026-11-23
 
 ### Added
