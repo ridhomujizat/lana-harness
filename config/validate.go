@@ -2,6 +2,7 @@ package config
 
 import (
 	"fmt"
+	"math"
 	"regexp"
 	"sort"
 	"strconv"
@@ -16,15 +17,23 @@ import (
 )
 
 var topKeys = []string{"agents", "channels", "combos", "knowledge", "mcp", "modules", "providers", "router", "routes", "teams", "update", "version", "web"}
-var providerKeys = []string{"allow_scheduled", "api_key_env", "auth", "base_url", "binary", "config_dir", "disabled", "headers", "home", "kind", "label", "stream_idle_timeout", "thinking_format", "timeout"}
+var providerKeys = []string{"allow_scheduled", "api_key_env", "api_key_envs", "auth", "base_url", "binary", "config_dir", "disabled", "headers", "home", "kind", "label", "pool", "priority", "stream_idle_timeout", "thinking_format", "timeout"}
 
 // claudeAccountKeys are the keys of a [providers.<name>] table of kind
 // "claude-code", a Claude Code account (API-CCT-010).
-var claudeAccountKeys = []string{"allow_scheduled", "api_key_env", "auth", "binary", "config_dir", "disabled", "kind", "label"}
+var claudeAccountKeys = []string{"allow_scheduled", "api_key_env", "auth", "binary", "config_dir", "disabled", "kind", "label", "pool", "priority"}
 
 // antigravityAccountKeys are the keys of a [providers.<name>] table of kind
 // "antigravity", an Antigravity account (API-AGY-002).
-var antigravityAccountKeys = []string{"allow_scheduled", "binary", "disabled", "home", "kind", "label"}
+var antigravityAccountKeys = []string{"allow_scheduled", "binary", "disabled", "home", "kind", "label", "pool", "priority"}
+
+// poolAccountKeys are the subscription pool keys of spec 75 (REQ-PAF-001):
+// allowed for kind claude-code and antigravity only.
+var poolAccountKeys = []string{"pool", "priority"}
+
+// apiKeyPoolKinds are the API kinds that may list backup keys in
+// api_key_envs (REQ-PAF-005).
+var apiKeyPoolKinds = []string{"anthropic", "commandcode", "deepseek", "openai", "openai_compat", "openrouter"}
 
 // builtinAccountRejectedKeys are the account keys the [providers.claude-code]
 // table of the built-in account must not set (spec 39 revision 5,
@@ -428,6 +437,10 @@ func validateProvider(v map[string]any, path string, add func(string, string)) {
 			add(path+"."+key, "not allowed for kind claude-code")
 		case antigravity && !contains(antigravityAccountKeys, key):
 			add(path+"."+key, "not allowed for kind antigravity")
+		case !claude && !antigravity && kindValue != "" && contains(poolAccountKeys, key):
+			add(path+"."+key, "allowed only for kind claude-code or antigravity")
+		case key == "api_key_envs" && kindValue != "" && !contains(apiKeyPoolKinds, kindValue):
+			add(path+"."+key, "allowed only for API kinds ("+strings.Join(apiKeyPoolKinds, ", ")+")")
 		case !claude && !antigravity && kindValue != "" && contains(claudeAccountKeys, key) && !contains([]string{"api_key_env", "disabled", "kind"}, key):
 			add(path+"."+key, "allowed only for kind claude-code")
 		case !claude && !antigravity && kindValue != "" && contains(antigravityAccountKeys, key) && !contains(claudeAccountKeys, key):
@@ -439,6 +452,12 @@ func validateProvider(v map[string]any, path string, add func(string, string)) {
 	}
 	if antigravity {
 		validateAntigravityAccount(v, path, add)
+	}
+	if claude || antigravity {
+		validatePoolKeys(v, path, add)
+	}
+	if contains(apiKeyPoolKinds, kindValue) {
+		validateAPIKeyEnvs(v, path, add)
 	}
 	kind, ok := v["kind"]
 	if !ok {
@@ -490,6 +509,61 @@ func validateProvider(v map[string]any, path string, add func(string, string)) {
 			} else if d <= 0 {
 				add(path+"."+key, "must be greater than 0, got "+s)
 			}
+		}
+	}
+}
+
+// validatePoolKeys checks the subscription pool keys of a Claude Code or
+// Antigravity account (REQ-PAF-001): priority is an integer >= 0 and pool a
+// boolean.
+func validatePoolKeys(v map[string]any, path string, add func(string, string)) {
+	if val, ok := v["priority"]; ok {
+		n, isInt := asInt(val)
+		switch {
+		case !isInt:
+			add(path+".priority", typeMsg("integer", val))
+		case n < 0:
+			add(path+".priority", fmt.Sprintf("must be 0 or more, got %d", n))
+		case n > math.MaxInt32:
+			add(path+".priority", fmt.Sprintf("must be at most %d, got %d", math.MaxInt32, n))
+		}
+	}
+	if val, ok := v["pool"]; ok {
+		if _, ok := val.(bool); !ok {
+			add(path+".pool", typeMsg("boolean", val))
+		}
+	}
+}
+
+// validateAPIKeyEnvs checks the backup keys of an API provider
+// (REQ-PAF-005): an array of secret names, each a valid env name, with no
+// name listed twice or equal to api_key_env.
+func validateAPIKeyEnvs(v map[string]any, path string, add func(string, string)) {
+	val, ok := v["api_key_envs"]
+	if !ok {
+		return
+	}
+	list, ok := asSlice(val)
+	if !ok {
+		add(path+".api_key_envs", typeMsg("array string", val))
+		return
+	}
+	seen := map[string]bool{}
+	if first, _ := v["api_key_env"].(string); first != "" {
+		seen[first] = true
+	}
+	for i, item := range list {
+		itemPath := fmt.Sprintf("%s.api_key_envs.%d", path, i)
+		name, ok := item.(string)
+		switch {
+		case !ok:
+			add(itemPath, typeMsg("string", item))
+		case !validEnvName(name):
+			add(itemPath, fmt.Sprintf("%q is not a valid secret name (letters, digits, and _, not starting with a digit)", name))
+		case seen[name]:
+			add(itemPath, fmt.Sprintf("duplicate key %q", name))
+		default:
+			seen[name] = true
 		}
 	}
 }

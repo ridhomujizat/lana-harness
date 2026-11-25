@@ -355,3 +355,32 @@ func TestKindRegisteredWithDefaultKeyEnv(t *testing.T) {
 		t.Errorf("Authorization = %q, want key from CMD_CODE_API_KEY", auth)
 	}
 }
+
+// spec 75: HTTP 402 and an insufficient-balance message are quota.
+func TestQuotaClass(t *testing.T) {
+	for _, tc := range []struct {
+		status  int
+		message string
+		want    string
+	}{
+		{402, "", core.ErrorClassQuota},
+		{400, "Insufficient balance on your account", core.ErrorClassQuota},
+		{429, "quota exceeded", core.ErrorClassQuota},
+		{429, "slow down", "rate_limit"},
+		{401, "insufficient balance", "auth"},
+	} {
+		if got := classOf(tc.status, tc.message); got != tc.want {
+			t.Errorf("classOf(%d, %q) = %s, want %s", tc.status, tc.message, got, tc.want)
+		}
+	}
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusPaymentRequired)
+		_, _ = io.WriteString(w, `{"error":"payment required"}`)
+	}))
+	defer srv.Close()
+	_, err := newTestAdapter(t, srv.URL).Stream(context.Background(), core.ChatRequest{Model: "m"})
+	var pe *core.ProviderError
+	if !errors.As(err, &pe) || pe.Class != core.ErrorClassQuota || pe.Status != 402 {
+		t.Fatalf("err = %v", err)
+	}
+}

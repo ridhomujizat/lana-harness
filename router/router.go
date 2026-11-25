@@ -113,8 +113,10 @@ type Router struct {
 	// recorder is the call recorder: WithRecorder, or AttachStores later.
 	recorder atomic.Pointer[recorderBox]
 	cool     cooldowns
-	limits   limitState
-	models   modelCache
+	// keyCool holds the API keys cooling down (REQ-PAF-005).
+	keyCool keyCooldowns
+	limits  limitState
+	models  modelCache
 	// claudeModels is the model list Claude Code reported (nil: none yet).
 	claudeModels atomic.Pointer[[]core.RuntimeModel]
 	// agyModelsMu guards agyModels, the model list each Antigravity account
@@ -131,7 +133,22 @@ type providerEntry struct {
 	raw     core.Provider
 	adapter Adapter
 	custom  bool
+	// keys are the clients of the provider's API keys in pool order
+	// (REQ-PAF-005): one per key env, the first being adapter. A provider
+	// without a key, or a custom one, has one client with an empty env.
+	keys []keyClient
 }
+
+// keyClient is the adapter of one API key of a provider. env is the
+// secret's name, never its value.
+type keyClient struct {
+	env     string
+	adapter Adapter
+}
+
+// pooled reports whether the provider has more than one API key, so call
+// records name the key (REQ-PAF-005).
+func (e *providerEntry) pooled() bool { return e != nil && len(e.keys) > 1 }
 
 type snapshot struct {
 	cfg       Config
@@ -166,6 +183,7 @@ func New(cfg Config, opts ...Option) (*Router, error) {
 		r.opts.jitter = randomJitter
 	}
 	r.cool.until = map[Target]time.Time{}
+	r.keyCool.until = map[string]time.Time{}
 	r.recorder.Store(&recorderBox{rec: r.opts.recorder})
 	r.limits.init(r.opts.limitStore)
 	r.models.entries = map[string]modelCacheEntry{}
@@ -270,9 +288,11 @@ func (r *Router) build(cfg Config, old *snapshot) (*snapshot, error) {
 				continue
 			}
 		}
+		adapter := WrapProvider(p)
 		next.providers[name] = &providerEntry{
 			name: name, kind: kind, cfg: cfg.Providers[name],
-			raw: p, adapter: WrapProvider(p), custom: true,
+			raw: p, adapter: adapter, custom: true,
+			keys: []keyClient{{adapter: adapter}},
 		}
 	}
 	for _, name := range sortedKeys(cfg.Providers) {
@@ -298,18 +318,11 @@ func (r *Router) build(cfg Config, old *snapshot) (*snapshot, error) {
 				continue
 			}
 		}
-		factory, ok := kindFactory(pc.Kind)
-		if !ok {
-			return nil, fmt.Errorf("provider '%s' kind '%s' is not supported in this build", name, pc.Kind)
-		}
-		adapter, err := factory(name, pc, r.deps(name, pc.Kind))
+		entry, err := r.buildEntry(name, pc)
 		if err != nil {
 			return nil, err
 		}
-		if adapter == nil {
-			return nil, fmt.Errorf("provider '%s' kind '%s' returned no adapter", name, pc.Kind)
-		}
-		next.providers[name] = &providerEntry{name: name, kind: pc.Kind, cfg: pc, raw: adapter, adapter: adapter}
+		next.providers[name] = entry
 	}
 	for _, name := range sortedKeys(cfg.Combos) {
 		combo := cfg.Combos[name]
@@ -325,6 +338,53 @@ func (r *Router) build(cfg Config, old *snapshot) (*snapshot, error) {
 		next.cooldown = cfg.Cooldown
 	}
 	return next, nil
+}
+
+// buildEntry builds the adapters of a configured provider: one per API key
+// (REQ-PAF-005). A provider with one key or none gets one adapter built from
+// its config as is, so it behaves as before key pools.
+func (r *Router) buildEntry(name string, pc core.ProviderConfig) (*providerEntry, error) {
+	factory, ok := kindFactory(pc.Kind)
+	if !ok {
+		return nil, fmt.Errorf("provider '%s' kind '%s' is not supported in this build", name, pc.Kind)
+	}
+	make1 := func(cfg core.ProviderConfig) (Adapter, error) {
+		adapter, err := factory(name, cfg, r.deps(name, pc.Kind))
+		if err != nil {
+			return nil, err
+		}
+		if adapter == nil {
+			return nil, fmt.Errorf("provider '%s' kind '%s' returned no adapter", name, pc.Kind)
+		}
+		return adapter, nil
+	}
+	envs := KeyEnvs(pc, name)
+	entry := &providerEntry{name: name, kind: pc.Kind, cfg: pc}
+	if len(envs) <= 1 {
+		adapter, err := make1(pc)
+		if err != nil {
+			return nil, err
+		}
+		env := ""
+		if len(envs) == 1 {
+			env = envs[0]
+		}
+		entry.raw, entry.adapter = adapter, adapter
+		entry.keys = []keyClient{{env: env, adapter: adapter}}
+		return entry, nil
+	}
+	for _, env := range envs {
+		one := pc
+		one.APIKeyEnv = env
+		one.APIKeyEnvs = nil
+		adapter, err := make1(one)
+		if err != nil {
+			return nil, err
+		}
+		entry.keys = append(entry.keys, keyClient{env: env, adapter: adapter})
+	}
+	entry.raw, entry.adapter = entry.keys[0].adapter, entry.keys[0].adapter
+	return entry, nil
 }
 
 func validateCombo(name string, combo Combo, snap *snapshot, combos map[string]Combo) error {
@@ -474,6 +534,15 @@ func cloneConfig(cfg Config) Config {
 					headers[k] = v
 				}
 				pc.Headers = headers
+			}
+			pc.APIKeyEnvs = append([]string(nil), pc.APIKeyEnvs...)
+			if pc.Priority != nil {
+				p := *pc.Priority
+				pc.Priority = &p
+			}
+			if pc.Pool != nil {
+				p := *pc.Pool
+				pc.Pool = &p
 			}
 			out.Providers[name] = pc
 		}

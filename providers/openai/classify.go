@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/ridhomujizat/lana-harness/core"
+	"github.com/ridhomujizat/lana-harness/router"
 )
 
 // contextLengthPhrases are the provider messages that mean the request did
@@ -48,6 +49,10 @@ func classifyHTTP(status int, body []byte) *core.ProviderError {
 				class = "context_length"
 			}
 		}
+	}
+	// spec 75: an exhausted balance or quota moves to the next key.
+	if router.IsQuotaError(status, string(body)) {
+		class = core.ErrorClassQuota
 	}
 	msg := fmt.Sprintf("HTTP %d", status)
 	if len(body) > 0 {

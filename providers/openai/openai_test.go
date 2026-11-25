@@ -29,6 +29,12 @@ func TestClassify(t *testing.T) {
 		{400, `{"error":{"code":"invalid"}}`, "client"},
 		{404, "", core.ErrorClassNotFound},
 		{422, "", "client"},
+		// spec 75: an exhausted balance or quota.
+		{402, `{"error":{"message":"Insufficient Balance"}}`, core.ErrorClassQuota},
+		{400, `{"error":{"message":"Insufficient Balance"}}`, core.ErrorClassQuota},
+		{429, `{"error":{"code":"insufficient_quota","message":"You exceeded your current quota"}}`, core.ErrorClassQuota},
+		{403, `{"error":{"message":"Quota exceeded"}}`, core.ErrorClassQuota},
+		{500, `{"error":{"message":"insufficient balance"}}`, "server"},
 	}
 	for _, tc := range cases {
 		got := classifyHTTP(tc.status, []byte(tc.body))

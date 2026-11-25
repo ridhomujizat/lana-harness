@@ -188,7 +188,26 @@ type ProviderConfig struct {
 	// "" means $LANA_HOME/antigravity/<name>. It applies to kind
 	// "antigravity" only.
 	Home string `toml:"home" json:"home"`
+
+	// The keys below belong to spec 75 (account failover inside a provider).
+
+	// Priority orders the accounts of a subscription pool (REQ-PAF-001),
+	// lower first, for kind "claude-code" and "antigravity" accounts and the
+	// built-in [providers.claude-code] / [providers.antigravity] tables. It is
+	// a pointer so an unset priority (nil) differs from 0: nil means the
+	// default, 0 for the built-in account and 100 for the others.
+	Priority *int `toml:"priority"`
+	// Pool is false to keep the account out of pooled addresses
+	// (REQ-PAF-001); nil means true.
+	Pool *bool `toml:"pool"`
+	// APIKeyEnvs are the backup API keys of an API provider (REQ-PAF-005):
+	// secret names tried in order after APIKeyEnv.
+	APIKeyEnvs []string `toml:"api_key_envs"`
 }
+
+// InPool reports whether the account may be used by a pooled address: Pool
+// is unset or true (REQ-PAF-001).
+func (pc ProviderConfig) InPool() bool { return pc.Pool == nil || *pc.Pool }
 
 // ClaudeCodeKind is the provider kind of a Claude Code account
 // (REQ-CCT-010): [providers.<name>] kind = "claude-code". Its targets run in

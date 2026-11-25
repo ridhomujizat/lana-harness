@@ -100,7 +100,8 @@ type missingSecret struct {
 }
 
 // missingSecrets returns the providers in use (see usedProviders) whose
-// effective API key env is empty, in name order. A disabled provider is
+// effective API key env, or one of whose api_key_envs, is empty, in name
+// order, one entry per empty env. A disabled provider is
 // never called, so its key is not checked.
 func missingSecrets(config core.Config, secrets core.Secrets) []missingSecret {
 	used := usedProviders(config)
@@ -112,17 +113,17 @@ func missingSecrets(config core.Config, secrets core.Secrets) []missingSecret {
 		if !used[name] || config.Providers[name].Disabled || kind == core.ClaudeCodeKind || kind == core.AntigravityKind {
 			continue
 		}
-		env := EffectiveKeyEnv(config.Providers[name], name)
-		if env == "" {
-			continue
-		}
-		var secret core.Secret
-		ok := false
-		if secrets != nil {
-			secret, ok = secrets.Lookup(env)
-		}
-		if !ok || secret.Reveal() == "" {
-			out = append(out, missingSecret{Provider: name, Env: env})
+		// REQ-PAF-005: every key of a key pool is checked and each missing
+		// one reported, though the provider works with any one key present.
+		for _, env := range KeyEnvs(config.Providers[name], name) {
+			var secret core.Secret
+			ok := false
+			if secrets != nil {
+				secret, ok = secrets.Lookup(env)
+			}
+			if !ok || secret.Reveal() == "" {
+				out = append(out, missingSecret{Provider: name, Env: env})
+			}
 		}
 	}
 	return out

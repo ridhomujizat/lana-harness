@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/ridhomujizat/lana-harness/core"
+	"github.com/ridhomujizat/lana-harness/router"
 )
 
 // contextLengthPhrases are the provider messages that mean the request did
@@ -21,9 +22,13 @@ var contextLengthPhrases = []string{
 	"prompt is too long",
 }
 
-// classOf maps an HTTP status and message to a router error class.
+// classOf maps an HTTP status and message to a router error class. An
+// exhausted balance or quota (HTTP 402, or a quota message) is quota
+// (spec 75).
 func classOf(status int, message string) string {
 	switch {
+	case router.IsQuotaError(status, message):
+		return core.ErrorClassQuota
 	case status == http.StatusUnauthorized || status == http.StatusForbidden:
 		return "auth"
 	case status == http.StatusTooManyRequests:

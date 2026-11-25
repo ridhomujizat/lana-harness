@@ -34,7 +34,8 @@ type apiError struct {
 }
 
 // classifyHTTP maps an HTTP error status and body to a provider error class:
-// 401/402/403 auth, 404 not_found, 413 and prompt-too-long 400 context_length,
+// 402 and an exhausted credit balance quota (spec 75), 401/403 auth, 404
+// not_found, 413 and prompt-too-long 400 context_length,
 // other 4xx client, 408 network, 429 rate_limit, 5xx and 529 server. The API
 // key is redacted from the message.
 func classifyHTTP(status int, body []byte, key string) *core.ProviderError {
@@ -42,7 +43,9 @@ func classifyHTTP(status int, body []byte, key string) *core.ProviderError {
 	parsed := json.Unmarshal(body, &payload) == nil && payload.Error.Type != ""
 	class := "client"
 	switch {
-	case status == http.StatusUnauthorized || status == http.StatusForbidden || status == http.StatusPaymentRequired:
+	case router.IsQuotaError(status, string(body)):
+		class = core.ErrorClassQuota
+	case status == http.StatusUnauthorized || status == http.StatusForbidden:
 		class = "auth"
 	case status == http.StatusNotFound:
 		class = core.ErrorClassNotFound
@@ -87,7 +90,7 @@ func classifyStreamError(errType, message, key string) *core.ProviderError {
 	case "permission_error":
 		class, status = "auth", http.StatusForbidden
 	case "billing_error":
-		class, status = "auth", http.StatusPaymentRequired
+		class, status = core.ErrorClassQuota, http.StatusPaymentRequired
 	case "not_found_error":
 		class, status = core.ErrorClassNotFound, http.StatusNotFound
 	case "request_too_large":
@@ -97,6 +100,9 @@ func classifyStreamError(errType, message, key string) *core.ProviderError {
 		if isContextLengthMessage(message) {
 			class = "context_length"
 		}
+	}
+	if status != 0 && router.IsQuotaError(status, message) {
+		class = core.ErrorClassQuota
 	}
 	msg := "stream error"
 	if errType != "" {
