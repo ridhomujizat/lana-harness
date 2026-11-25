@@ -43,7 +43,7 @@ function jobIcon(job: BackgroundJob): { name: string; tone: string } {
 
 function jobMeta(job: BackgroundJob): string {
   if (job.status === "running") {
-    return "running · " + ageText(job.started_at) + (job.pid ? " · pid " + job.pid : "");
+    return ageText(job.started_at) + (job.pid ? " · pid " + job.pid : "");
   }
   const ago = job.ended_at ? ageText(job.ended_at) + " ago" : "";
   if (job.status === "killed") {
@@ -213,39 +213,49 @@ export function ComposerTray({
     <div className={"cx-tray" + (expanded ? " is-open" : "")}>
       {/* The tab frames its own inner box, like the input field in the shell. */}
       <div className="cx-tray-box">
-      <button
-        type="button"
-        className="cx-tray-head"
-        aria-expanded={expanded}
-        aria-label={expanded ? "Close background tasks" : title}
-        onClick={() => setOpen(!expanded)}
-      >
-        {hasRunning ? (
-          <Ic name="loader-circle" size={13} className="cx-spin cx-run" />
-        ) : (
-          <Ic name="layers" size={13} />
-        )}
-        <span className="cx-tray-title">{title}</span>
-        {ended ? <span className="cx-tray-sub">{ended + " done"}</span> : null}
-        {!expanded && latest ? (
-          <span className="cx-tray-peek" title={latest.command}>
-            {latest.command}
-          </span>
+      <div className="cx-tray-headrow">
+        <button
+          type="button"
+          className="cx-tray-head"
+          aria-expanded={expanded}
+          aria-label={expanded ? "Close background tasks" : title}
+          onClick={() => setOpen(!expanded)}
+        >
+          {hasRunning ? (
+            <Ic name="loader-circle" size={13} className="cx-spin cx-run" />
+          ) : (
+            <Ic name="layers" size={13} />
+          )}
+          <span className="cx-tray-title">{title}</span>
+          {ended ? <span className="cx-tray-sub">{ended + " done"}</span> : null}
+          {!expanded && latest ? (
+            <span className="cx-tray-peek" title={latest.command}>
+              {latest.command}
+            </span>
+          ) : null}
+          <span className="cx-sp" />
+          {expanded ? null : <Ic name="chevron-up" size={13} />}
+        </button>
+        {expanded && runningCount > 1 ? (
+          <button type="button" className="cx-link" onClick={() => void stopAll()}>
+            Stop all
+          </button>
         ) : null}
-        <span className="cx-sp" />
-        <Ic name={expanded ? "chevron-down" : "chevron-up"} size={13} />
-      </button>
+        {expanded ? (
+          <button
+            type="button"
+            className="cx-tray-close"
+            aria-label="Collapse background tasks"
+            onClick={() => setOpen(false)}
+          >
+            <Ic name="chevron-down" size={13} />
+          </button>
+        ) : null}
+      </div>
       {expanded ? (
         <div className="cx-tray-list" role="list" aria-label="Background tasks">
           {rows.length === 0 ? (
             <p className="cx-tasks-empty">No background tasks in this session.</p>
-          ) : null}
-          {runningCount > 1 ? (
-            <div className="cx-tray-actions">
-              <button type="button" className="cx-link" onClick={() => void stopAll()}>
-                Stop all
-              </button>
-            </div>
           ) : null}
           {rows.map((job, index) => {
             const logsId = "job-logs-" + job.id;
@@ -262,13 +272,10 @@ export function ComposerTray({
                       size={13}
                       className={"cx-job-ico tone-" + icon.tone + (icon.tone === "running" ? " cx-spin" : "")}
                     />
-                    <Ic name="square-terminal" size={13} className="cx-job-kind" />
-                    <span className="cx-job-text">
-                      <span className="cx-job-cmd" title={job.command}>
-                        {job.command}
-                      </span>
-                      <span className={"cx-job-meta tone-" + icon.tone}>{jobMeta(job)}</span>
+                    <span className="cx-job-cmd" title={job.command}>
+                      {job.command}
                     </span>
+                    <span className={"cx-job-meta tone-" + icon.tone}>{jobMeta(job)}</span>
                     <button
                       type="button"
                       className={"cx-job-btn" + (logsOpen ? " is-on" : "")}

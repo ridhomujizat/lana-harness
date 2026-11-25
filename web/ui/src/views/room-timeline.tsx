@@ -1535,6 +1535,7 @@ export function RoomView({ room, initialDraft, variant = "page" }: RoomViewProps
               continue={node.item.continue === true}
               attachments={storedAttachments(node.sessionId, node.item.attachments)}
               replyTo={node.item.replyTo || null}
+              at={node.at}
             />
           </div>
         );

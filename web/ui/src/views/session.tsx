@@ -2740,6 +2740,7 @@ export function SessionPage({ id, view }: SessionPageProps) {
                     continue={item.continue === true}
                     attachments={storedAttachments(id, item.attachments)}
                     replyTo={item.replyTo || null}
+                    at={item.at || 0}
                   />
                 )
               ) : (
