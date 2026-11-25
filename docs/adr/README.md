@@ -35,6 +35,7 @@ If you are a new engineer, read the ADR index below before diving into code or a
 | [0019](0019-llm-router-as-embeddable-core.md) | Route all LLM calls through an embeddable router package | Accepted | 2026-11-08 |
 | [0020](0020-claude-code-as-router-target-with-lana-context.md) | Offer Claude Code as a router target that runs with lana's context and tools | Accepted | 2026-11-08 |
 | [0021](0021-embedded-js-sandbox-for-workflow-scripts.md) | Run guardian-written workflow scripts in an embedded JavaScript sandbox | Accepted | 2026-11-08 |
+| [0022](0022-antigravity-as-router-target-through-agy-acp.md) | Offer Antigravity as a router target that runs through the official `agy acp` | Proposed | 2026-11-25 |
 
 ## How to add an ADR
 
