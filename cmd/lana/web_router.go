@@ -137,6 +137,17 @@ func (b *webBackend) RouterTest(ctx context.Context, address string) (web.Router
 		}
 		return web.RouterTestResult{OK: true, LatencyMS: latency}, nil
 	}
+	// Spec 74: an Antigravity address runs one tiny Antigravity turn.
+	if runtime, ok := llmcall.ExternalRuntime(r, providerOf(address)); ok && runtime == lana.AntigravityRuntime && isAddress(address) {
+		if _, err := r.Resolve(address); err != nil {
+			return web.RouterTestResult{}, web.ErrRouterUnknownAddress
+		}
+		latency, err := b.rt.TestAntigravity(ctx, address)
+		if err != nil {
+			return routerTestFailure(err), nil
+		}
+		return web.RouterTestResult{OK: true, LatencyMS: latency}, nil
+	}
 	chain, err := r.Resolve(address)
 	if err != nil {
 		return web.RouterTestResult{}, web.ErrRouterUnknownAddress
@@ -172,6 +183,20 @@ func (b *webBackend) RouterTest(ctx context.Context, address string) (web.Router
 		}
 	}
 	return web.RouterTestResult{OK: true, LatencyMS: time.Since(start).Milliseconds()}, nil
+}
+
+// providerOf returns the provider part of a "<provider>/<model>" address.
+func providerOf(address string) string {
+	if target, ok := llmcall.ParseTarget(address); ok {
+		return target.Provider
+	}
+	return ""
+}
+
+// isAddress reports whether value is a "<provider>/<model>" address.
+func isAddress(value string) bool {
+	target, ok := llmcall.ParseTarget(value)
+	return ok && value[len(target.Provider)] == '/'
 }
 
 func routerTestFailure(err error) web.RouterTestResult {
@@ -225,7 +250,8 @@ func (b *webBackend) RouterCalls(ctx context.Context, filter routerdb.CallFilter
 
 // RouterLimits implements web.RouterBackend (API-RTR-013). A refresh fetches
 // the API providers' balances and, in parallel, probes the plan usage of the
-// Claude Code accounts (spec 39 Revision 4); both are throttled per provider.
+// Claude Code accounts (spec 39 Revision 4) and of the Antigravity accounts
+// (API-AGY-027); each is throttled per provider.
 func (b *webBackend) RouterLimits(ctx context.Context, refresh bool) ([]web.RouterLimit, error) {
 	r, err := b.llmRouter()
 	if err != nil {
@@ -233,10 +259,14 @@ func (b *webBackend) RouterLimits(ctx context.Context, refresh bool) ([]web.Rout
 	}
 	if refresh {
 		var wg sync.WaitGroup
-		wg.Add(1)
+		wg.Add(2)
 		go func() {
 			defer wg.Done()
 			b.rt.RefreshClaudeUsage(ctx)
+		}()
+		go func() {
+			defer wg.Done()
+			b.rt.RefreshAntigravityUsage(ctx)
 		}()
 		r.Limits(ctx, true)
 		wg.Wait()
@@ -435,6 +465,7 @@ func (b *webBackend) ClaudeAgentStatus(ctx context.Context) (web.ClaudeAgentStat
 		Queued:           status.Queued,
 		MaxConcurrent:    status.MaxConcurrent,
 		Accounts:         []web.ClaudeCodeAccountStatus{},
+		PoolWarning:      b.rt.PoolWarning(lana.ClaudeCodeRuntime),
 	}
 	// API-CCT-011: one row per account.
 	accounts, err := b.rt.ClaudeCodeAccounts(ctx)
@@ -453,6 +484,7 @@ func (b *webBackend) ClaudeAgentStatus(ctx context.Context) (web.ClaudeAgentStat
 			LoginCommand: account.LoginCommand,
 			Windows:      make([]web.RouterPlanWindow, 0, len(account.Windows)),
 			Agents:       account.Agents, Combos: account.Combos,
+			Priority: account.Priority, Pool: account.Pool, CoolingUntil: optionalTime(account.CoolingUntil),
 		}
 		for _, w := range account.Windows {
 			window := web.RouterPlanWindow{
@@ -467,4 +499,23 @@ func (b *webBackend) ClaudeAgentStatus(ctx context.Context) (web.ClaudeAgentStat
 		out.Accounts = append(out.Accounts, row)
 	}
 	return out, nil
+}
+
+// optionalTime is t in UTC, or nil for the zero time.
+func optionalTime(t time.Time) *time.Time {
+	if t.IsZero() {
+		return nil
+	}
+	at := t.UTC()
+	return &at
+}
+
+// ProviderKeyCooling implements web.ProviderKeyCoolingBackend: the API keys
+// of provider that are cooling down, by secret name (spec 75 REQ-PAF-006).
+func (b *webBackend) ProviderKeyCooling(provider string) map[string]time.Time {
+	r, err := b.llmRouter()
+	if err != nil {
+		return nil
+	}
+	return r.KeyCooling(provider)
 }

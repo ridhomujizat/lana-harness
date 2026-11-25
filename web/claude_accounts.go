@@ -101,6 +101,7 @@ func renderClaudeAccountTable(name string, record providerRecord) string {
 		b.WriteString("disabled = true\n")
 	}
 	writeProviderString(&b, "label", record.Label)
+	writeProviderPool(&b, record)
 	return b.String()
 }
 
@@ -205,6 +206,8 @@ func (s *Server) putClaudeAccount(w http.ResponseWriter, r *http.Request, store 
 		record = providerRecord{
 			ConfigDir: stored.ConfigDir, Binary: stored.Binary, Auth: stored.Auth, APIKeyEnv: stored.APIKeyEnv,
 			AllowScheduled: stored.AllowScheduled, Disabled: stored.Disabled, Label: stored.Label,
+			// Spec 75: a save keeps the account's pool settings.
+			Priority: stored.Priority, Pool: stored.Pool,
 		}
 	}
 	record.Kind = core.ClaudeCodeKind

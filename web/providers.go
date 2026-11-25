@@ -13,6 +13,7 @@ import (
 	"regexp"
 	"sort"
 	"strings"
+	"time"
 
 	"github.com/pelletier/go-toml/v2"
 
@@ -34,12 +35,13 @@ var providerEnvRE = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]*$`)
 // providerKinds are the kinds a provider form may save (API-RTR-001).
 var providerKinds = map[string]bool{
 	"openai": true, "deepseek": true, "openrouter": true, "anthropic": true, "openai_compat": true,
-	"commandcode":       true,
-	core.ClaudeCodeKind: true,
+	"commandcode":        true,
+	core.ClaudeCodeKind:  true,
+	core.AntigravityKind: true,
 }
 
 // providerKindsMessage is the error text for a kind outside providerKinds.
-const providerKindsMessage = "kind must be one of openai, deepseek, openrouter, anthropic, commandcode, openai_compat, claude-code"
+const providerKindsMessage = "kind must be one of openai, deepseek, openrouter, anthropic, commandcode, openai_compat, claude-code, antigravity"
 
 // claudeTestModel is the model of a Claude Code account test without one: the
 // cheapest alias.
@@ -78,6 +80,7 @@ func (s *Server) registerProviderRoutes() {
 	s.Handle("POST /v1/providers/test", http.HandlerFunc(s.handleTestProvider))
 	s.Handle("PUT /v1/providers/{name}", http.HandlerFunc(s.handlePutProvider))
 	s.Handle("DELETE /v1/providers/{name}", http.HandlerFunc(s.handleDeleteProvider))
+	s.Handle("PUT /v1/providers/{name}/keys", http.HandlerFunc(s.handlePutProviderKeys))
 }
 
 type providerJSON struct {
@@ -106,8 +109,23 @@ type providerJSON struct {
 	AllowScheduled bool `json:"allow_scheduled"`
 	// LoginCommand signs a Claude Code account in from a terminal.
 	LoginCommand string `json:"login_command,omitempty"`
-	// Label is the display label of a Claude Code account (REQ-CCT-012).
+	// Label is the display label of a Claude Code or Antigravity account
+	// (REQ-CCT-012, API-AGY-002).
 	Label string `json:"label,omitempty"`
+	// Home is the HOME of an Antigravity account; "" for the built-in one
+	// (API-AGY-002).
+	Home string `json:"home,omitempty"`
+	// Keys are an API provider's keys in use order (spec 75 REQ-PAF-005):
+	// api_key_env first, then api_key_envs. Secret names only.
+	Keys []providerKeyJSON `json:"keys,omitempty"`
+}
+
+// providerKeyJSON is one key of an API provider (spec 75): its secret name,
+// whether the secret holds a value, and the end of its cooldown.
+type providerKeyJSON struct {
+	Name         string     `json:"name"`
+	Present      bool       `json:"present"`
+	CoolingUntil *time.Time `json:"cooling_until"`
 }
 
 type listProvidersResponse struct {
@@ -125,8 +143,11 @@ type providerSaveResponse struct {
 	ConfigDir    string `json:"config_dir,omitempty"`
 	LoginCommand string `json:"login_command,omitempty"`
 	Message      string `json:"message,omitempty"`
-	// FolderRemoved answers a delete with remove_folder (REQ-CCT-012).
+	// FolderRemoved answers a delete with remove_folder (REQ-CCT-012,
+	// API-AGY-025).
 	FolderRemoved bool `json:"folder_removed,omitempty"`
+	// Home answers an Antigravity account delete (API-AGY-025).
+	Home string `json:"home,omitempty"`
 }
 
 type providerTestRequest struct {
@@ -169,6 +190,15 @@ type providerRecord struct {
 	Auth           string
 	AllowScheduled bool
 	Label          string
+
+	// Home is the HOME of an Antigravity account (API-AGY-002).
+	Home string
+	// Priority and Pool are the pool settings of a subscription account
+	// (spec 75 REQ-PAF-001); nil keeps the default.
+	Priority *int
+	Pool     *bool
+	// APIKeyEnvs are the backup keys of an API provider (REQ-PAF-005).
+	APIKeyEnvs []string
 }
 
 // providerValidationError carries config.Check issues through the section
@@ -191,6 +221,10 @@ type providerDocument struct {
 	// Claude Code account (API-CCT-027). parseProviderDocument moves it out
 	// of Providers, so it is never listed as a configured provider.
 	Builtin map[string]any `toml:"-"`
+	// AgyBuiltin is the optional [providers.antigravity] table of the
+	// built-in Antigravity account (API-AGY-003), moved out of Providers the
+	// same way.
+	AgyBuiltin map[string]any `toml:"-"`
 }
 
 func (s *Server) providerTesterOrError(w http.ResponseWriter) ProviderTester {
@@ -252,6 +286,7 @@ func (s *Server) handleListProviders(w http.ResponseWriter, r *http.Request) {
 		builtin.AllowScheduled = stored.AllowScheduled
 		builtin.Disabled = stored.Disabled
 	}
+
 	secretValues := map[string]string{}
 	if home := s.providerHome(); home != "" {
 		values, readErr := webfiles.ReadSecrets(secretsPath(home))
@@ -280,15 +315,25 @@ func (s *Server) handleListProviders(w http.ResponseWriter, r *http.Request) {
 			ModelsCount:    len(modelLists[name]),
 			Disabled:       record.Disabled,
 		}
-		if record.Kind == core.ClaudeCodeKind {
+		switch record.Kind {
+		case core.ClaudeCodeKind:
 			row.ConfigDir = s.claudeConfigDir(name, record)
 			row.AllowScheduled = record.AllowScheduled
 			row.LoginCommand = llmcall.ClaudeLoginCommand(row.ConfigDir)
 			row.Label = record.Label
+		case core.AntigravityKind:
+			row.APIKeyEnv, row.KeyState = "", "unset"
+			row.Home = s.antigravityHome(name, record)
+			row.AllowScheduled = record.AllowScheduled
+			row.Label = record.Label
+		default:
+			// Spec 75: the key pool in use order, secret names only.
+			row.Keys = s.providerKeys(name, record, secretValues)
 		}
 		response.Providers = append(response.Providers, row)
 	}
-	// The built-in account comes after the tables.
+	// The built-in account comes after the tables. The built-in Antigravity
+	// account is listed on GET /v1/router/antigravity (API-AGY-020).
 	response.Providers = append(response.Providers, builtin)
 	writeJSON(w, http.StatusOK, response)
 }
@@ -426,8 +471,16 @@ func (s *Server) handlePutProvider(w http.ResponseWriter, r *http.Request) {
 		writeProviderIssue(w, "providers."+name, "claude-code is built in")
 		return
 	}
+	if name == core.AntigravityProvider && kind != core.AntigravityKind {
+		writeProviderIssue(w, "providers."+name, "antigravity is built in")
+		return
+	}
 	if kind == core.ClaudeCodeKind {
 		s.putClaudeAccount(w, r, store, name, body)
+		return
+	}
+	if kind == core.AntigravityKind {
+		s.putAntigravityAccount(w, r, store, name, body)
 		return
 	}
 	if issues := claudeOnlyProviderKeys(body); len(issues) > 0 {
@@ -650,6 +703,10 @@ func (s *Server) handleDeleteProvider(w http.ResponseWriter, r *http.Request) {
 		writeAPIError(w, http.StatusConflict, "builtin", "claude-code is built in and cannot be deleted")
 		return
 	}
+	if name == core.AntigravityProvider {
+		writeAPIError(w, http.StatusConflict, "builtin", "antigravity is built in and cannot be deleted")
+		return
+	}
 	// REQ-CCT-012: ?remove_folder=1 on a Claude Code account signs it out
 	// and deletes its folder before the table goes.
 	removeFolder := false
@@ -665,6 +722,11 @@ func (s *Server) handleDeleteProvider(w http.ResponseWriter, r *http.Request) {
 	if removeFolder {
 		var ok bool
 		if signOutNote, ok = s.signOutClaudeAccountForRemoval(w, r, store, name, body.ExpectedVersion); !ok {
+			return
+		}
+		// API-AGY-025: the in-use and folder checks of an Antigravity
+		// account come before anything changes.
+		if !s.checkAntigravityRemoval(w, r, store, name, body.ExpectedVersion) {
 			return
 		}
 	}
@@ -725,6 +787,25 @@ func (s *Server) handleDeleteProvider(w http.ResponseWriter, r *http.Request) {
 			folderRemoved = true
 		}
 	}
+	if record.Kind == core.AntigravityKind {
+		// API-AGY-025: a running sign-in is cancelled before the home goes.
+		if auth := s.agyPort(); auth != nil {
+			auth.ForgetAntigravityAccount(name)
+		}
+		if removeFolder {
+			home := s.antigravityHome(name, record)
+			if !s.antigravityFolderRemovable(home) {
+				writeAntigravityFolderOutside(w, home)
+				return
+			}
+			if err := os.RemoveAll(home); err != nil {
+				s.logger.Error("web: remove antigravity account folder", "error", err)
+				writeAPIError(w, http.StatusInternalServerError, "internal_error", "cannot delete the account folder")
+				return
+			}
+			folderRemoved = true
+		}
+	}
 	if err := store.ConfigWrite(r.Context(), candidate); err != nil {
 		s.logger.Error("web: write config for provider delete", "error", err)
 		writeAPIError(w, http.StatusInternalServerError, "internal_error", "internal server error")
@@ -751,6 +832,15 @@ func (s *Server) handleDeleteProvider(w http.ResponseWriter, r *http.Request) {
 			response.Message = "The account folder " + response.ConfigDir + " was kept; delete it yourself to remove its login."
 		}
 	}
+	if record.Kind == core.AntigravityKind {
+		response.Home = s.antigravityHome(name, record)
+		if folderRemoved {
+			response.FolderRemoved = true
+			response.Message = "The account folder " + response.Home + " was deleted."
+		} else {
+			response.Message = "The account folder " + response.Home + " was kept; delete it yourself to remove its login."
+		}
+	}
 	writeJSON(w, http.StatusOK, response)
 }
 
@@ -765,6 +855,10 @@ func parseProviderDocument(raw []byte) (providerDocument, error) {
 	if table, ok := document.Providers[core.ClaudeCodeProvider]; ok {
 		document.Builtin = table
 		delete(document.Providers, core.ClaudeCodeProvider)
+	}
+	if table, ok := document.Providers[core.AntigravityProvider]; ok {
+		document.AgyBuiltin = table
+		delete(document.Providers, core.AntigravityProvider)
 	}
 	return document, nil
 }
@@ -785,6 +879,25 @@ func providerRecordFromMap(table map[string]any) providerRecord {
 	record.Auth = mapProviderString(table, "auth")
 	record.AllowScheduled, _ = table["allow_scheduled"].(bool)
 	record.Label = mapProviderString(table, "label")
+	record.Home = mapProviderString(table, "home")
+	switch v := table["priority"].(type) {
+	case int64:
+		n := int(v)
+		record.Priority = &n
+	case int:
+		n := v
+		record.Priority = &n
+	}
+	if v, ok := table["pool"].(bool); ok {
+		record.Pool = &v
+	}
+	if list, ok := table["api_key_envs"].([]any); ok {
+		for _, item := range list {
+			if text, ok := item.(string); ok {
+				record.APIKeyEnvs = append(record.APIKeyEnvs, text)
+			}
+		}
+	}
 	if headers, ok := table["headers"].(map[string]any); ok {
 		record.Headers = make(map[string]string, len(headers))
 		for key, value := range headers {
@@ -828,6 +941,7 @@ func renderProviderTable(name string, record providerRecord) string {
 	writeProviderString(&b, "kind", record.Kind)
 	writeProviderString(&b, "base_url", record.BaseURL)
 	writeProviderString(&b, "api_key_env", record.APIKeyEnv)
+	writeProviderStrings(&b, "api_key_envs", record.APIKeyEnvs)
 	if len(record.Headers) > 0 {
 		keys := make([]string, 0, len(record.Headers))
 		for key := range record.Headers {
@@ -847,6 +961,29 @@ func renderProviderTable(name string, record providerRecord) string {
 		b.WriteString("disabled = true\n")
 	}
 	return b.String()
+}
+
+// writeProviderStrings writes a string array; an empty list writes nothing.
+func writeProviderStrings(b *strings.Builder, key string, values []string) {
+	if len(values) == 0 {
+		return
+	}
+	parts := make([]string, 0, len(values))
+	for _, value := range values {
+		parts = append(parts, providerTOMLString(value))
+	}
+	fmt.Fprintf(b, "%s = [%s]\n", key, strings.Join(parts, ", "))
+}
+
+// writeProviderPool writes the pool keys of a subscription account (spec 75):
+// priority when set, and pool = false when it is out of the pool.
+func writeProviderPool(b *strings.Builder, record providerRecord) {
+	if record.Priority != nil {
+		fmt.Fprintf(b, "priority = %d\n", *record.Priority)
+	}
+	if record.Pool != nil && !*record.Pool {
+		b.WriteString("pool = false\n")
+	}
 }
 
 func writeProviderString(b *strings.Builder, key, value string) {
@@ -1016,6 +1153,9 @@ func unknownProviderKeys(body map[string]json.RawMessage) []ConfigIssue {
 		"binary":          true,
 		"auth":            true,
 		"allow_scheduled": true,
+		// Antigravity account keys (API-AGY-002).
+		"home":  true,
+		"label": true,
 	}
 	keys := make([]string, 0, len(body))
 	for key := range body {

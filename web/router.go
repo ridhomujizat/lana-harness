@@ -238,9 +238,12 @@ type ClaudeAgentStatus struct {
 	Running          int      `json:"running"`
 	Queued           int      `json:"queued"`
 	MaxConcurrent    int      `json:"max_concurrent"`
-	// Accounts are the Claude Code accounts, the built-in one first
-	// (API-CCT-011). The fields above describe the built-in account.
+	// Accounts are the Claude Code accounts in pool order (API-CCT-011,
+	// spec 75 REQ-PAF-006). The fields above describe the built-in account.
 	Accounts []ClaudeCodeAccountStatus `json:"accounts"`
+	// PoolWarning is true with more than one pooled personal account
+	// (REQ-PAF-006).
+	PoolWarning bool `json:"pool_warning"`
 }
 
 // ClaudeCodeAccountStatus is one account row of GET /v1/router/claude-agent
@@ -272,6 +275,12 @@ type ClaudeCodeAccountStatus struct {
 	Label       string              `json:"label"`
 	DisplayName string              `json:"display_name"`
 	SignIn      *ClaudeSignInStatus `json:"sign_in"`
+	// Priority, Pool, and CoolingUntil are the pool order, whether a pooled
+	// address may use the account, and the end of its cooldown (spec 75
+	// REQ-PAF-006).
+	Priority     int        `json:"priority"`
+	Pool         bool       `json:"pool"`
+	CoolingUntil *time.Time `json:"cooling_until"`
 }
 
 // SetRouterBackend installs the Router port directly. SetBackend also
@@ -316,6 +325,8 @@ func (s *Server) registerRouterRoutes() {
 	s.Handle("GET /v1/router/claude-agent", http.HandlerFunc(s.handleClaudeAgentStatus))
 	s.Handle("PUT /v1/router/claude-code/models", http.HandlerFunc(s.handlePutClaudeCodeModels))
 	s.registerClaudeSignInRoutes()
+	s.registerAntigravityRoutes()
+	s.Handle("PUT /v1/router/pool-order", http.HandlerFunc(s.handlePutPoolOrder))
 	s.mux.Handle(RouterProxyPrefix+"/", s.checkHost(http.HandlerFunc(s.serveRouterProxy)))
 }
 
@@ -463,15 +474,18 @@ func (s *Server) handleRouterOverview(w http.ResponseWriter, r *http.Request) {
 		response.Choices = append(response.Choices, routerChoiceJSON{Value: name, Label: name, Group: "Combos"})
 	}
 	// A disabled provider is no agent model choice (API-RTR-001 revision 2).
-	// Claude Code accounts are listed with the Claude Code group below.
+	// Claude Code and Antigravity accounts are listed with their own groups
+	// below.
 	enabled := make([]string, 0, len(providers))
-	var accounts []string
+	var accounts, agyAccounts []string
 	for _, name := range providers {
 		record := providerRecordFromMap(document.Providers[name])
 		switch {
 		case record.Disabled:
 		case record.Kind == core.ClaudeCodeKind:
 			accounts = append(accounts, name)
+		case record.Kind == core.AntigravityKind:
+			agyAccounts = append(agyAccounts, name)
 		default:
 			enabled = append(enabled, name)
 		}
@@ -490,6 +504,8 @@ func (s *Server) handleRouterOverview(w http.ResponseWriter, r *http.Request) {
 	// found, the built-in account first, then each enabled account
 	// (REQ-CCT-010).
 	response.Choices = append(response.Choices, s.claudeCodeChoices(r.Context(), accounts)...)
+	// API-AGY-026: Antigravity models of each enabled account.
+	response.Choices = append(response.Choices, s.antigravityChoices(r.Context(), document, agyAccounts)...)
 	writeJSON(w, http.StatusOK, response)
 }
 

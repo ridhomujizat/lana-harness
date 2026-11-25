@@ -71,15 +71,16 @@ func (d workflowDeps) RunAgent(ctx context.Context, req workflow.AgentRequest) (
 			return workflow.AgentResult{}, err
 		}
 	} else if err := rt.scheduledRunAllowed(req.Agent, req.Model); err != nil {
-		// REQ-CCR-007: a workflow node runs a Claude Agent only with
-		// allow_scheduled = true.
+		// REQ-CCR-007, REQ-AGY-008: a workflow node runs on Claude Code or
+		// Antigravity only with allow_scheduled = true.
 		return workflow.AgentResult{}, err
 	}
 	session, err := rt.createChannelSession(ctx, "workflow", req.WorkflowID, req.Agent, rt.workflowSessionTitle(ctx, req.WorkflowID))
 	if err != nil {
 		return workflow.AgentResult{}, err
 	}
-	// REQ-CCT-008: the run's turns skip Claude Code unless allow_scheduled.
+	// REQ-CCT-008, REQ-AGY-008: the run's turns skip Claude Code and
+	// Antigravity unless allow_scheduled.
 	defer rt.registry.MarkScheduled(session.ID)()
 	if req.Background {
 		defer rt.registry.MarkBackground(session.ID)()

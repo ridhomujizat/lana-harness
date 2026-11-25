@@ -220,6 +220,18 @@ func (r *Runtime) AccountStatus(ctx context.Context, account core.RuntimeAccount
 
 var _ core.RuntimeAccountStatuser = (*Runtime)(nil)
 
+// ForgetAccountStatus drops the cached status and model probe of one account
+// (a sign-in just finished, or the account was removed), so the next
+// AccountStatus runs `agy models` again.
+func (r *Runtime) ForgetAccountStatus(account string) {
+	if account == "" {
+		account = core.AntigravityProvider
+	}
+	r.agy.mu.Lock()
+	delete(r.agy.accounts, account)
+	r.agy.mu.Unlock()
+}
+
 // account is the cached probe of key. The caller holds s.mu.
 func (s *agyState) account(key string) *agyAccount {
 	a := s.accounts[key]

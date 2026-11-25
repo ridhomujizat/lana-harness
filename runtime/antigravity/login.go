@@ -213,6 +213,9 @@ func (r *Runtime) SignIn(ctx context.Context, account core.RuntimeAccount, onLin
 	select {
 	case waitErr := <-done:
 		if waitErr == nil {
+			// The account just signed in: its cached `agy models` probe is
+			// stale, so the next AccountStatus runs it again.
+			r.ForgetAccountStatus(agyAccountName(account))
 			return nil
 		}
 		return exitFailure()
