@@ -39,6 +39,31 @@ describe("buildHistory", () => {
     expect(users[0]?.text).toBe("hello");
   });
 
+  /* REQ-JBN-020: a job notice is one system line, not a hidden runtime note. */
+  it("renders a job notice as its own item", () => {
+    const items = buildHistory([
+      event(1, "user/message", {
+        runtime: true,
+        job: {
+          id: "bash-1",
+          command: "npm run dev",
+          status: "exited",
+          exit_code: 1,
+          tail: "boom",
+        },
+      }),
+    ]);
+    expect(items).toEqual([
+      {
+        key: "1",
+        type: "job",
+        label: "Background task failed · exit 1",
+        text: "npm run dev",
+        status: "exited",
+      },
+    ]);
+  });
+
   /* REQ-MEM-030: one decision line per captured operation. */
   it("renders a decision line per memory operation", () => {
     const items = buildHistory([

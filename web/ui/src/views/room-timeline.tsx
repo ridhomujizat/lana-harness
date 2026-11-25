@@ -26,14 +26,16 @@ import { compactSession } from "../api/turns";
 import { NewSessionBanner, SlashMenu, useSlashMenu } from "./slash-menu";
 import { ContextMeter } from "./context-meter";
 import type { SlashCommand } from "./slash-menu";
-import type { SessionEvent } from "../api/sessions";
-import { knowledgeCompiledLine, memoryOpLine } from "../lib/format";
+import type { SessionEvent, JobNoticePayload } from "../api/sessions";
+import { knowledgeCompiledLine, jobNoticeOf, memoryOpLine } from "../lib/format";
 import { useSessionPresence } from "../lib/session-presence";
 import { ErrorDetails } from "../ui/ui";
 import { Ic } from "../ui/icons";
 import { pinToBottom, useStickToBottom } from "./scroll-pin";
 import { Badge, Button, Skeleton } from "../ui/gr8r";
 import { AgentAvatar } from "./agent-avatar";
+import { JobNoticeLine } from "./job-notice";
+import { JobsPill } from "./jobs-pill";
 import { ApprovalCard } from "./approval";
 import type { ApprovalItem } from "./approval";
 import {
@@ -263,6 +265,18 @@ function segmentEntries(
   const entries: TimelineNode[] = [];
   for (const item of thread) {
     if (item.kind === "user") {
+      /* REQ-JBN-020: a job notice is a system line, placed at its event time. */
+      if (item.job) {
+        const event = bySeq.get(Number(item.seq) || 0);
+        entries.push({
+          key: item.key,
+          at: event ? event.created_at : segment.created_at,
+          kind: "job",
+          sessionId: segment.session_id,
+          job: item.job,
+        });
+        continue;
+      }
       const seq = Number(String(item.key).replace("user-", ""));
       const event = bySeq.get(seq);
       entries.push({
@@ -377,6 +391,7 @@ type TimelineNode =
   | { key: string; at: number; kind: "summary"; sessionId: string }
   | { key: string; at: number; kind: "learned"; learnedText: string }
   | { key: string; at: number; kind: "user"; sessionId: string; item: UserThreadItem }
+  | { key: string; at: number; kind: "job"; sessionId: string; job: JobNoticePayload }
   | { key: string; at: number; kind: "turn"; sessionId: string; turn: ChatTurn };
 
 export interface RoomViewProps {
@@ -427,6 +442,8 @@ export function RoomView({ room, initialDraft, variant = "page" }: RoomViewProps
   const [stoppingId, setStoppingId] = useState("");
   const [sending, setSending] = useState(false);
   const [uploading, setUploading] = useState(false);
+  /* REQ-JBN-022: bumped on a tool/result or job notice so JobsPill re-reads. */
+  const [jobRefresh, setJobRefresh] = useState(0);
 
   const scrollRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
@@ -662,6 +679,14 @@ export function RoomView({ room, initialDraft, variant = "page" }: RoomViewProps
         if (event.kind === "assistant/message" || event.kind === "tool/call") {
           setLiveText("");
           setLiveThinking(false);
+        }
+        /* REQ-JBN-022: refresh the background pill on a tool result or a job
+           notice, so a job started mid-visit appears without a reload. */
+        if (
+          event.kind === "tool/result" ||
+          (event.kind === "user/message" && jobNoticeOf(payload) !== null)
+        ) {
+          setJobRefresh((value) => value + 1);
         }
         if (event.kind === "turn/end") {
           finishLive();
@@ -1475,6 +1500,12 @@ export function RoomView({ room, initialDraft, variant = "page" }: RoomViewProps
             />
           </div>
         );
+      case "job":
+        return (
+          <div className={rowClass(node.key, node.sessionId)} key={node.key}>
+            <JobNoticeLine job={node.job} />
+          </div>
+        );
       case "turn":
         return (
           <div className={rowClass(node.key, node.sessionId)} key={node.key}>
@@ -1646,6 +1677,11 @@ export function RoomView({ room, initialDraft, variant = "page" }: RoomViewProps
       </div>
 
       <div className="room-composer">
+        {/* REQ-JBN-021: the same background pill sits above the agent room's
+            composer (a team room has no single session, so it is left out). */}
+        {!team && currentWebSessionId ? (
+          <JobsPill sessionId={currentWebSessionId} refreshKey={jobRefresh} />
+        ) : null}
         {commandReply ? (
           <div className="alert info" role="status">
             <Ic name="workflow" size={15} />

@@ -6,8 +6,8 @@ import { AgentFiles, FoldText, MessageFiles, type UserAttachment } from "./messa
 import { memo, useEffect, useRef, useState } from "react";
 import type { AvatarMood } from "../lib/pixel-avatar";
 import { getEvent } from "../api/sessions";
-import type { SessionContentBlock, SessionEvent, UserMessagePayload } from "../api/sessions";
-import { contentText, cut, knowledgeCompiledLine, memoryOpLine, primaryArg, toolStatusWord, userMessageText } from "../lib/format";
+import type { SessionContentBlock, SessionEvent, UserMessagePayload, JobNoticePayload } from "../api/sessions";
+import { backgroundTool, contentText, cut, jobNoticeOf, knowledgeCompiledLine, memoryOpLine, primaryArg, toolStatusWord, userMessageText } from "../lib/format";
 import { Markdown } from "../lib/markdown";
 import { Ic } from "../ui/icons";
 import { Button } from "../ui/gr8r";
@@ -172,6 +172,8 @@ export interface Turn {
   stopReason?: string;
   error?: unknown;
   userTexts?: TurnUserText[];
+  /* REQ-JBN-020: ended-job notices attached to this turn's start. */
+  jobNotices?: TurnJobNotice[];
   segments?: TurnSegment[];
   steps?: TurnStep[];
   approvals?: Map<string, TurnApproval>;
@@ -194,6 +196,7 @@ export interface ChatTurn extends Turn {
   stopReason: string;
   error: unknown;
   userTexts: TurnUserText[];
+  jobNotices: TurnJobNotice[];
   segments: TurnSegment[];
   steps: TurnStep[];
   approvals: Map<string, TurnApproval>;
@@ -226,8 +229,19 @@ export type ThreadItem =
       continue?: boolean;
       attachments?: UserAttachmentRef[];
       replyTo?: ReplyTarget;
+      /* REQ-JBN-020: a job notice rides on a user item but renders as a system
+         line, not an owner bubble. seq places it in time in the room timeline. */
+      job?: JobNoticePayload;
+      seq?: number;
     }
   | { kind: "turn"; key: string; turn: ChatTurn };
+
+/* One ended-job notice of a turn (REQ-JBN-004). */
+export interface TurnJobNotice {
+  key: string;
+  seq: number;
+  job: JobNoticePayload;
+}
 
 export interface LiveTurnState {
   running?: boolean;
@@ -640,6 +654,9 @@ function StepRow({ step }: { step: TurnStep }) {
           <Ic name={CATEGORY_ICONS[toolCategory(step.name)] || "wrench"} size={14} />
         </span>
         <span className="tp-label">{stepIntent(step.name)}</span>
+        {backgroundTool(step.name, step.input) ? (
+          <span className="tp-bg-tag">background</span>
+        ) : null}
         {argument ? (
           <code className="tp-arg" title={argument}>
             {argument}
@@ -1412,6 +1429,7 @@ function newTurn(id: string, startedAt: unknown): ChatTurn {
     stopReason: "",
     error: null,
     userTexts: [],
+    jobNotices: [],
     segments: [],
     steps: [],
     approvals: new Map(),
@@ -1556,6 +1574,18 @@ export function buildTurns(
         break;
       }
       case "user/message": {
+        // REQ-JBN-020: a job notice is one system line, not an owner bubble.
+        const job = jobNoticeOf(payload);
+        if (job) {
+          const turn = turnFor(event, payload);
+          turn.lastAt = Math.max(turn.lastAt, createdAt);
+          turn.jobNotices.push({
+            key: "job-" + event.seq,
+            seq: event.seq,
+            job,
+          });
+          break;
+        }
         // REQ-MEM-021: skip a runtime note so it makes no owner bubble.
         if (payload.runtime === true) {
           break;
@@ -1824,9 +1854,21 @@ export function buildTurns(
 
   const items: ThreadItem[] = [];
   for (const turn of turns) {
-    const empty = turn.userTexts.length === 0 && turn.groups.length === 0;
+    const empty =
+      turn.userTexts.length === 0 &&
+      turn.groups.length === 0 &&
+      turn.jobNotices.length === 0;
     if (empty && !turn.running) {
       continue;
+    }
+    for (const notice of turn.jobNotices) {
+      items.push({
+        kind: "user",
+        key: notice.key,
+        text: "",
+        job: notice.job,
+        seq: notice.seq,
+      });
     }
     for (const message of turn.userTexts) {
       items.push({

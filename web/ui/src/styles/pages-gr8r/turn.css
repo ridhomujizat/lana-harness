@@ -166,6 +166,17 @@
   font-family: inherit;
   font-size: var(--fs-sm);
 }
+/* REQ-JBN-023: a bash call that runs in the background. */
+.tp-bg-tag {
+  flex: 0 0 auto;
+  padding: 1px 6px;
+  border-radius: 5px;
+  background: var(--surface-3);
+  color: var(--text-3);
+  font-size: var(--fs-2xs);
+  font-weight: 600;
+  letter-spacing: 0.02em;
+}
 .tp-status {
   margin-left: auto;
   flex-shrink: 0;
