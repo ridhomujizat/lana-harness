@@ -211,6 +211,8 @@ export function ComposerTray({
 
   return (
     <div className={"cx-tray" + (expanded ? " is-open" : "")}>
+      {/* The tab frames its own inner box, like the input field in the shell. */}
+      <div className="cx-tray-box">
       <button
         type="button"
         className="cx-tray-head"
@@ -303,6 +305,7 @@ export function ComposerTray({
           })}
         </div>
       ) : null}
+      </div>
     </div>
   );
 }
