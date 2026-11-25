@@ -1026,20 +1026,20 @@ function Composer({
         ></textarea>
         <span className="cx-send">
           {turnRunning && !readOnly ? (
-            <Button
-              size="sm"
-              variant="danger-ghost"
-              icon="square"
+            <button
+              type="button"
+              className="cx-send-btn is-stop"
               aria-label="Stop the running turn"
               title="Stop the running turn"
               disabled={cancelling}
               onClick={onStop}
-            />
+            >
+              <i />
+            </button>
           ) : (
-            <Button
-              size="sm"
-              variant="primary"
-              icon="arrow-up"
+            <button
+              type="button"
+              className="cx-send-btn"
               aria-label="Send message"
               title="Send message"
               disabled={
@@ -1050,7 +1050,9 @@ function Composer({
                 (!draft.trim() && attachments.length === 0)
               }
               onClick={onSend}
-            />
+            >
+              <Ic name="arrow-up" size={16} />
+            </button>
           )}
         </span>
         </div>

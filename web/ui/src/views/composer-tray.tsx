@@ -5,10 +5,9 @@ import type { BackgroundJob } from "../api/jobs";
 import { Ic } from "../ui/icons";
 
 /* The composer tray (composer redesign 2026-11-25, FigCraft page "Composer
-   redesign"): a small framed tab docked on top of the composer. It says what
-   the agent is doing while a turn runs and carries the background task chip
-   (REQ-JBN-021). The chip opens the task panel in the same docked frame:
-   running jobs first, then ended ones, with logs in place and Stop. The job
+   redesign"): the background row at the top of the composer shell, styled
+   after the Workbench Claude chat tray (REQ-JBN-021). It opens into the job
+   list in place: running jobs first, then ended ones, with logs and Stop. The job
    list refreshes every 3 s while a job runs and whenever the session stream
    bumps refreshKey (REQ-JBN-022). */
 
@@ -53,35 +52,12 @@ function jobMeta(job: BackgroundJob): string {
   return "exited " + job.exit_code + (ago ? " · " + ago : "");
 }
 
-/* useElapsed ticks once a second while since is set, for the working line. */
-function useElapsed(since: number): string {
-  const [, setTick] = useState(0);
-  useEffect(() => {
-    if (!since) {
-      return undefined;
-    }
-    const timer = window.setInterval(() => setTick((value) => value + 1), 1000);
-    return () => window.clearInterval(timer);
-  }, [since]);
-  return since ? ageText(since) : "";
-}
-
-export interface TrayWorking {
-  /* Who is working, e.g. "Lana". */
-  who: string;
-  /* What it does now, e.g. "running bash" or "thinking". */
-  doing: string;
-  /* When the turn started (ms), for the elapsed time; 0 hides it. */
-  since: number;
-}
-
 export interface ComposerTrayProps {
-  /* The session whose jobs to show; "" shows only the working line. */
+  /* The session whose jobs to show; "" shows nothing. */
   sessionId: string;
   /* REQ-JBN-022: bumped by the session stream on a tool/result or a job
      notice, so a job started mid-visit appears without a reload. */
   refreshKey?: number;
-  working?: TrayWorking | null;
   /* The task panel can be opened from outside (the /tasks command). */
   open?: boolean;
   onOpenChange?: (open: boolean) => void;
@@ -90,7 +66,6 @@ export interface ComposerTrayProps {
 export function ComposerTray({
   sessionId,
   refreshKey = 0,
-  working = null,
   open: openProp,
   onOpenChange,
 }: ComposerTrayProps) {
@@ -101,7 +76,6 @@ export function ComposerTray({
   const [stopErrors, setStopErrors] = useState<Record<string, string>>({});
   const [loadError, setLoadError] = useState("");
   const open = openProp === undefined ? openState : openProp;
-  const elapsed = useElapsed(working ? working.since : 0);
 
   function setOpen(next: boolean) {
     if (openProp === undefined) {
@@ -215,41 +189,61 @@ export function ComposerTray({
     }
   }
 
-  /* With no turn running, the tray's right side names the newest running job. */
+  /* The head row, like the Workbench Claude chat tray (REQ-WC-062): what
+     runs, how many ended, a peek at the newest running command, and a
+     chevron. The open list keeps Logs and Stop per job. */
   const latest = rows.find((job) => job.status === "running") || null;
-  const chipLabel =
-    runningCount === 1 ? "1 background task" : runningCount + " background tasks";
+  const ended = jobs.length - runningCount;
+  const title = hasRunning
+    ? runningCount + (runningCount === 1 ? " background task" : " background tasks") + " running"
+    : "Background";
+  const expanded = open && Boolean(sessionId);
 
-  if (open && sessionId) {
-    return (
-      <section className="cx-tab cx-tasks" role="dialog" aria-label="Background tasks">
-        <div className="cx-tab-in">
-          <div className="cx-tasks-head">
-            <Ic name="square-terminal" size={15} className="cx-lav" />
-            <span className="cx-tasks-title">Background tasks</span>
-            {hasRunning ? (
-              <span className="cx-badge">
-                <span className="cx-badge-dot" aria-hidden="true" />
-                {runningCount + " running"}
-              </span>
-            ) : null}
-            <span className="cx-sp" />
-            {runningCount > 1 ? (
+  if (!sessionId || (jobs.length === 0 && !expanded)) {
+    /* A fetch error still surfaces a small notice so a broken endpoint is
+       not silent. */
+    return loadError ? (
+      <p className="cx-tray-error" role="alert">
+        {loadError}
+      </p>
+    ) : null;
+  }
+
+  return (
+    <div className={"cx-tray" + (expanded ? " is-open" : "")}>
+      <button
+        type="button"
+        className="cx-tray-head"
+        aria-expanded={expanded}
+        aria-label={expanded ? "Close background tasks" : title}
+        onClick={() => setOpen(!expanded)}
+      >
+        {hasRunning ? (
+          <Ic name="loader-circle" size={13} className="cx-spin cx-run" />
+        ) : (
+          <Ic name="layers" size={13} />
+        )}
+        <span className="cx-tray-title">{title}</span>
+        {ended ? <span className="cx-tray-sub">{ended + " done"}</span> : null}
+        {!expanded && latest ? (
+          <span className="cx-tray-peek" title={latest.command}>
+            {latest.command}
+          </span>
+        ) : null}
+        <span className="cx-sp" />
+        <Ic name={expanded ? "chevron-down" : "chevron-up"} size={13} />
+      </button>
+      {expanded ? (
+        <div className="cx-tray-list" role="list" aria-label="Background tasks">
+          {rows.length === 0 ? (
+            <p className="cx-tasks-empty">No background tasks in this session.</p>
+          ) : null}
+          {runningCount > 1 ? (
+            <div className="cx-tray-actions">
               <button type="button" className="cx-link" onClick={() => void stopAll()}>
                 Stop all
               </button>
-            ) : null}
-            <button
-              type="button"
-              className="cx-ibtn"
-              aria-label="Close background tasks"
-              onClick={() => setOpen(false)}
-            >
-              <Ic name="chevron-down" size={14} />
-            </button>
-          </div>
-          {rows.length === 0 ? (
-            <p className="cx-tasks-empty">No background tasks in this session.</p>
+            </div>
           ) : null}
           {rows.map((job, index) => {
             const logsId = "job-logs-" + job.id;
@@ -257,15 +251,16 @@ export function ComposerTray({
             const busy = stopping.includes(job.id);
             const icon = jobIcon(job);
             return (
-              <div key={job.id}>
-                {index === firstEnded ? <div className="cx-group">Ended</div> : null}
-                <div className={"cx-job" + (logsOpen ? " is-open" : "")}>
+              <div key={job.id} role="listitem">
+                {index === firstEnded && firstEnded > 0 ? <div className="cx-group">Ended</div> : null}
+                <div className={"cx-job" + (logsOpen ? " is-open" : "") + (job.status === "running" ? "" : " is-done")}>
                   <div className="cx-job-head">
                     <Ic
                       name={icon.name}
-                      size={15}
+                      size={13}
                       className={"cx-job-ico tone-" + icon.tone + (icon.tone === "running" ? " cx-spin" : "")}
                     />
+                    <Ic name="square-terminal" size={13} className="cx-job-kind" />
                     <span className="cx-job-text">
                       <span className="cx-job-cmd" title={job.command}>
                         {job.command}
@@ -279,7 +274,6 @@ export function ComposerTray({
                       aria-controls={logsId}
                       onClick={() => toggleLogs(job.id)}
                     >
-                      <Ic name="square-terminal" size={13} />
                       Logs
                     </button>
                     {job.status === "running" ? (
@@ -289,20 +283,14 @@ export function ComposerTray({
                         disabled={busy}
                         onClick={() => void stop(job.id)}
                       >
-                        <span className="cx-stop-sq" aria-hidden="true" />
                         {busy ? "Stopping…" : "Stop"}
                       </button>
                     ) : null}
                   </div>
                   {logsOpen ? (
-                    <>
-                      <pre className="cx-job-log" id={logsId}>
-                        {job.tail || "No output yet."}
-                      </pre>
-                      <div className="cx-job-logfoot">
-                        {"Last 4 000 characters" + (job.status === "running" ? " · live" : "")}
-                      </div>
-                    </>
+                    <pre className="cx-job-log" id={logsId}>
+                      {job.tail || "No output yet."}
+                    </pre>
                   ) : null}
                   {stopErrors[job.id] ? (
                     <p className="cx-job-error" role="alert">
@@ -314,56 +302,7 @@ export function ComposerTray({
             );
           })}
         </div>
-      </section>
-    );
-  }
-
-  if (!working && !hasRunning) {
-    /* A fetch error still surfaces a small notice so a broken endpoint is
-       not silent. */
-    return loadError ? (
-      <p className="cx-tray-error" role="alert">
-        {loadError}
-      </p>
-    ) : null;
-  }
-
-  return (
-    <section className="cx-tab" aria-label={working ? "Agent status" : "Background tasks"}>
-      <div className="cx-tab-in cx-tray">
-        {working ? (
-          <span className="cx-working" role="status">
-            <Ic name="loader-circle" size={14} className="cx-lav cx-spin" />
-            <span className="cx-working-who">{working.who + " is working"}</span>
-            {working.doing || elapsed ? (
-              <span className="cx-working-doing">
-                {[working.doing, elapsed].filter(Boolean).join(" · ")}
-              </span>
-            ) : null}
-          </span>
-        ) : null}
-        {working ? <span className="cx-sp" /> : null}
-        {hasRunning ? (
-          <button
-            type="button"
-            className="cx-chip"
-            aria-expanded={open}
-            onClick={() => setOpen(!open)}
-          >
-            <span className="cx-chip-dot" aria-hidden="true" />
-            <span className="cx-chip-text">{chipLabel}</span>
-            <Ic name="chevron-up" size={12} />
-          </button>
-        ) : null}
-        {!working && latest ? (
-          <>
-            <span className="cx-sp" />
-            <span className="cx-latest" title={latest.command}>
-              {latest.command + " · " + ageText(latest.started_at)}
-            </span>
-          </>
-        ) : null}
-      </div>
-    </section>
+      ) : null}
+    </div>
   );
 }

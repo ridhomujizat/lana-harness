@@ -1831,24 +1831,25 @@ export function RoomView({ room, initialDraft, variant = "page" }: RoomViewProps
               {canStop && !draft.trim() && attachmentDraft.items.length === 0 ? (
                 <button
                   type="button"
-                  className="cx-stop"
+                  className="cx-send-btn is-stop"
                   aria-label="Stop the running turn"
-                  title="Stop the running turn (esc)"
+                  title="Stop · Esc"
                   disabled={cancelling}
                   onClick={() => void stopTurn()}
                 >
-                  <span className="cx-stop-sq" aria-hidden="true" />
+                  <i />
                 </button>
               ) : (
-                <Button
-                  size="sm"
-                  variant="primary"
-                  icon="arrow-up"
+                <button
+                  type="button"
+                  className="cx-send-btn"
                   aria-label="Send message"
                   title="Send message"
                   disabled={sending || (!draft.trim() && attachmentDraft.items.length === 0)}
                   onClick={() => void sendMessage()}
-                />
+                >
+                  <Ic name="arrow-up" size={16} />
+                </button>
               )}
             </span>
           </div>

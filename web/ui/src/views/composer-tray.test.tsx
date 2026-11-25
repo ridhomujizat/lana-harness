@@ -39,10 +39,10 @@ describe("composer tray", () => {
     await waitFor(() => {
       expect(vi.mocked(listSessionJobs)).toHaveBeenCalledWith("s1");
     });
-    expect(container.querySelector(".cx-chip")).toBeNull();
+    expect(container.querySelector(".cx-tray")).toBeNull();
   });
 
-  it("hides the pill when only ended jobs remain", async () => {
+  it("shows a quiet Background row when only ended jobs remain", async () => {
     vi.mocked(listSessionJobs).mockResolvedValue([
       makeJob({ status: "exited", exit_code: 0, ended_at: Date.now() }),
     ]);
@@ -51,7 +51,9 @@ describe("composer tray", () => {
     await waitFor(() => {
       expect(vi.mocked(listSessionJobs)).toHaveBeenCalled();
     });
-    expect(container.querySelector(".cx-chip")).toBeNull();
+    expect(container.querySelector(".cx-run")).toBeNull();
+    expect(await screen.findByRole("button", { name: "Background" })).toBeTruthy();
+    expect(screen.getByText("1 done")).toBeTruthy();
   });
 
   it("shows a pulsing pill with the running count", async () => {
@@ -61,9 +63,9 @@ describe("composer tray", () => {
     ]);
 
     const { container } = render(<ComposerTray sessionId="s1" />);
-    expect(await screen.findByText("2 background tasks")).toBeTruthy();
-    expect(container.querySelector(".cx-chip-dot")).toBeTruthy();
-    expect(screen.getByRole("button", { name: "2 background tasks" })).toBeTruthy();
+    expect(await screen.findByText("2 background tasks running")).toBeTruthy();
+    expect(container.querySelector(".cx-run")).toBeTruthy();
+    expect(screen.getByRole("button", { name: "2 background tasks running" })).toBeTruthy();
   });
 
   it("lists the running job first, then ended jobs newest first", async () => {
@@ -75,10 +77,10 @@ describe("composer tray", () => {
     ]);
 
     const { container } = render(<ComposerTray sessionId="s1" />);
-    fireEvent.click(await screen.findByRole("button", { name: "1 background task" }));
+    fireEvent.click(await screen.findByRole("button", { name: "1 background task running" }));
 
     const commands = Array.from(
-      container.querySelectorAll(".cx-tasks .cx-job .cx-job-cmd")
+      container.querySelectorAll(".cx-tray-list .cx-job .cx-job-cmd")
     ).map((node) => node.textContent);
     expect(commands).toEqual(["cmd-run", "cmd-new", "cmd-old"]);
     expect(screen.getByText(/^exited 1/)).toBeTruthy();
@@ -91,7 +93,7 @@ describe("composer tray", () => {
     ]);
 
     render(<ComposerTray sessionId="s1" />);
-    fireEvent.click(await screen.findByRole("button", { name: "1 background task" }));
+    fireEvent.click(await screen.findByRole("button", { name: "1 background task running" }));
     const toggle = await screen.findByRole("button", { name: "Logs" });
     expect(toggle.getAttribute("aria-expanded")).toBe("false");
 
@@ -127,7 +129,7 @@ describe("composer tray", () => {
     );
 
     render(<ComposerTray sessionId="s1" />);
-    fireEvent.click(await screen.findByRole("button", { name: "2 background tasks" }));
+    fireEvent.click(await screen.findByRole("button", { name: "2 background tasks running" }));
     const stops = await screen.findAllByRole("button", { name: "Stop" });
     const firstStop = stops[0];
     expect(firstStop).toBeTruthy();
@@ -159,7 +161,7 @@ describe("composer tray", () => {
     );
 
     render(<ComposerTray sessionId="s1" />);
-    fireEvent.click(await screen.findByRole("button", { name: "1 background task" }));
+    fireEvent.click(await screen.findByRole("button", { name: "1 background task running" }));
     fireEvent.click(await screen.findByRole("button", { name: "Stop" }));
 
     const alert = await screen.findByRole("alert");
@@ -222,20 +224,6 @@ describe("composer tray", () => {
     expect(vi.mocked(listSessionJobs)).toHaveBeenCalledTimes(2);
   });
 
-  it("shows the working line while a turn runs, without jobs", async () => {
-    vi.mocked(listSessionJobs).mockResolvedValue([]);
-
-    render(
-      <ComposerTray
-        sessionId="s1"
-        working={{ who: "Lana", doing: "running bash", since: Date.now() - 12000 }}
-      />
-    );
-    expect(await screen.findByText("Lana is working")).toBeTruthy();
-    expect(screen.getByText(/^running bash · 1[23]s$/)).toBeTruthy();
-    expect(screen.queryByRole("button", { name: /background task/ })).toBeNull();
-  });
-
   it("opens the task panel from outside, even with only ended jobs", async () => {
     vi.mocked(listSessionJobs).mockResolvedValue([
       makeJob({ status: "killed", ended_at: Date.now() }),
@@ -244,7 +232,6 @@ describe("composer tray", () => {
 
     render(<ComposerTray sessionId="s1" open onOpenChange={onOpenChange} />);
     expect(await screen.findByText(/^stopped/)).toBeTruthy();
-    expect(screen.getByText("Ended")).toBeTruthy();
     fireEvent.click(screen.getByRole("button", { name: "Close background tasks" }));
     expect(onOpenChange).toHaveBeenCalledWith(false);
   });
