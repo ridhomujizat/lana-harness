@@ -274,6 +274,12 @@ func ClaudeConfigDir(home, name string, cfg core.ProviderConfig) string {
 	if dir == "" {
 		return filepath.Clean(filepath.Join(home, "claude", name))
 	}
+	return expandAccountDir(home, dir)
+}
+
+// expandAccountDir expands a leading $LANA_HOME (home) or ~ of an account
+// folder and takes a relative result from home.
+func expandAccountDir(home, dir string) string {
 	for _, prefix := range []string{"$LANA_HOME", "${LANA_HOME}"} {
 		if rest, ok := strings.CutPrefix(dir, prefix); ok && (rest == "" || rest[0] == '/') {
 			dir = home + rest
@@ -289,6 +295,68 @@ func ClaudeConfigDir(home, name string, cfg core.ProviderConfig) string {
 		dir = filepath.Join(home, dir)
 	}
 	return filepath.Clean(dir)
+}
+
+// AntigravityHomeDir returns the HOME of the Antigravity account name for a
+// turn (REQ-AGY-001): "" for the built-in account (the daemon's own HOME),
+// else home with a leading ~ or $LANA_HOME expanded, or
+// $LANA_HOME/antigravity/<name> when home is empty. A relative result is taken
+// from lanaHome. An empty lanaHome is $LANA_HOME, else ~/.lana.
+func AntigravityHomeDir(lanaHome, name string, cfg core.ProviderConfig) string {
+	if name == Antigravity || name == "" {
+		return ""
+	}
+	if lanaHome == "" {
+		lanaHome = defaultHome()
+	}
+	dir := strings.TrimSpace(cfg.Home)
+	if dir == "" {
+		return filepath.Clean(filepath.Join(lanaHome, "antigravity", name))
+	}
+	return expandAccountDir(lanaHome, dir)
+}
+
+// PoolAccounts is implemented by an LLM registry (the router) that knows the
+// subscription pools of the external runtimes (spec 75, REQ-PAF-001).
+type PoolAccounts interface {
+	// PoolAccounts returns the accounts of runtime ("claude-code" or
+	// "antigravity") a pooled address may use: enabled, pool not false,
+	// sorted by priority then name, the built-in account included unless it
+	// is left out.
+	PoolAccounts(runtime string) []string
+}
+
+// Pool returns the targets a turn on t tries in order (REQ-PAF-001). For a
+// pooled address (the built-in claude-code or antigravity provider) on a
+// registry that knows pools, it is one target per pooled account of that
+// runtime with t's model. A pinned account address, a target outside the
+// external runtimes, an empty pool, or a registry without pools returns
+// [t].
+func Pool(llm core.LLMRegistry, t core.LLMTarget) []core.LLMTarget {
+	if t.Provider != ClaudeCode && t.Provider != Antigravity {
+		return []core.LLMTarget{t}
+	}
+	p, ok := llm.(PoolAccounts)
+	if !ok {
+		return []core.LLMTarget{t}
+	}
+	accounts := p.PoolAccounts(t.Provider)
+	if len(accounts) == 0 {
+		return []core.LLMTarget{t}
+	}
+	out := make([]core.LLMTarget, 0, len(accounts))
+	seen := make(map[string]bool, len(accounts))
+	for _, name := range accounts {
+		if name == "" || seen[name] {
+			continue
+		}
+		seen[name] = true
+		out = append(out, core.LLMTarget{Provider: name, Model: t.Model})
+	}
+	if len(out) == 0 {
+		return []core.LLMTarget{t}
+	}
+	return out
 }
 
 // AntigravityHome returns the HOME of the Antigravity account name

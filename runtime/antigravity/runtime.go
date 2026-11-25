@@ -18,6 +18,7 @@ import (
 	"log/slog"
 	"os"
 	"os/exec"
+	"regexp"
 	"strings"
 	"sync"
 	"syscall"
@@ -100,6 +101,7 @@ const (
 	classNotInstalled = core.ErrorClassNotFound
 	classVersion      = "client"
 	classAuth         = "auth"
+	classQuota        = core.ErrorClassQuota
 	classRuntime      = "runtime"
 )
 
@@ -247,8 +249,10 @@ func (r *Runtime) RunTurn(ctx context.Context, turn core.RuntimeTurn) error {
 		}
 		if errors.Is(err, errBusy) {
 			content = true // not an early failure: another turn owns the session
+			return fail(classRuntime, err.Error())
 		}
-		return fail(classRuntime, err.Error())
+		c, msg := classifyFailure(account, err.Error())
+		return fail(c, msg)
 	}
 	ev, evClass := r.serveTurn(ctx, p, turn, tracked)
 	if evClass != "" {
@@ -608,15 +612,26 @@ func (r *Runtime) turnFailure(ctx context.Context, p *process, err error, turn c
 	if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) || ctx.Err() != nil {
 		return core.RuntimeEvent{Kind: core.RuntimeEnd, StopReason: core.RuntimeStopCancelled}, ""
 	}
-	if errors.Is(err, errProcessExited) {
-		return core.RuntimeEvent{Kind: core.RuntimeEnd, StopReason: core.RuntimeStopError, IsError: true, ErrorText: p.crashText()}, classRuntime
-	}
 	msg := err.Error()
-	if looksNotSignedIn(msg) {
-		msg = notSignedInMessage(accountName(turn.Config))
-		return core.RuntimeEvent{Kind: core.RuntimeEnd, StopReason: core.RuntimeStopError, IsError: true, ErrorText: msg}, classAuth
+	if errors.Is(err, errProcessExited) {
+		msg = p.crashText()
 	}
-	return core.RuntimeEvent{Kind: core.RuntimeEnd, StopReason: core.RuntimeStopError, IsError: true, ErrorText: msg}, classRuntime
+	class, msg := classifyFailure(accountName(turn.Config), msg)
+	return core.RuntimeEvent{Kind: core.RuntimeEnd, StopReason: core.RuntimeStopError, IsError: true, ErrorText: msg}, class
+}
+
+// classifyFailure returns the outcome class and the turn error of a failure
+// text: auth for an account that is not signed in (with lana's message),
+// quota for an exhausted quota or a rate limit (spec 75 REQ-PAF-001: both move
+// a pooled turn to the next account), else runtime.
+func classifyFailure(account, msg string) (string, string) {
+	switch {
+	case looksNotSignedIn(msg):
+		return classAuth, notSignedInMessage(account)
+	case looksQuota(msg):
+		return classQuota, msg
+	}
+	return classRuntime, msg
 }
 
 // handleLine maps one line of the turn: a session/update notification, or an
@@ -778,6 +793,25 @@ func looksNotSignedIn(text string) bool {
 		}
 	}
 	return false
+}
+
+// quotaMarkers are the lower-case texts of agy's quota, resource-exhausted,
+// and rate limit answers (JSON-RPC error messages and stderr lines).
+var quotaMarkers = []string{"quota", "resource exhausted", "resource_exhausted", "rate limit", "rate-limit", "ratelimit", "limit reached", "too many requests"}
+
+// http429Re matches an HTTP 429 status as a number of its own.
+var http429Re = regexp.MustCompile(`(^|[^0-9])429([^0-9]|$)`)
+
+// looksQuota reports whether an error text is agy's answer for an exhausted
+// quota or plan window, or a rate limit.
+func looksQuota(text string) bool {
+	t := strings.ToLower(text)
+	for _, s := range quotaMarkers {
+		if strings.Contains(t, s) {
+			return true
+		}
+	}
+	return http429Re.MatchString(t)
 }
 
 // clientVersion is the version lana reports in the ACP initialize handshake.

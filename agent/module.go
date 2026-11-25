@@ -72,9 +72,9 @@ func (m *Module) Install(b *core.Builder, cfg core.ModuleConfig) error {
 			if target, ok := llmcall.ParseTarget(fallback); ok {
 				provider = target.Provider
 			}
-			// ADR 0020, REQ-CCT-010: a Claude Code account has no router
-			// provider.
-			if llmcall.IsClaudeCodeProvider(config.Providers, provider) {
+			// ADR 0020, REQ-CCT-010, ADR 0022: a Claude Code or Antigravity
+			// account has no router provider.
+			if _, external := llmcall.ExternalRuntimeIn(config.Providers, provider); external {
 				continue
 			}
 			if _, ok := config.Providers[provider]; !ok {

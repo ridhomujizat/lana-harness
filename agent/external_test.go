@@ -563,9 +563,11 @@ func ownerText(t *testing.T, turn core.RuntimeTurn) string {
 }
 
 // isInjectedInputBlock reports whether a runtime input text block is one lana
-// injected: the <context> block or a reply quote.
+// injected: the <context> block, a reply quote, or the conversation block of
+// a new runtime session (REQ-PAF-002).
 func isInjectedInputBlock(text string) bool {
-	return strings.HasPrefix(text, "<context>") || strings.HasPrefix(text, replyQuoteBlockPrefix)
+	return strings.HasPrefix(text, "<context>") || strings.HasPrefix(text, replyQuoteBlockPrefix) ||
+		strings.HasPrefix(text, "Conversation so far")
 }
 
 // replyQuoteBlockPrefix opens the injected block of a reply.

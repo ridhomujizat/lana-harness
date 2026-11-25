@@ -285,6 +285,8 @@ func (r *Runtime) RunTurn(ctx context.Context, turn core.RuntimeTurn) error {
 		emit(ev)
 	}
 	class := classRuntime
+	// resetAt is when a rejected plan window resets (spec 75 REQ-PAF-004).
+	var resetAt time.Time
 	end := func(ev core.RuntimeEvent) error {
 		ev.Kind = core.RuntimeEnd
 		emit(ev)
@@ -292,7 +294,7 @@ func (r *Runtime) RunTurn(ctx context.Context, turn core.RuntimeTurn) error {
 			return nil
 		}
 		if !content {
-			return &EarlyError{Class: class, Message: ev.ErrorText}
+			return &EarlyError{Class: class, Message: ev.ErrorText, ResetAt: resetAt}
 		}
 		return &TurnError{Message: ev.ErrorText}
 	}
@@ -357,7 +359,7 @@ func (r *Runtime) RunTurn(ctx context.Context, turn core.RuntimeTurn) error {
 		}
 		return fail(classRuntime, err.Error())
 	}
-	ev, evClass := r.serveTurn(ctx, p, turn, tracked)
+	ev, evClass := r.serveTurn(ctx, p, turn, tracked, &resetAt)
 	if evClass != "" {
 		class = evClass
 	}
@@ -623,8 +625,9 @@ func (r *Runtime) onExit(p *process) {
 
 // serveTurn writes the user message and maps the stream until the turn's
 // result, a cancel, or the process exit. It returns the end event and, for a
-// failure, its outcome class ("" = runtime).
-func (r *Runtime) serveTurn(ctx context.Context, p *process, turn core.RuntimeTurn, emit func(core.RuntimeEvent)) (core.RuntimeEvent, string) {
+// failure, its outcome class ("" = runtime). For a rejected plan window it
+// sets *resetAt to the window's reset time when the event named one.
+func (r *Runtime) serveTurn(ctx context.Context, p *process, turn core.RuntimeTurn, emit func(core.RuntimeEvent), resetAt *time.Time) (core.RuntimeEvent, string) {
 	p.mu.Lock()
 	t := p.turn
 	p.mu.Unlock()
@@ -667,6 +670,7 @@ func (r *Runtime) serveTurn(ctx context.Context, p *process, turn core.RuntimeTu
 		case m.authFailed || ev.ErrorText == notLoggedInMessage:
 			return ev, classAuth
 		case m.rejected != "":
+			*resetAt = m.rejectedAt
 			return ev, classRateLimit
 		}
 		return ev, classRuntime
@@ -676,6 +680,7 @@ func (r *Runtime) serveTurn(ctx context.Context, p *process, turn core.RuntimeTu
 	// cannot reach the next one, which resumes the Claude session.
 	rejected := func() (core.RuntimeEvent, string) {
 		p.stop(0, r.opts.KillGrace)
+		*resetAt = m.rejectedAt
 		return core.RuntimeEvent{StopReason: core.RuntimeStopError, IsError: true, ErrorText: m.rejectedText()}, classRateLimit
 	}
 	handle := func(line []byte) *resultLine {

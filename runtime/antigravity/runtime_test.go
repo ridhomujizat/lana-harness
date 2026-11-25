@@ -751,3 +751,35 @@ func TestPermCall(t *testing.T) {
 		t.Fatalf("read no path rule = %q", rule)
 	}
 }
+
+// Spec 75 REQ-PAF-001: agy's quota answer before any output is an early
+// failure of class quota, so a pooled turn moves to the next account.
+func TestQuotaIsEarlyQuota(t *testing.T) {
+	h := newHarness(t, "acp_quota.jsonl", Options{})
+	_, err := h.run(context.Background(), h.turn("s1"))
+	var early *EarlyError
+	if !errors.As(err, &early) || early.Class != core.ErrorClassQuota || !strings.Contains(early.Message, "quota") {
+		t.Fatalf("err = %#v", err)
+	}
+}
+
+func TestClassifyFailure(t *testing.T) {
+	cases := []struct{ text, class string }{
+		{"Please sign in to use Antigravity", classAuth},
+		{"RESOURCE_EXHAUSTED: quota exceeded", classQuota},
+		{"Resource exhausted", classQuota},
+		{"rate limit exceeded, retry later", classQuota},
+		{"HTTP 429 Too Many Requests", classQuota},
+		{"Weekly limit reached", classQuota},
+		{"listen tcp 127.0.0.1:4290: bind failed", classRuntime},
+		{"session not found", classRuntime},
+	}
+	for _, c := range cases {
+		if got, _ := classifyFailure("agy-2", c.text); got != c.class {
+			t.Errorf("classifyFailure(%q) = %q, want %q", c.text, got, c.class)
+		}
+	}
+	if _, msg := classifyFailure("agy-2", "not signed in"); msg != "Antigravity account agy-2 is not signed in" {
+		t.Errorf("auth message = %q", msg)
+	}
+}
