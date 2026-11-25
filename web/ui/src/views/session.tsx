@@ -17,9 +17,11 @@ import type { Agent } from "../api/agents";
 import { getModels } from "../api/models";
 import { COMBOS_GROUP, getRouter } from "../api/router";
 import { groupClaudeChoices, useClaudeAccounts } from "./router/claude-code";
-import { CLAUDE_CODE_GROUP, isAntigravityGroup } from "./router/presets";
-import { ProviderLogo } from "./router/provider-logo";
-import type { RouterChoice } from "../api/router";
+import { CLAUDE_CODE_GROUP } from "./router/presets";
+import type { RouterChoice, RouterProvider } from "../api/router";
+import { choiceOptions } from "./agent-runtime";
+import { AGENT_DEFAULT_GROUP, CURRENT_GROUP, ModelPickerPanel } from "./model-picker";
+import type { ModelOption } from "./model-picker";
 import type { CatalogEffort, CatalogModel } from "../api/models";
 import { choiceLevels, cleanEfforts, effortName, keptEffort } from "./effort";
 import type { EffortLevels } from "./effort";
@@ -76,6 +78,7 @@ import {
   Input,
   Menu,
   Modal,
+  Popover,
 } from "../ui/gr8r";
 import { ApprovalCard, approvalResultWords } from "./approval";
 import type { ApprovalItem } from "./approval";
@@ -394,7 +397,9 @@ function ModelMenuContent({
   provider,
   models,
   choices,
+  routerOptions,
   onPick,
+  onEscape,
 }: {
   current: string;
   agentModel: string;
@@ -403,11 +408,14 @@ function ModelMenuContent({
   /* Spec 37 (REQ-RTR-018): the router choices, combos first. When they are
      known they replace the one-provider catalog list. */
   choices: RouterChoice[];
+  /* The same choices as model picker options, with provider logos. */
+  routerOptions: ModelOption[];
   onPick: (value: string) => void;
+  onEscape: () => void;
 }) {
   const routed = choices.length > 0;
   const [custom, setCustom] = useState("");
-  const options: { value: string; label: string; meta: string }[] = [];
+  const options: ModelOption[] = [];
   const currentId = shortModel(current);
   const currentInCatalog = routed
     ? choices.some((choice) => choice.value === current)
@@ -416,15 +424,31 @@ function ModelMenuContent({
     options.push({
       value: current,
       label: shortModel(current),
-      meta: "Current model",
+      group: CURRENT_GROUP,
+      meta: current,
     });
   }
   if (agentModel && agentModel !== current) {
     options.push({
       value: agentModel,
       label: shortModel(agentModel),
-      meta: "Agent default",
+      group: AGENT_DEFAULT_GROUP,
+      meta: agentModel,
     });
+  }
+  if (routed) {
+    options.push(...routerOptions);
+  } else {
+    for (const model of models) {
+      const value = provider ? provider + ":" + model.id : model.id;
+      options.push({
+        value,
+        label: model.name,
+        group: provider || "Models",
+        meta: value,
+        tag: model.legacy ? "Legacy" : undefined,
+      });
+    }
   }
 
   function submitCustom(event: FormEvent<HTMLFormElement>) {
@@ -436,143 +460,30 @@ function ModelMenuContent({
   }
 
   return (
-    <>
-      <p className="mh">Model</p>
-      {options.length === 0 && models.length === 0 ? (
-        <p className="mi-empty">No model is set yet.</p>
-      ) : null}
-      {options.map((option) => (
-        <button
-          key={option.value}
-          type="button"
-          role="menuitemradio"
-          className="mi"
-          aria-checked={option.value === current}
-          onClick={() => onPick(option.value)}
-        >
-          <span className="mi-text">
-            <span className="mi-name">{option.label}</span>
-            <span className="mi-meta">
-              {option.meta + " · " + option.value}
-            </span>
-          </span>
-          {option.value === current ? (
-            <span className="ck">
-              <Ic name="check" size={14} />
-            </span>
-          ) : null}
-        </button>
-      ))}
-      {routed ? <RouterChoiceItems choices={choices} current={current} onPick={onPick} /> : null}
-      {(routed ? [] : models).map((model) => {
-        const value = provider ? provider + ":" + model.id : model.id;
-        return (
-          <button
-            key={"catalog-" + model.id}
-            type="button"
-            role="menuitemradio"
-            className="mi"
-            aria-checked={value === current}
-            onClick={() => onPick(value)}
-          >
-            <span className="mi-text">
-              <span className="mi-name">
-                {model.name}
-                {model.legacy ? <span className="tag">Legacy</span> : null}
-              </span>
-              <span className="mi-meta">{value}</span>
-            </span>
-            {value === current ? (
-              <span className="ck">
-                <Ic name="check" size={14} />
-              </span>
-            ) : null}
-          </button>
-        );
-      })}
-      <form className="mi-custom" onSubmit={submitCustom}>
-        <Input
-          type="text"
-          className="mi-custom-input"
-          aria-label={routed ? "Custom model: a combo, provider/model, or provider:model" : "Custom model as provider:model"}
-          placeholder={routed ? "combo or provider/model" : "provider:model"}
-          value={custom}
-          onChange={(event) => setCustom(event.target.value)}
-        />
-        <Button type="submit" size="sm" disabled={!custom.trim()}>
-          Set
-        </Button>
-      </form>
-    </>
-  );
-}
-
-/* The router choices grouped as the agent picker shows them: combos, then
-   each provider's models under its name. */
-function RouterChoiceItems({
-  choices,
-  current,
-  onPick,
-}: {
-  choices: RouterChoice[];
-  current: string;
-  onPick: (value: string) => void;
-}) {
-  const groups: string[] = [];
-  if (choices.some((choice) => choice.group === COMBOS_GROUP)) {
-    groups.push(COMBOS_GROUP);
-  }
-  for (const choice of choices) {
-    if (!groups.includes(choice.group)) {
-      groups.push(choice.group);
-    }
-  }
-  return (
-    <>
-      {groups.map((group) => (
-        <div key={group} role="group" aria-label={group}>
-          <p className="mh" aria-hidden="true">
-            {group === CLAUDE_CODE_GROUP || group.startsWith(CLAUDE_CODE_GROUP + " · ") ? (
-              <span className="mh-logo">
-                <ProviderLogo logo="claude" name="Claude Code" size={14} />
-                {group}
-              </span>
-            ) : isAntigravityGroup(group) ? (
-              <span className="mh-logo">
-                <ProviderLogo logo="antigravity" name="Antigravity" size={14} />
-                {group}
-              </span>
-            ) : (
-              group
-            )}
-          </p>
-          {choices
-            .filter((choice) => choice.group === group)
-            .map((choice) => (
-              <button
-                key={choice.value}
-                type="button"
-                role="menuitemradio"
-                className="mi"
-                aria-checked={choice.value === current}
-                onClick={() => onPick(choice.value)}
-              >
-                <span className="mi-text">
-                  <span className="mi-name">{choice.label || choice.value}</span>
-                  {choice.label && choice.label !== choice.value ? (
-                    <span className="mi-meta">{choice.value}</span>
-                  ) : null}
-                </span>
-                {choice.value === current ? (
-                  <span className="ck">
-                    <Ic name="check" size={14} />
-                  </span>
-                ) : null}
-              </button>
-            ))}
-        </div>
-      ))}
-    </>
+    <ModelPickerPanel
+      options={options}
+      value={current}
+      onPick={onPick}
+      onEscape={onEscape}
+      footer={
+        <>
+          {options.length === 0 ? <p className="mi-empty">No model is set yet.</p> : null}
+          <form className="mi-custom" onSubmit={submitCustom}>
+            <Input
+              type="text"
+              className="mi-custom-input"
+              aria-label={routed ? "Custom model: a combo, provider/model, or provider:model" : "Custom model as provider:model"}
+              placeholder={routed ? "combo or provider/model" : "provider:model"}
+              value={custom}
+              onChange={(event) => setCustom(event.target.value)}
+            />
+            <Button type="submit" size="sm" disabled={!custom.trim()}>
+              Set
+            </Button>
+          </form>
+        </>
+      }
+    />
   );
 }
 
@@ -802,6 +713,7 @@ function Composer({
     efforts: CatalogEffort[];
   }>({ provider: "", models: [], efforts: [] });
   const [choices, setChoices] = useState<RouterChoice[]>([]);
+  const [routerProviders, setRouterProviders] = useState<RouterProvider[]>([]);
   const plusRef = useRef<HTMLSpanElement>(null);
   const modelRef = useRef<HTMLSpanElement>(null);
   const thinkingRef = useRef<HTMLSpanElement>(null);
@@ -844,6 +756,10 @@ function Composer({
     () => groupClaudeChoices(choices, null, claudeAccounts),
     [choices, claudeAccounts]
   );
+  const routerOptions = useMemo(
+    () => choiceOptions(choices, routerProviders, claudeAccounts),
+    [choices, routerProviders, claudeAccounts]
+  );
 
   /* Spec 37: the session model menu offers the router choices. */
   useEffect(() => {
@@ -852,6 +768,7 @@ function Composer({
       .then((data) => {
         if (!cancelled) {
           setChoices(Array.isArray(data.choices) ? data.choices : []);
+          setRouterProviders(Array.isArray(data.providers) ? data.providers : []);
         }
       })
       .catch(() => {});
@@ -1194,7 +1111,7 @@ function Composer({
                     variant="ghost"
                     iconRight="chevron-down"
                     aria-label={"Model: " + (modelValue || "not set")}
-                    aria-haspopup="menu"
+                    aria-haspopup="dialog"
                     aria-expanded={menu === "model"}
                     title={modelValue || "No model set"}
                     disabled={busySession}
@@ -1202,10 +1119,12 @@ function Composer({
                   >
                     {shortModel(modelValue) || "Model"}
                   </Button>
-                  <Menu
+                  <Popover
                     anchorRef={modelRef}
                     open={menu === "model"}
                     onClose={() => closeMenu("model")}
+                    role="dialog"
+                    className="mp-pop"
                   >
                     <ModelMenuContent
                       current={modelValue}
@@ -1213,9 +1132,11 @@ function Composer({
                       provider={modelProvider}
                       models={catalog}
                       choices={menuChoices}
+                      routerOptions={routerOptions}
                       onPick={pickModel}
+                      onEscape={() => closeMenu("model")}
                     />
-                  </Menu>
+                  </Popover>
                 </>
               )}
             </span>

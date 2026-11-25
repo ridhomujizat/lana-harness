@@ -60,7 +60,6 @@ import {
   ErrorState,
   Input,
   Radio,
-  Select,
   Skeleton,
   Tabs,
   Toggle,
@@ -68,7 +67,8 @@ import {
 import { AgentAvatar, AgentAvatarStack } from "./agent-avatar";
 import { GenerateAvatarButton } from "./avatar-dialog";
 import type { AvatarSavedResult } from "./avatar-dialog";
-import type { SelectOption } from "../ui/gr8r";
+import { ModelPicker } from "./model-picker";
+import type { ModelOption } from "./model-picker";
 
 /* REQ-WEB-047: the agent detail header, the seven-tab bar, and the General
    tab. The other tabs show a placeholder until their slices land (T-030). */
@@ -1304,7 +1304,7 @@ export function AgentDetailPage({ name, tab }: AgentDetailPageProps) {
     : form
       ? form.model
       : "";
-  const modelOptions: SelectOption[] = [
+  const modelOptions: ModelOption[] = [
     ...(form && !form.model && !legacy ? [{ value: "", label: "Not set" }] : []),
     ...(legacy && form
       ? [
@@ -1319,7 +1319,7 @@ export function AgentDetailPage({ name, tab }: AgentDetailPageProps) {
       ? [{ value: form.model, label: form.model, group: "Current" }]
       : []),
     ...choiceOptions(choices, page ? page.providers : undefined, accounts),
-    { value: OTHER_MODEL, label: "Other…" },
+    { value: OTHER_MODEL, label: "Other…", sticky: true },
   ];
   const modelValue = legacy
     ? LEGACY_MODEL
@@ -1642,7 +1642,7 @@ export function AgentDetailPage({ name, tab }: AgentDetailPageProps) {
                   </div>
                 </div>
                 <div className="agent-ctl">
-                  <Select
+                  <ModelPicker
                     id="agent-model-select"
                     aria-label="Model"
                     value={modelValue}

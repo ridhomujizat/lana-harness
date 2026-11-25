@@ -11,10 +11,11 @@ import {
   IconButton,
   Input,
   Modal,
-  Select,
   Textarea,
 } from "../../ui/gr8r";
-import type { SelectOption } from "../../ui/gr8r";
+import { ModelPicker } from "../model-picker";
+import type { ModelOption } from "../model-picker";
+import { effortHint } from "../model-picker";
 import { Ic } from "../../ui/icons";
 import { Alert, StatusLine } from "../settings-pages";
 import { UsedBy } from "./providers";
@@ -70,7 +71,7 @@ function asIssues(details: unknown[]): ValidationIssue[] {
 interface ComboDialogProps {
   combo: RouterCombo | null;
   version: string;
-  addresses: SelectOption[];
+  addresses: ModelOption[];
   providers?: Record<string, RouterProvider>;
   /* The Claude Code account names, for the several-accounts note
      (REQ-CCT-010). */
@@ -319,7 +320,7 @@ export function ComboDialog({
             </ol>
           )}
           <div className="rt-combo-add">
-            <Select
+            <ModelPicker
               aria-label="Model to add"
               placeholder={available.length ? "Pick a model" : "No more models"}
               options={available}
@@ -418,11 +419,9 @@ export function RouterCombos() {
         .filter((choice) => choice.group !== COMBOS_GROUP)
         .map((choice) => ({
           value: choice.value,
-          label:
-            choice.label && choice.label !== choice.value
-              ? choice.label + " (" + choice.value + ")"
-              : choice.value,
+          label: choice.label || choice.value,
           group: choice.group,
+          hint: effortHint(choice.efforts),
           icon: isClaudeChoice(choice, claudeNames) ? (
             <ProviderLogo logo="claude" name="Claude Code" size={16} />
           ) : isAntigravityGroup(choice.group) ? (

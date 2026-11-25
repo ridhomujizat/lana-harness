@@ -18,6 +18,8 @@ import {
 } from "./agent-common";
 import { ClaudeCodeNote, choiceOptions } from "./agent-runtime";
 import { EffortControl } from "./effort-control";
+import { ModelPicker } from "./model-picker";
+import type { ModelOption } from "./model-picker";
 import { choiceLevels, effortChoice, keptEffort } from "./effort";
 import {
   ClaudeCodeBadge,
@@ -186,12 +188,12 @@ export function CreateAgentDialog({
     effortChoice(model, choices, router ? router.combos : null),
     claudeAccount !== ""
   );
-  const modelOptions = useMemo(() => {
+  const modelOptions = useMemo((): ModelOption[] => {
     const options = choiceOptions(choices, router ? router.providers : undefined, accounts);
     const known = !model || options.some((option) => option.value === model);
     return [
       { value: "", label: "Same as the default agent" },
-      ...(known ? [] : [{ value: model, label: model }]),
+      ...(known ? [] : [{ value: model, label: model, group: "Current" }]),
       ...options,
     ];
   }, [choices, router, accounts, model]);
@@ -337,7 +339,7 @@ export function CreateAgentDialog({
           <label className="field-label" htmlFor="create-agent-model">
             Model
           </label>
-          <Select
+          <ModelPicker
             id="create-agent-model"
             aria-label="Model"
             value={model}

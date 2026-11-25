@@ -1,6 +1,5 @@
 import type { ClaudeAccount, RouterChoice, RouterProvider } from "../api/router";
 import { COMBOS_GROUP } from "../api/router";
-import type { SelectOption } from "../ui/gr8r";
 import { Ic } from "../ui/icons";
 import { ProviderLogo, ProviderMark, providerIndex } from "./router/provider-logo";
 import {
@@ -11,13 +10,15 @@ import {
   isClaudeChoice,
 } from "./router/claude-code";
 import { isAntigravityGroup } from "./router/presets";
+import { effortHint } from "./model-picker";
+import type { ModelOption } from "./model-picker";
 
 /* The router model options of spec 37 (REQ-RTR-018) shared by the agent
    forms, and the Claude Code note of spec 39 (REQ-CCT-009). There is no
    engine choice: every agent is a lana agent, and a Claude Code model runs
    its turns in Claude Code. */
 
-/* Router choices as Select options: combos first, then the models of each
+/* Router choices as model picker options: combos first, then the models of each
    provider under its name (AC-RTR-024), and Claude Code models under one
    group per account with the Claude logo (REQ-CCT-009), and Antigravity
    models under their groups with the Antigravity logo (API-AGY-033). With the provider
@@ -26,7 +27,7 @@ export function choiceOptions(
   choices: RouterChoice[],
   providers?: RouterProvider[],
   accounts?: ClaudeAccount[] | null
-): SelectOption[] {
+): ModelOption[] {
   const index = providers ? providerIndex(providers) : null;
   const names = claudeAccountNames(choices, providers, accounts);
   const grouped = groupClaudeChoices(choices, providers, accounts);
@@ -44,6 +45,7 @@ export function choiceOptions(
       value: choice.value,
       label: choice.label || choice.value,
       group: choice.group === COMBOS_GROUP ? "Combos" : choice.group,
+      hint: effortHint(choice.efforts),
       icon: claude ? (
         <ProviderLogo logo="claude" name="Claude Code" size={16} />
       ) : isAntigravityGroup(choice.group) ? (
