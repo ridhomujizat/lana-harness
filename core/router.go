@@ -46,4 +46,8 @@ const (
 	// ErrorClassNotFound is an HTTP 404 from a provider: the model or the
 	// endpoint does not exist. The router moves to the next target.
 	ErrorClassNotFound = "not_found"
+	// ErrorClassQuota is an exhausted balance, credit, or plan quota (HTTP
+	// 402, "insufficient balance", an agy quota error). The router and the
+	// subscription pools move to the next key or account (spec 75).
+	ErrorClassQuota = "quota"
 )

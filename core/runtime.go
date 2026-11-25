@@ -76,9 +76,13 @@ type RuntimeModelLister interface {
 // shown, so the caller may run the turn on another target.
 type RuntimeEarlyError struct {
 	// Class is the router outcome class of the failure, for example "auth",
-	// "rate_limit", "not_found", "missing_secret", "client", or "runtime".
+	// "rate_limit", "quota", "not_found", "missing_secret", "client", or
+	// "runtime".
 	Class   string
 	Message string
+	// ResetAt is when the exhausted window or quota resets, when the runtime
+	// knows it (spec 75 REQ-PAF-004); zero otherwise.
+	ResetAt time.Time
 }
 
 func (e *RuntimeEarlyError) Error() string { return e.Message }
