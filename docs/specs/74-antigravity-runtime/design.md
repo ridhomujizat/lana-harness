@@ -180,7 +180,7 @@ second runtime beside Claude Code, and leave every Claude Code behavior unchange
 
 - agy's `_meta` extensions and `/usage` JSON are not a public contract; minimum version 1.5.17 and the
   fixtures catch drift.
-- How agy names MCP tools in `tool_call.name` is not recorded yet (MCP was empty in the fixtures); the
-  live test records it and the tool note is adjusted.
+- agy 1.5.17 names lana's MCP tools `mcp_lana_<tool>` (recorded live 2026-11-26); `mcpToolName` accepts
+  it next to Claude's `mcp__lana__<tool>`.
 - A named account's shell commands run with another `HOME`; git over SSH and `gh` work through the
   links, Keychain-backed helpers do not (ADR 0022).
