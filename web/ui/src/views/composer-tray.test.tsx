@@ -3,7 +3,7 @@ import { act, fireEvent, render, screen, waitFor } from "@testing-library/react"
 import { ApiError } from "../api/client";
 import { listSessionJobs, stopSessionJob } from "../api/jobs";
 import type { BackgroundJob } from "../api/jobs";
-import { JobsPill } from "./jobs-pill";
+import { ComposerTray } from "./composer-tray";
 
 /* REQ-JBN-021, REQ-JBN-022: the pill talks to the jobs API only, so the
    module is mocked and the component is rendered on its own. */
@@ -31,15 +31,15 @@ afterEach(() => {
   vi.clearAllMocks();
 });
 
-describe("jobs pill", () => {
+describe("composer tray", () => {
   it("renders nothing with zero jobs", async () => {
     vi.mocked(listSessionJobs).mockResolvedValue([]);
 
-    const { container } = render(<JobsPill sessionId="s1" />);
+    const { container } = render(<ComposerTray sessionId="s1" />);
     await waitFor(() => {
       expect(vi.mocked(listSessionJobs)).toHaveBeenCalledWith("s1");
     });
-    expect(container.querySelector(".jobs-pill")).toBeNull();
+    expect(container.querySelector(".cx-chip")).toBeNull();
   });
 
   it("hides the pill when only ended jobs remain", async () => {
@@ -47,11 +47,11 @@ describe("jobs pill", () => {
       makeJob({ status: "exited", exit_code: 0, ended_at: Date.now() }),
     ]);
 
-    const { container } = render(<JobsPill sessionId="s1" />);
+    const { container } = render(<ComposerTray sessionId="s1" />);
     await waitFor(() => {
       expect(vi.mocked(listSessionJobs)).toHaveBeenCalled();
     });
-    expect(container.querySelector(".jobs-pill")).toBeNull();
+    expect(container.querySelector(".cx-chip")).toBeNull();
   });
 
   it("shows a pulsing pill with the running count", async () => {
@@ -60,9 +60,9 @@ describe("jobs pill", () => {
       makeJob({ id: "bash-2" }),
     ]);
 
-    const { container } = render(<JobsPill sessionId="s1" />);
+    const { container } = render(<ComposerTray sessionId="s1" />);
     expect(await screen.findByText("2 background tasks")).toBeTruthy();
-    expect(container.querySelector(".jobs-pill-dot")).toBeTruthy();
+    expect(container.querySelector(".cx-chip-dot")).toBeTruthy();
     expect(screen.getByRole("button", { name: "2 background tasks" })).toBeTruthy();
   });
 
@@ -74,15 +74,15 @@ describe("jobs pill", () => {
       makeJob({ id: "new", command: "cmd-new", status: "exited", exit_code: 1, started_at: now - 300000 }),
     ]);
 
-    const { container } = render(<JobsPill sessionId="s1" />);
+    const { container } = render(<ComposerTray sessionId="s1" />);
     fireEvent.click(await screen.findByRole("button", { name: "1 background task" }));
 
     const commands = Array.from(
-      container.querySelectorAll(".jobs-panel .job-row .job-command")
+      container.querySelectorAll(".cx-tasks .cx-job .cx-job-cmd")
     ).map((node) => node.textContent);
     expect(commands).toEqual(["cmd-run", "cmd-new", "cmd-old"]);
-    expect(screen.getByText("exited with code 1")).toBeTruthy();
-    expect(screen.getByText("exited with code 0")).toBeTruthy();
+    expect(screen.getByText(/^exited 1/)).toBeTruthy();
+    expect(screen.getByText(/^exited 0/)).toBeTruthy();
   });
 
   it("shows the tail in a pre when Logs is toggled", async () => {
@@ -90,7 +90,7 @@ describe("jobs pill", () => {
       makeJob({ tail: "hello\nworld" }),
     ]);
 
-    render(<JobsPill sessionId="s1" />);
+    render(<ComposerTray sessionId="s1" />);
     fireEvent.click(await screen.findByRole("button", { name: "1 background task" }));
     const toggle = await screen.findByRole("button", { name: "Logs" });
     expect(toggle.getAttribute("aria-expanded")).toBe("false");
@@ -107,7 +107,7 @@ describe("jobs pill", () => {
       new ApiError(500, "internal_error", "boom")
     );
 
-    render(<JobsPill sessionId="s1" />);
+    render(<ComposerTray sessionId="s1" />);
     const alert = await screen.findByRole("alert");
     expect(alert.textContent).toBe("boom");
   });
@@ -126,7 +126,7 @@ describe("jobs pill", () => {
         })
     );
 
-    render(<JobsPill sessionId="s1" />);
+    render(<ComposerTray sessionId="s1" />);
     fireEvent.click(await screen.findByRole("button", { name: "2 background tasks" }));
     const stops = await screen.findAllByRole("button", { name: "Stop" });
     const firstStop = stops[0];
@@ -149,7 +149,7 @@ describe("jobs pill", () => {
     });
     /* The other job still runs, so the pill stays and one Stop remains. */
     expect(screen.getAllByRole("button", { name: "Stop" })).toHaveLength(1);
-    expect(screen.getByText("killed")).toBeTruthy();
+    expect(screen.getByText(/^stopped/)).toBeTruthy();
   });
 
   it("shows a stop error in the row", async () => {
@@ -158,7 +158,7 @@ describe("jobs pill", () => {
       new ApiError(500, "internal_error", "boom")
     );
 
-    render(<JobsPill sessionId="s1" />);
+    render(<ComposerTray sessionId="s1" />);
     fireEvent.click(await screen.findByRole("button", { name: "1 background task" }));
     fireEvent.click(await screen.findByRole("button", { name: "Stop" }));
 
@@ -173,7 +173,7 @@ describe("jobs pill", () => {
       makeJob({ status: "exited", exit_code: 0, ended_at: Date.now() }),
     ]);
 
-    render(<JobsPill sessionId="s1" />);
+    render(<ComposerTray sessionId="s1" />);
     await act(async () => {});
     expect(vi.mocked(listSessionJobs)).toHaveBeenCalledTimes(1);
 
@@ -191,7 +191,7 @@ describe("jobs pill", () => {
         makeJob({ status: "exited", exit_code: 0, ended_at: Date.now() }),
       ]);
 
-    render(<JobsPill sessionId="s1" />);
+    render(<ComposerTray sessionId="s1" />);
     await act(async () => {});
     expect(vi.mocked(listSessionJobs)).toHaveBeenCalledTimes(1);
 
@@ -212,13 +212,40 @@ describe("jobs pill", () => {
     vi.useFakeTimers();
     vi.mocked(listSessionJobs).mockResolvedValue([makeJob()]);
 
-    const { rerender } = render(<JobsPill sessionId="s1" refreshKey={0} />);
+    const { rerender } = render(<ComposerTray sessionId="s1" refreshKey={0} />);
     await act(async () => {});
     expect(vi.mocked(listSessionJobs)).toHaveBeenCalledTimes(1);
 
     await act(async () => {
-      rerender(<JobsPill sessionId="s1" refreshKey={1} />);
+      rerender(<ComposerTray sessionId="s1" refreshKey={1} />);
     });
     expect(vi.mocked(listSessionJobs)).toHaveBeenCalledTimes(2);
+  });
+
+  it("shows the working line while a turn runs, without jobs", async () => {
+    vi.mocked(listSessionJobs).mockResolvedValue([]);
+
+    render(
+      <ComposerTray
+        sessionId="s1"
+        working={{ who: "Lana", doing: "running bash", since: Date.now() - 12000 }}
+      />
+    );
+    expect(await screen.findByText("Lana is working")).toBeTruthy();
+    expect(screen.getByText(/^running bash · 1[23]s$/)).toBeTruthy();
+    expect(screen.queryByRole("button", { name: /background task/ })).toBeNull();
+  });
+
+  it("opens the task panel from outside, even with only ended jobs", async () => {
+    vi.mocked(listSessionJobs).mockResolvedValue([
+      makeJob({ status: "killed", ended_at: Date.now() }),
+    ]);
+    const onOpenChange = vi.fn();
+
+    render(<ComposerTray sessionId="s1" open onOpenChange={onOpenChange} />);
+    expect(await screen.findByText(/^stopped/)).toBeTruthy();
+    expect(screen.getByText("Ended")).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "Close background tasks" }));
+    expect(onOpenChange).toHaveBeenCalledWith(false);
   });
 });

@@ -428,7 +428,7 @@ describe("Live turn (AC-ROOM-006)", () => {
       handlers?.onFrame?.({ kind: "tool_call", name: "bash", call_id: "c1", turn_id: "t1" });
     });
 
-    expect(await screen.findByText(/running bash/)).toBeTruthy();
+    expect((await screen.findAllByText(/running bash/)).length).toBeGreaterThan(0);
     /* An agent room shows the agent's avatar before the typing dots, in the
        running turn's foot (or the live row until that turn appears). */
     const row = document.querySelector(".turn-foot-live, .room-live.room-live-agent");

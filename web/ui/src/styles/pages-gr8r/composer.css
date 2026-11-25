@@ -1,0 +1,733 @@
+/* Composer redesign (owner 2026-11-25, FigCraft page "Composer redesign").
+
+   The composer is a card inside a thick frame made of padding (a bezel), not
+   a stroke. A smaller framed tab — the tray — docks on top of it: it says what
+   the agent is doing and carries the background task chip, and it opens into
+   the task panel in the same frame. Corners are small (card 4, frame 7) and
+   the shadow is barely there. While the composer has focus or a turn runs,
+   both frames turn Lana violet. */
+
+.cx {
+  --cx-pad: 3px;
+  --cx-r: 4px;
+  --cx-frame: color-mix(in srgb, var(--text) 9%, var(--surface));
+  --cx-live: color-mix(in srgb, var(--bg-brand-solid-hover, var(--accent)) 55%, var(--cx-frame));
+  --cx-card: var(--surface);
+  --cx-lav: color-mix(in srgb, var(--bg-brand-solid-hover, var(--accent)) 55%, var(--text));
+  --cx-lav-soft: color-mix(in srgb, var(--bg-brand-solid-hover, var(--accent)) 22%, transparent);
+  --cx-lav-line: color-mix(in srgb, var(--bg-brand-solid-hover, var(--accent)) 55%, transparent);
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+/* ---- frames ---------------------------------------------------- */
+
+.cx-bezel {
+  padding: var(--cx-pad);
+  border-radius: calc(var(--cx-r) + var(--cx-pad));
+  background: var(--cx-frame);
+  box-shadow: 0 4px 12px -8px rgba(0, 0, 0, 0.12);
+  transition: background var(--dur, 160ms) var(--ease, ease);
+}
+
+.cx-tab {
+  margin: 0 14px;
+  padding: var(--cx-pad) var(--cx-pad) 0;
+  border-radius: calc(var(--cx-r) + var(--cx-pad)) calc(var(--cx-r) + var(--cx-pad)) 0 0;
+  background: var(--cx-frame);
+  transition: background var(--dur, 160ms) var(--ease, ease);
+}
+
+.cx-tab-in {
+  border-radius: calc(var(--cx-r) - 1px) calc(var(--cx-r) - 1px) 0 0;
+  background: var(--cx-card);
+}
+
+.cx:focus-within .cx-bezel,
+.cx:focus-within .cx-tab,
+.cx.is-live .cx-bezel,
+.cx.is-live .cx-tab {
+  background: var(--cx-live);
+}
+
+/* The card: the old .cbox / composer box loses its own stroke, ring and big
+   radius inside the frame. */
+.cx-bezel > .cbox,
+.cx .cx-bezel > .cbox:focus-within {
+  position: relative;
+  gap: 10px;
+  padding: 12px 12px 8px 14px;
+  border: 0;
+  border-radius: var(--cx-r);
+  background: var(--cx-card);
+  box-shadow: none;
+}
+
+.cx-bezel > .cbox textarea {
+  padding-right: 0;
+  font-size: 14.5px;
+  line-height: 1.55;
+}
+
+/* ---- tray ------------------------------------------------------ */
+
+.cx-tray {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-height: 34px;
+  padding: 5px 6px 5px 10px;
+}
+
+.cx-working {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  font-size: 12.5px;
+  white-space: nowrap;
+}
+
+.cx-working-who {
+  color: var(--text);
+  font-weight: 500;
+}
+
+.cx-working-doing {
+  overflow: hidden;
+  color: var(--text-3);
+  text-overflow: ellipsis;
+}
+
+.cx-sp {
+  flex: 1 1 auto;
+}
+
+.cx-lav {
+  color: var(--cx-lav);
+}
+
+.cx-spin {
+  animation: cx-spin 1s linear infinite;
+}
+
+@keyframes cx-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+.cx-chip {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  gap: 6px;
+  height: 24px;
+  min-height: 0;
+  padding: 0 8px 0 7px;
+  border: 1px solid var(--cx-lav-line);
+  border-radius: 4px;
+  background: var(--cx-lav-soft);
+  color: var(--cx-lav);
+  font: inherit;
+  font-size: 12px;
+  font-weight: 500;
+  cursor: pointer;
+}
+
+.cx-chip:hover {
+  background: color-mix(in srgb, var(--bg-brand-solid-hover, var(--accent)) 32%, transparent);
+}
+
+.cx-chip-dot,
+.cx-badge-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--cx-lav);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--cx-lav) 25%, transparent);
+  animation: cx-pulse 1.6s ease-in-out infinite;
+}
+
+@keyframes cx-pulse {
+  50% {
+    opacity: 0.45;
+  }
+}
+
+.cx-latest {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--text-4);
+  font-family: var(--font-mono, ui-monospace, monospace);
+  font-size: 11.5px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.cx-tray-error {
+  margin: 0 14px 6px;
+  color: var(--red);
+  font-size: var(--fs-xs);
+}
+
+/* ---- task panel ------------------------------------------------ */
+
+.cx-tasks .cx-tab-in {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  max-height: min(420px, 50vh);
+  padding: 8px 8px 6px;
+  overflow-y: auto;
+}
+
+.cx-tasks-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 0 4px 6px 6px;
+}
+
+.cx-tasks-title {
+  color: var(--text);
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.cx-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 1px 7px 1px 6px;
+  border-radius: 4px;
+  background: var(--cx-lav-soft);
+  color: var(--cx-lav);
+  font-size: 11px;
+  font-weight: 500;
+}
+
+.cx-link {
+  min-height: 0;
+  padding: 2px 4px;
+  border: 0;
+  background: none;
+  color: var(--text-3);
+  font: inherit;
+  font-size: 12px;
+  font-weight: 500;
+  cursor: pointer;
+}
+
+.cx-link:hover {
+  color: var(--text);
+}
+
+.cx-ibtn {
+  display: inline-grid;
+  place-items: center;
+  width: 24px;
+  height: 24px;
+  min-height: 0;
+  padding: 0;
+  border: 0;
+  border-radius: 4px;
+  background: none;
+  color: var(--text-3);
+  cursor: pointer;
+}
+
+.cx-ibtn:hover {
+  background: var(--surface-2);
+  color: var(--text);
+}
+
+.cx-tasks-empty {
+  margin: 0;
+  padding: 6px 8px 8px;
+  color: var(--text-3);
+  font-size: 12.5px;
+}
+
+.cx-group {
+  padding: 10px 8px 4px;
+  color: var(--text-4);
+  font-size: 10.5px;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.cx-job {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 7px 8px;
+  border-radius: 3px;
+}
+
+.cx-job.is-open {
+  background: var(--surface-2);
+}
+
+.cx-job-head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+}
+
+.cx-job-ico {
+  flex: none;
+}
+
+.cx-job-ico.tone-running {
+  color: var(--cx-lav);
+}
+
+.cx-job-ico.tone-ok {
+  color: var(--green);
+}
+
+.cx-job-ico.tone-err {
+  color: var(--red);
+}
+
+.cx-job-ico.tone-stopped {
+  color: var(--text-3);
+}
+
+.cx-job-text {
+  display: flex;
+  flex: 1 1 auto;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.cx-job-cmd {
+  overflow: hidden;
+  color: var(--text);
+  font-family: var(--font-mono, ui-monospace, monospace);
+  font-size: 12.5px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.cx-job-meta {
+  color: var(--text-3);
+  font-size: 11.5px;
+}
+
+.cx-job-meta.tone-err {
+  color: var(--red);
+}
+
+.cx-job-btn {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  gap: 5px;
+  height: 26px;
+  min-height: 0;
+  padding: 0 8px;
+  border: 1px solid transparent;
+  border-radius: 4px;
+  background: none;
+  color: var(--text-2);
+  font: inherit;
+  font-size: 12px;
+  font-weight: 500;
+  cursor: pointer;
+}
+
+.cx-job-btn:hover,
+.cx-job-btn.is-on {
+  border-color: var(--border-strong);
+  background: var(--surface-3);
+}
+
+.cx-job-stop {
+  border-color: var(--border-strong);
+}
+
+.cx-job-btn:disabled {
+  opacity: 0.6;
+  cursor: default;
+}
+
+.cx-stop-sq {
+  width: 8px;
+  height: 8px;
+  border-radius: 1.5px;
+  background: var(--red);
+}
+
+.cx-job-log {
+  max-height: 200px;
+  margin: 0;
+  padding: 9px 11px;
+  overflow: auto;
+  border: 1px solid var(--border);
+  border-radius: 3px;
+  background: var(--sunken, var(--bg));
+  color: var(--text-2);
+  font-family: var(--font-mono, ui-monospace, monospace);
+  font-size: 11.5px;
+  line-height: 1.6;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.cx-job-logfoot {
+  padding: 0 2px;
+  color: var(--text-4);
+  font-size: 11px;
+}
+
+.cx-job-error {
+  margin: 0;
+  color: var(--red);
+  font-size: 11.5px;
+}
+
+/* ---- inside the card ------------------------------------------- */
+
+.cx-keys {
+  position: absolute;
+  top: 13px;
+  right: 12px;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  color: var(--text-4);
+  font-size: 11.5px;
+  pointer-events: none;
+}
+
+.cx-keys kbd,
+.cx-stop kbd {
+  padding: 0 5px;
+  border: 1px solid var(--border-strong);
+  border-radius: 3px;
+  background: var(--surface-2);
+  color: var(--text-3);
+  font-family: var(--font-mono, ui-monospace, monospace);
+  font-size: 11px;
+  line-height: 16px;
+}
+
+.cx-keys kbd + kbd,
+.cx-keys kbd:not(:first-child) {
+  margin-left: 6px;
+}
+
+/* Toolbar controls: boxy, quiet. */
+.cx .room-composer-bar,
+.cx .composer-bar {
+  gap: 4px;
+}
+
+.cx .composer-plus,
+.cx .room-attach .btn,
+.cx .composer-pill,
+.cx .room-composer-bar > .btn,
+.cx .composer-bar > .btn,
+.cx .composer-bar .composer-control > .btn {
+  border-radius: 4px;
+}
+
+.cx .composer-pill {
+  border-color: transparent;
+  background: transparent;
+}
+
+.cx .composer-pill:hover {
+  background: var(--surface-2);
+}
+
+.cx-stop {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  gap: 6px;
+  height: 30px;
+  min-height: 0;
+  padding: 0 7px 0 10px;
+  border: 1px solid var(--border-strong);
+  border-radius: 4px;
+  background: var(--surface-3);
+  color: var(--text);
+  font: inherit;
+  font-size: 12.5px;
+  font-weight: 500;
+  cursor: pointer;
+}
+
+.cx-stop .cx-stop-sq {
+  width: 9px;
+  height: 9px;
+  background: var(--text);
+}
+
+.cx-stop:disabled {
+  opacity: 0.6;
+}
+
+.cx-hint {
+  margin: 8px 0 0;
+  color: var(--text-4);
+  font-size: 11.5px;
+  text-align: center;
+}
+
+/* The floating agent dock keeps its compact composer: no keys, no hint. */
+.cx.is-dock .cx-tab {
+  margin: 0 10px;
+}
+
+/* ---- slash menu and mentions: the same boxy raised surface ------ */
+
+.slash-menu {
+  max-width: 440px;
+  max-height: 360px;
+  padding: 6px;
+  border-radius: 6px;
+}
+
+.slash-menu-head {
+  padding: 10px 8px 4px;
+  color: var(--text-4);
+  font-size: 10.5px;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+}
+
+.slash-item:first-child .slash-menu-head {
+  padding-top: 4px;
+}
+
+.slash-option {
+  min-height: 0;
+  padding: 6px 8px 6px 6px;
+  border-radius: 4px;
+}
+
+.slash-option.is-active,
+.slash-option:hover {
+  background: color-mix(in srgb, var(--bg-brand-solid-hover, var(--accent)) 22%, transparent);
+}
+
+.slash-option-icon {
+  width: 28px;
+  height: 28px;
+  border: 0;
+  border-radius: 4px;
+  background: var(--surface-3);
+}
+
+.slash-option.is-active .slash-option-icon {
+  border: 0;
+  background: var(--bg-brand-solid, var(--accent));
+  color: #fff;
+}
+
+.slash-option-text {
+  flex: 1 1 auto;
+  gap: 1px;
+}
+
+.slash-option-name {
+  color: var(--text);
+  font-size: 12.5px;
+  font-weight: 500;
+}
+
+.slash-option-desc {
+  font-size: 12px;
+}
+
+.slash-option-value {
+  flex: none;
+  color: var(--text-4);
+  font-size: 11.5px;
+}
+
+.slash-option-key {
+  flex: none;
+  padding: 0 5px;
+  border: 1px solid var(--border-strong);
+  border-radius: 3px;
+  background: var(--surface-2);
+  color: var(--text-3);
+  font-family: inherit;
+  font-size: 11px;
+}
+
+.slash-menu-foot {
+  gap: 12px;
+  border-top-color: var(--border);
+  color: var(--text-4);
+}
+
+.slash-menu-foot kbd {
+  border-radius: 3px;
+}
+
+.room-mention-list {
+  border-radius: 6px;
+}
+
+.room-mention-option {
+  border-radius: 4px;
+}
+
+/* ---- job notice line in the transcript (REQ-JBN-020) ------------ */
+
+.job-notice {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin: 6px 0;
+}
+
+.job-notice-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  min-height: 0;
+  padding: 7px 10px 7px 8px;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  background: var(--sunken, var(--bg));
+  color: var(--text);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.job-notice-row:hover {
+  border-color: var(--border-strong);
+}
+
+.job-notice-ico {
+  display: inline-grid;
+  flex: none;
+  place-items: center;
+  width: 24px;
+  height: 24px;
+  border-radius: 4px;
+  background: color-mix(in srgb, var(--text-3) 14%, transparent);
+  color: var(--text-3);
+}
+
+.job-notice.tone-ok .job-notice-ico {
+  background: color-mix(in srgb, var(--green) 16%, transparent);
+  color: var(--green);
+}
+
+.job-notice.tone-err .job-notice-ico {
+  background: color-mix(in srgb, var(--red) 16%, transparent);
+  color: var(--red);
+}
+
+.job-notice-label {
+  flex: none;
+  font-size: 13px;
+  font-weight: 500;
+}
+
+.job-notice-code {
+  flex: none;
+  color: var(--text-3);
+  font-family: var(--font-mono, ui-monospace, monospace);
+  font-size: 12px;
+}
+
+.job-notice.tone-ok .job-notice-code {
+  color: var(--green);
+}
+
+.job-notice.tone-err .job-notice-code {
+  color: var(--red);
+}
+
+.job-notice-cmd {
+  min-width: 0;
+  padding: 2px 7px;
+  overflow: hidden;
+  border-radius: 3px;
+  background: var(--surface-2);
+  color: var(--text-3);
+  font-family: var(--font-mono, ui-monospace, monospace);
+  font-size: 12px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.job-notice-log {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  gap: 4px;
+  margin-left: auto;
+  color: var(--text-3);
+  font-size: 12px;
+  font-weight: 500;
+}
+
+.job-notice-chev {
+  transition: transform var(--dur, 160ms) var(--ease, ease);
+}
+
+.job-notice.is-open .job-notice-chev {
+  transform: rotate(90deg);
+}
+
+.job-notice-tail {
+  max-height: 240px;
+  margin: 0;
+  padding: 9px 11px;
+  overflow: auto;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  background: var(--sunken, var(--bg));
+  color: var(--text-2);
+  font-family: var(--font-mono, ui-monospace, monospace);
+  font-size: 11.5px;
+  line-height: 1.6;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+/* ---- phones ---------------------------------------------------- */
+
+@media (max-width: 760px) {
+  .cx-keys,
+  .cx-hint,
+  .cx-stop kbd,
+  .cx-stop-text {
+    display: none;
+  }
+  .cx-stop {
+    width: 30px;
+    padding: 0;
+    justify-content: center;
+  }
+  .cx-tab {
+    margin: 0 10px;
+  }
+  .cx-working-doing {
+    display: none;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .cx-spin,
+  .cx-chip-dot,
+  .cx-badge-dot {
+    animation: none;
+  }
+}

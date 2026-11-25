@@ -13,6 +13,11 @@ export interface SlashCommand {
   description: string;
   icon: string;
   run: () => void;
+  /* The group heading the command sits under (composer redesign
+     2026-11-25), e.g. "Session"; commands without one go under "Commands". */
+  group?: string;
+  /* The current value shown on the right, e.g. "2 running". */
+  value?: string;
 }
 
 export interface SlashMenuState {
@@ -97,41 +102,48 @@ export function SlashMenu({ state }: { state: SlashMenuState }) {
   }
   return (
     <div className="slash-menu" role="listbox" aria-label="Commands">
-      <div className="slash-menu-head">Commands</div>
-      {state.matches.map((command, index) => (
-        <button
-          key={command.name}
-          type="button"
-          role="option"
-          aria-selected={index === state.index}
-          tabIndex={-1}
-          className={"slash-option" + (index === state.index ? " is-active" : "")}
-          onMouseDown={(event) => {
-            event.preventDefault();
-            state.pick(command);
-          }}
-        >
-          <span className="slash-option-icon">
-            <Ic name={command.icon} size={16} />
-          </span>
-          <span className="slash-option-text">
-            <span className="slash-option-title">
-              {command.title}
-              <code className="slash-option-name">{"/" + command.name}</code>
-            </span>
-            <span className="slash-option-desc">{command.description}</span>
-          </span>
-        </button>
-      ))}
+      {state.matches.map((command, index) => {
+        const group = command.group || "Commands";
+        const before = index > 0 ? state.matches[index - 1] : undefined;
+        const previous = before ? before.group || "Commands" : "";
+        const active = index === state.index;
+        return (
+          <div key={command.name} className="slash-item">
+            {group !== previous ? <div className="slash-menu-head">{group}</div> : null}
+            <button
+              type="button"
+              role="option"
+              aria-selected={active}
+              aria-label={command.title + " /" + command.name}
+              tabIndex={-1}
+              className={"slash-option" + (active ? " is-active" : "")}
+              onMouseDown={(event) => {
+                event.preventDefault();
+                state.pick(command);
+              }}
+            >
+              <span className="slash-option-icon">
+                <Ic name={command.icon} size={15} />
+              </span>
+              <span className="slash-option-text">
+                <code className="slash-option-name">{"/" + command.name}</code>
+                <span className="slash-option-desc">{command.description}</span>
+              </span>
+              {command.value ? <span className="slash-option-value">{command.value}</span> : null}
+              {active ? <kbd className="slash-option-key">↵</kbd> : null}
+            </button>
+          </div>
+        );
+      })}
       <div className="slash-menu-foot">
         <span>
-          <kbd>↑</kbd> <kbd>↓</kbd> to move
+          <kbd>↑↓</kbd> move
         </span>
         <span>
-          <kbd>Enter</kbd> to run
+          <kbd>↵</kbd> run
         </span>
         <span>
-          <kbd>Esc</kbd> to close
+          <kbd>esc</kbd> close
         </span>
       </div>
     </div>
