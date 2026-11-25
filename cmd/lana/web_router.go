@@ -92,8 +92,14 @@ func (b *webBackend) RouterModels(ctx context.Context, provider string, refresh 
 	}
 	// Spec 39: claude-code is built in, not a configured provider; Kind
 	// knows it and every Claude Code account.
-	if _, ok := r.Kind(provider); !ok {
+	kind, ok := r.Kind(provider)
+	if !ok {
 		return web.RouterModelList{}, web.ErrRouterUnknownProvider
+	}
+	// API-AGY-026: an Antigravity account's list comes from `agy models`;
+	// read it on first use so pickers do not wait for the Router page.
+	if kind == core.AntigravityKind && b.rt != nil {
+		b.rt.EnsureAntigravityModels(ctx, provider, refresh)
 	}
 	infos, fetchErr := r.Models(ctx, provider, refresh)
 	if errors.Is(fetchErr, router.ErrUnknownAddress) {

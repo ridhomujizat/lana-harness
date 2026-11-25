@@ -222,6 +222,48 @@ func (rt *Runtime) antigravityUsage24h(ctx context.Context) map[string]Antigravi
 	return out
 }
 
+// antigravityModelsTimeout bounds the `agy models` run of
+// EnsureAntigravityModels.
+const antigravityModelsTimeout = 20 * time.Second
+
+// EnsureAntigravityModels reads an Antigravity account's model list with
+// `agy models` when the router has none yet or refresh is set, so the model
+// pickers list the account before its Router page was ever opened
+// (API-AGY-026). A signed-out account, a missing binary, or a timeout leaves
+// the list as it was.
+func (rt *Runtime) EnsureAntigravityModels(ctx context.Context, account string, refresh bool) {
+	if rt.registry == nil || rt.router == nil || account == "" {
+		return
+	}
+	if _, ok := rt.router.AntigravityAccount(account); !ok {
+		return
+	}
+	if !refresh && len(rt.router.RuntimeModels(account)) > 0 {
+		return
+	}
+	ext, err := rt.registry.Runtime(AntigravityRuntime)
+	if err != nil {
+		return
+	}
+	statuser, _ := ext.(core.RuntimeAccountStatuser)
+	modelsPort, _ := ext.(agyModelsPort)
+	if statuser == nil || modelsPort == nil {
+		return
+	}
+	ctx, cancel := context.WithTimeout(ctx, antigravityModelsTimeout)
+	defer cancel()
+	cfg := rt.antigravityAccountConfig(account)
+	if !antigravityBinaryFound(cfg.Binary) {
+		return
+	}
+	if status := statuser.AccountStatus(ctx, rt.antigravityAccountSpec(account, cfg)); !status.LoggedIn {
+		return
+	}
+	if models, ok := modelsPort.Models(account); ok {
+		rt.syncAntigravityModels(account, models)
+	}
+}
+
 // syncAntigravityModels stores an account's model list when it differs from
 // the router's.
 func (rt *Runtime) syncAntigravityModels(account string, models []core.RuntimeModel) {
