@@ -657,6 +657,36 @@ func (r *Registry) SendReply(ctx context.Context, sessionID, text string, reply 
 	return nil
 }
 
+// SendJobNotice delivers a background-job notice to the session that owns the
+// job (REQ-JBN-003): an idle session starts a new turn whose first message is
+// the notice; a busy session queues it in the inbox so the running turn takes
+// it at its next step, like an owner message sent mid-turn. The notice is a
+// runtime note, never an owner message (REQ-JBN-004). A closed registry or a
+// session that no longer exists drops it without error (REQ-JBN-005).
+func (r *Registry) SendJobNotice(sessionID string, n core.JobNotice, text string) error {
+	if err := r.sessionExists(context.Background(), sessionID); err != nil {
+		return nil
+	}
+	r.mu.Lock()
+	if r.closed {
+		r.mu.Unlock()
+		return nil
+	}
+	runner := r.runnerLocked(sessionID)
+	item := inboxItem{text: text, job: &n}
+	runner.mu.Lock()
+	if runner.running {
+		runner.inbox = append(runner.inbox, item)
+		runner.mu.Unlock()
+		r.mu.Unlock()
+		return nil
+	}
+	r.startTurnAsync(runner, item)
+	runner.mu.Unlock()
+	r.mu.Unlock()
+	return nil
+}
+
 // Cancel cancels the running turn.
 func (r *Registry) Cancel(ctx context.Context, sessionID string) error {
 	if err := r.sessionExists(ctx, sessionID); err != nil {

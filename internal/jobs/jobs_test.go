@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"sync/atomic"
 	"syscall"
 	"testing"
 	"time"
@@ -141,6 +142,40 @@ func TestKillStopsProcess(t *testing.T) {
 	}
 	if processAlive(job.PID) {
 		t.Fatalf("process %d is still alive after kill", job.PID)
+	}
+}
+
+// TestKillMarksStoppedByOwner covers REQ-JBN-002: the web Stop path (Kill)
+// records that the owner stopped the job.
+func TestKillMarksStoppedByOwner(t *testing.T) {
+	reg := newTestRegistry(t)
+	job, err := reg.Start("s1", t.TempDir(), "sleep 30")
+	if err != nil {
+		t.Fatal(err)
+	}
+	killed, err := reg.Kill("s1", job.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !killed.StoppedByOwner {
+		t.Fatalf("Kill did not mark the job stopped by the owner: %+v", killed)
+	}
+}
+
+// TestKillSilentLeavesStoppedByOwnerFalse covers REQ-JBN-001: the agent's own
+// job_kill (KillSilent) is not an owner stop.
+func TestKillSilentLeavesStoppedByOwnerFalse(t *testing.T) {
+	reg := newTestRegistry(t)
+	job, err := reg.Start("s1", t.TempDir(), "sleep 30")
+	if err != nil {
+		t.Fatal(err)
+	}
+	killed, err := reg.KillSilent("s1", job.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if killed.StoppedByOwner {
+		t.Fatalf("KillSilent marked the job stopped by the owner: %+v", killed)
 	}
 }
 
@@ -364,4 +399,93 @@ func TestStartExtraPath(t *testing.T) {
 		t.Fatal(err)
 	}
 	waitForTail(t, reg, "s1", job.ID, "hello from tool", 5*time.Second)
+}
+
+// TestOnEndFiresOnExit covers REQ-JBN-001: a job that exits calls OnEnd exactly
+// once with its final snapshot.
+func TestOnEndFiresOnExit(t *testing.T) {
+	reg := newTestRegistry(t)
+	ended := make(chan Job, 1)
+	reg.OnEnd = func(job Job) { ended <- job }
+	job, err := reg.Start("s1", t.TempDir(), "exit 3")
+	if err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case got := <-ended:
+		if got.ID != job.ID || got.SessionID != "s1" || got.Status != StatusExited || got.ExitCode != 3 {
+			t.Fatalf("OnEnd job=%+v", got)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("OnEnd was not called on exit")
+	}
+	// It fires once: no second call arrives.
+	select {
+	case got := <-ended:
+		t.Fatalf("OnEnd fired twice: %+v", got)
+	case <-time.After(100 * time.Millisecond):
+	}
+}
+
+// TestOnEndFiresOnKill covers REQ-JBN-001: a kill that is not the agent's own
+// job_kill (the web Stop path) calls OnEnd with the killed snapshot.
+func TestOnEndFiresOnKill(t *testing.T) {
+	reg := newTestRegistry(t)
+	ended := make(chan Job, 1)
+	reg.OnEnd = func(job Job) { ended <- job }
+	job, err := reg.Start("s1", t.TempDir(), "sleep 30")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := reg.Kill("s1", job.ID); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case got := <-ended:
+		if got.ID != job.ID || got.Status != StatusKilled {
+			t.Fatalf("OnEnd job=%+v", got)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("OnEnd was not called on kill")
+	}
+}
+
+// TestOnEndSilentOnKillSilent covers REQ-JBN-001: the agent's own job_kill
+// (KillSilent) does not call OnEnd.
+func TestOnEndSilentOnKillSilent(t *testing.T) {
+	reg := newTestRegistry(t)
+	var called atomic.Bool
+	reg.OnEnd = func(Job) { called.Store(true) }
+	job, err := reg.Start("s1", t.TempDir(), "sleep 30")
+	if err != nil {
+		t.Fatal(err)
+	}
+	killed, err := reg.KillSilent("s1", job.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if killed.Status != StatusKilled {
+		t.Fatalf("status=%q want killed", killed.Status)
+	}
+	// KillSilent waits for reap, which decides notify; the grace catches a
+	// stray asynchronous call.
+	time.Sleep(100 * time.Millisecond)
+	if called.Load() {
+		t.Fatal("OnEnd was called for a KillSilent job")
+	}
+}
+
+// TestOnEndSilentOnShutdown covers REQ-JOB-018 and REQ-JBN-001: daemon shutdown
+// kills jobs without calling OnEnd.
+func TestOnEndSilentOnShutdown(t *testing.T) {
+	reg := New(t.TempDir())
+	var called atomic.Bool
+	reg.OnEnd = func(Job) { called.Store(true) }
+	if _, err := reg.Start("s1", t.TempDir(), "sleep 30"); err != nil {
+		t.Fatal(err)
+	}
+	reg.Shutdown()
+	if called.Load() {
+		t.Fatal("OnEnd was called during Shutdown")
+	}
 }

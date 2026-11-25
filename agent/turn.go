@@ -45,12 +45,20 @@ type Runner struct {
 
 // inboxItem is one queued owner message: its text, the workspace-relative
 // paths of its attachments (REQ-ATT-002), and the automation message it
-// replies to, when it is a reply.
+// replies to, when it is a reply. A background-job notice is queued the same
+// way, with job set instead of an owner's message (REQ-JBN-003).
 type inboxItem struct {
 	text        string
 	attachments []string
 	replyTo     *core.ReplyRef
+	job         *core.JobNotice
 }
+
+// notice reports whether the item is a background-job notice. A notice is
+// delivered as a runtime note (payload Runtime true) but keeps the inbox-claim
+// semantics of an owner message: a step cap or halt returns it to the inbox
+// front instead of losing it (REQ-JBN-004).
+func (item inboxItem) notice() bool { return item.job != nil }
 
 // replyQuoteBlock is the injected text block of a reply: the note naming the
 // automation message the owner replied to, then its quoted text. Being a normal
@@ -1133,6 +1141,15 @@ func (rn *Runner) runNativeTurn(ctx context.Context, initial inboxItem, turnID, 
 			claimed = true
 		}
 
+		// A background-job notice is a runtime note, not an owner message, so
+		// display, memory capture, titles, and the owner-message rules treat it
+		// like other runtime notes (REQ-JBN-004). Its inbox-claim semantics
+		// (guard reset, return to the inbox front on a cap or halt) are already
+		// those of a popped owner message.
+		if claimed && claimedItem.notice() {
+			runtimeNote = true
+		}
+
 		inputMsg := core.Message{Role: core.RoleUser}
 		if claimed {
 			text := claimedText
@@ -1328,6 +1345,9 @@ func (rn *Runner) runNativeTurn(ctx context.Context, initial inboxItem, turnID, 
 			payload := core.UserMessage{V: core.PayloadVersion, Content: inputMsg.Content, PromptSections: storedSections, ContextBlocks: contextBlocks, Runtime: runtimeNote}
 			if !runtimeNote && claimedItem.replyTo != nil {
 				payload.ReplyTo = claimedItem.replyTo
+			}
+			if claimedItem.notice() {
+				payload.Job = claimedItem.job
 			}
 			if continueMsg {
 				payload.Continue = true
