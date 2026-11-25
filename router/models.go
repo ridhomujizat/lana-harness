@@ -39,6 +39,11 @@ type ModelInfo struct {
 	Price *Price `json:"price"`
 	// Source is "catalog", "provider", or "both".
 	Source string `json:"source"`
+	// Efforts are the model's own reasoning effort levels, in order, and
+	// DefaultEffort its default (spec 76 REQ-MES-002); none when the model
+	// has no effort control or is unknown.
+	Efforts       []string `json:"efforts,omitempty"`
+	DefaultEffort string   `json:"default_effort,omitempty"`
 }
 
 type modelCacheEntry struct {
@@ -151,6 +156,9 @@ func (r *Router) Models(ctx context.Context, provider string, refresh bool) ([]M
 			}
 			info.Vision = info.Vision || fill.Vision
 			info.Thinking = info.Thinking || fill.Thinking
+			if len(info.Efforts) == 0 {
+				info.Efforts, info.DefaultEffort = fill.Efforts, fill.DefaultEffort
+			}
 		}
 		if info.Name == "" {
 			info.Name = m.ID
@@ -374,6 +382,10 @@ func fromCatalog(m models.Model) ModelInfo {
 		MaxOutput:     m.MaxOutput,
 		Vision:        m.Vision,
 		Thinking:      m.Thinking != "",
+	}
+	if len(m.Efforts) > 0 {
+		info.Efforts = append([]string(nil), m.Efforts...)
+		info.DefaultEffort = models.ShownDefault(m)
 	}
 	if m.Price != nil {
 		p := *m.Price

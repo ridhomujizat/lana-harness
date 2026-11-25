@@ -1421,7 +1421,7 @@ agent = "lana"
 	}
 
 	// An invalid value is rejected and changes nothing.
-	resp, _ := webDo(t, http.MethodPatch, ts.URL+"/v1/sessions/"+info.ID, `{"reasoning_effort":"turbo"}`, cookie, csrf)
+	resp, _ := webDo(t, http.MethodPatch, ts.URL+"/v1/sessions/"+info.ID, `{"reasoning_effort":"turbo mode"}`, cookie, csrf)
 	if resp.StatusCode != http.StatusBadRequest {
 		t.Fatalf("invalid effort status = %d, want 400", resp.StatusCode)
 	}

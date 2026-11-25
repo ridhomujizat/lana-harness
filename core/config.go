@@ -247,8 +247,9 @@ type AgentConfig struct {
 	// turns. 0 means the provider default (REQ-TFB-008 item 6).
 	MaxTokens     int `toml:"max_tokens"`
 	ContextWindow int `toml:"context_window"`
-	// ReasoningEffort is "off", "low", "high", or "max"; "" uses the model's
-	// catalog default (REQ-MDL-001).
+	// ReasoningEffort is the model's own level name ("low", "xhigh",
+	// "minimal", …; one token) or "off"; "" uses the model's catalog default
+	// (REQ-MDL-001, spec 76 REQ-MES-001).
 	ReasoningEffort string `toml:"reasoning_effort"`
 	// CompactionHeadroom, CompactionThreshold, and CompactionRetain tune the
 	// context pressure policy (REQ-LTC-011). Zero means the default is used.

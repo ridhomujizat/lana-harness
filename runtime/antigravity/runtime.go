@@ -220,6 +220,8 @@ func (r *Runtime) RunTurn(ctx context.Context, turn core.RuntimeTurn) error {
 		}
 		return fail(classVersion, err.Error())
 	}
+	// Spec 76 REQ-MES-005: a base model runs as the variant of the effort.
+	turn.Config.Model = r.resolveModel(ctx, turn.Config, bin)
 	env := buildEnv(r.opts.Environ(), turn.Config)
 	dir, err := workspaceDir(turn.Config.Workspace)
 	if err != nil {

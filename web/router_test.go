@@ -2,9 +2,11 @@ package web
 
 import (
 	"context"
+	"encoding/json"
 	"net/http"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"sync"
 	"testing"
@@ -190,14 +192,14 @@ func TestRouterOverview(t *testing.T) {
 	// AC-RTR-024: combos first, then the models grouped by provider; a
 	// provider the router does not know yet lists its catalog.
 	choices := body.Choices
-	if len(choices) < 6 || choices[0] != (routerChoiceJSON{Value: "coding", Label: "coding", Group: "Combos"}) ||
+	if len(choices) < 6 || !reflect.DeepEqual(choices[0], routerChoiceJSON{Value: "coding", Label: "coding", Group: "Combos"}) ||
 		choices[1].Group != "Combos" {
 		t.Fatalf("choices = %+v", choices)
 	}
-	if choices[2] != (routerChoiceJSON{Value: "deepseek/deepseek-flash", Label: "DeepSeek Flash", Group: "deepseek"}) {
+	if !reflect.DeepEqual(choices[2], routerChoiceJSON{Value: "deepseek/deepseek-flash", Label: "DeepSeek Flash", Group: "deepseek"}) {
 		t.Fatalf("first model choice = %+v", choices[2])
 	}
-	if choices[4] != (routerChoiceJSON{Value: "local/qwen", Label: "qwen", Group: "local"}) {
+	if !reflect.DeepEqual(choices[4], routerChoiceJSON{Value: "local/qwen", Label: "qwen", Group: "local"}) {
 		t.Fatalf("local choice = %+v", choices[4])
 	}
 	if choices[5].Group != "spare" || !strings.HasPrefix(choices[5].Value, "spare/") {
@@ -754,5 +756,35 @@ func TestProviderTestModelDefaults(t *testing.T) {
 	}
 	if got := providerTestModel("x", providerRecord{Kind: "openai_compat", BaseURL: "https://api.deepseek.com/v1"}, providerDocument{}); got != "deepseek-flash" {
 		t.Fatalf("deepseek host = %q", got)
+	}
+}
+
+// Spec 76 REQ-MES-002: a choice carries "efforts" and "default_effort" only
+// when the model has effort levels.
+func TestRouterChoiceEffortsJSON(t *testing.T) {
+	withEfforts, err := json.Marshal(modelChoice(RouterModel{Address: "openai/gpt-5", Efforts: []string{"minimal", "low", "medium", "high"}, DefaultEffort: "medium"}, "GPT-5", "openai"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := string(withEfforts); got != `{"value":"openai/gpt-5","label":"GPT-5","group":"openai","efforts":["minimal","low","medium","high"],"default_effort":"medium"}` {
+		t.Fatalf("choice = %s", got)
+	}
+	plain, _ := json.Marshal(modelChoice(RouterModel{Address: "openai/gpt-4.1"}, "GPT-4.1", "openai"))
+	if got := string(plain); got != `{"value":"openai/gpt-4.1","label":"GPT-4.1","group":"openai"}` {
+		t.Fatalf("choice = %s", got)
+	}
+	// The catalog fills a provider's models with their levels.
+	rows := catalogRouterModels("oa", providerRecord{Kind: "openai"})
+	for _, row := range rows {
+		switch row.ID {
+		case "gpt-5.1":
+			if strings.Join(row.Efforts, ",") != "none,low,medium,high" || row.DefaultEffort != "none" {
+				t.Fatalf("gpt-5.1 = %+v", row)
+			}
+		case "gpt-4.1":
+			if row.Efforts != nil || row.DefaultEffort != "" {
+				t.Fatalf("gpt-4.1 = %+v", row)
+			}
+		}
 	}
 }

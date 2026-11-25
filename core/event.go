@@ -87,6 +87,10 @@ type StepStart struct {
 	Step     int    `json:"step"`
 	Provider string `json:"provider"`
 	Model    string `json:"model"`
+	// Effort is the reasoning effort the step sends to the model (spec 76
+	// REQ-MES-003): the requested level when the model lists it, else its
+	// default; empty when none is sent.
+	Effort string `json:"effort,omitempty"`
 }
 
 type StepEnd struct {
@@ -95,6 +99,9 @@ type StepEnd struct {
 	Provider string `json:"provider"`
 	Model    string `json:"model"`
 	Usage    Usage  `json:"usage"`
+	// Effort is the reasoning effort sent to the model that answered the
+	// step (spec 76 REQ-MES-003); empty when none was sent.
+	Effort string `json:"effort,omitempty"`
 }
 
 // PromptSection is one named part of a system prompt, kept so a later turn can

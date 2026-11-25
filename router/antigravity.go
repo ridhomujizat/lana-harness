@@ -6,6 +6,7 @@ import (
 
 	"github.com/ridhomujizat/lana-harness/core"
 	"github.com/ridhomujizat/lana-harness/internal/llmcall"
+	"github.com/ridhomujizat/lana-harness/internal/models"
 )
 
 // Antigravity is the built-in provider of Antigravity targets (ADR 0022). It
@@ -96,22 +97,49 @@ func (r *Router) RuntimeModels(account string) []core.RuntimeModel {
 }
 
 // antigravityModels is Models(account) for an Antigravity account
-// (API-AGY-026): the account's reported model list (SetRuntimeModels), each
-// as "<account>/<id>" with the label "Antigravity · <name>". It never returns
-// a catalog; an account that reported nothing lists nothing.
+// (API-AGY-026, spec 76 REQ-MES-005): the account's reported model list
+// (SetRuntimeModels), each as "<account>/<id>" with the label "Antigravity ·
+// <name>". agy lists one model per effort ("gemini-4-neon-low" …
+// "-xhigh"); those are listed once as the base model ("gemini-4-neon",
+// "Antigravity · Gemini 4 Neon") with the suffixes as its efforts, default
+// "high" when listed, else the first. A model without an effort suffix is
+// listed as it is, without efforts; so are the variants of a base agy lists
+// itself. It never returns a catalog; an account that reported nothing lists
+// nothing.
 func (r *Router) antigravityModels(account string) []ModelInfo {
 	reported := r.RuntimeModels(account)
-	out := make([]ModelInfo, 0, len(reported))
-	seen := map[string]bool{}
+	valid := make([]core.RuntimeModel, 0, len(reported))
+	listed := map[string]bool{}
 	for _, m := range reported {
 		id := m.Value
-		if id == "" || seen[id] || (id != "default" && !llmcall.ValidAntigravityModel(id)) {
+		if id == "" || listed[id] || (id != "default" && !llmcall.ValidAntigravityModel(id)) {
 			continue
 		}
-		seen[id] = true
+		listed[id] = true
+		valid = append(valid, m)
+	}
+	out := make([]ModelInfo, 0, len(valid))
+	bases := map[string]int{}
+	for _, m := range valid {
+		id := m.Value
 		label := strings.TrimSpace(m.DisplayName)
 		if label == "" {
 			label = id
+		}
+		if base, level, ok := models.SplitEffortVariant(id); ok && !listed[base] {
+			if i, seen := bases[base]; seen {
+				out[i].Efforts = append(out[i].Efforts, level)
+				continue
+			}
+			bases[base] = len(out)
+			out = append(out, ModelInfo{
+				ID:      base,
+				Address: account + "/" + base,
+				Name:    AntigravityLabelPrefix + variantLabel(label, base),
+				Source:  AntigravitySourceRuntime,
+				Efforts: []string{level},
+			})
+			continue
 		}
 		out = append(out, ModelInfo{
 			ID:      id,
@@ -120,5 +148,21 @@ func (r *Router) antigravityModels(account string) []ModelInfo {
 			Source:  AntigravitySourceRuntime,
 		})
 	}
+	for _, i := range bases {
+		out[i].Efforts = models.OrderVariantEfforts(out[i].Efforts)
+		out[i].DefaultEffort = models.VariantDefault(out[i].Efforts)
+	}
 	return out
+}
+
+// variantLabel is the label of a base model from one variant's label: the
+// trailing " (High)" part dropped ("Gemini 4 Neon (High)" → "Gemini 4 Neon").
+// A label without it, or the id itself, gives the base id.
+func variantLabel(label, base string) string {
+	if strings.HasSuffix(label, ")") {
+		if i := strings.LastIndex(label, " ("); i > 0 {
+			return strings.TrimSpace(label[:i])
+		}
+	}
+	return base
 }

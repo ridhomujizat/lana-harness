@@ -184,7 +184,8 @@ func TestExternalTurnEvents(t *testing.T) {
 			}
 		case core.KindStepStart:
 			step := payloadOf[core.StepStart](t, event)
-			if step.Provider != "claude-code" || step.Model != "claude-haiku-5-5" {
+			// Spec 76 REQ-MES-003: the step records the --effort sent.
+			if step.Provider != "claude-code" || step.Model != "claude-haiku-5-5" || step.Effort != "high" {
 				t.Fatalf("step/start = %+v", step)
 			}
 		case core.KindToolCall:

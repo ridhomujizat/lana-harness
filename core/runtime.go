@@ -122,7 +122,9 @@ type RuntimeConfig struct {
 	APIKeyEnv string
 	// Model is passed to --model. Empty uses the runtime's default.
 	Model string
-	// Effort is passed to --effort. Empty uses the runtime's default.
+	// Effort is passed to --effort (Claude Code). Antigravity picks the
+	// variant of a base model for it (spec 76 REQ-MES-005). Empty uses the
+	// runtime's default.
 	Effort string
 	// Binary is the executable path. Empty looks the binary up on PATH.
 	Binary string

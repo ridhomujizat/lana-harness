@@ -125,8 +125,10 @@ func TestAntigravityRuntimeModels(t *testing.T) {
 	if err != nil || len(list) != 2 {
 		t.Fatalf("models = %+v, %v", list, err)
 	}
-	if list[0].Address != "agy-work/gemini-4-neon-high" || list[0].ID != "gemini-4-neon-high" ||
-		list[0].Name != "Antigravity · Gemini 4 Neon (high)" || list[0].Source != AntigravitySourceRuntime {
+	// Spec 76 REQ-MES-005: an effort variant is listed as its base model.
+	if list[0].Address != "agy-work/gemini-4-neon" || list[0].ID != "gemini-4-neon" ||
+		list[0].Name != "Antigravity · Gemini 4 Neon" || list[0].Source != AntigravitySourceRuntime ||
+		len(list[0].Efforts) != 1 || list[0].Efforts[0] != "high" || list[0].DefaultEffort != "high" {
 		t.Fatalf("row 0 = %+v", list[0])
 	}
 	if list[1].Address != "agy-work/default" || list[1].Name != "Antigravity · default" {
@@ -207,5 +209,50 @@ func TestAntigravityUsedProviders(t *testing.T) {
 		Knowledge: core.KnowledgeConfig{EmbeddingProvider: "agy-work"},
 	}, nil); len(misses) != 0 {
 		t.Fatalf("missingSecrets = %+v", misses)
+	}
+}
+
+// Spec 76 REQ-MES-005, AC-MES-004: the variants of `agy models` collapse into
+// one base model each, efforts in level order; models without a suffix stay.
+func TestAntigravityBaseModels(t *testing.T) {
+	h := newHarness(t, Config{})
+	h.r.SetRuntimeModels(Antigravity, []core.RuntimeModel{
+		{Value: "gemini-4-neon-high", DisplayName: "Gemini 4 Neon (High)"},
+		{Value: "gemini-4-neon-xhigh", DisplayName: "Gemini 4 Neon (XHigh)"},
+		{Value: "gemini-4-neon-medium", DisplayName: "Gemini 4 Neon (Medium)"},
+		{Value: "gemini-4-neon-low", DisplayName: "Gemini 4 Neon (Low)"},
+		{Value: "gemini-pro-orchestrator-neon", DisplayName: "Orchestrator (Neon)"},
+		{Value: "gemini-pro-orchestrator", DisplayName: "Orchestrator (Carbon)"},
+		{Value: "gemini-3.8-flash-medium", DisplayName: "Gemini 3.8 Flash (Medium)"},
+		{Value: "gemini-3.8-flash-low", DisplayName: "Gemini 3.8 Flash (Low)"},
+		{Value: "gpt-oss-120b-medium", DisplayName: "GPT-OSS 120B (Medium)"},
+	})
+	list, err := h.r.Models(context.Background(), Antigravity, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	type row struct {
+		id, name, def string
+		efforts       string
+	}
+	want := []row{
+		{"gemini-4-neon", "Antigravity · Gemini 4 Neon", "high", "low,medium,high,xhigh"},
+		{"gemini-pro-orchestrator-neon", "Antigravity · Orchestrator (Neon)", "", ""},
+		{"gemini-pro-orchestrator", "Antigravity · Orchestrator (Carbon)", "", ""},
+		{"gemini-3.8-flash", "Antigravity · Gemini 3.8 Flash", "low", "low,medium"},
+		{"gpt-oss-120b", "Antigravity · GPT-OSS 120B", "medium", "medium"},
+	}
+	if len(list) != len(want) {
+		t.Fatalf("models = %+v", list)
+	}
+	for i, w := range want {
+		got := row{list[i].ID, list[i].Name, list[i].DefaultEffort, strings.Join(list[i].Efforts, ",")}
+		if got != w || list[i].Address != "antigravity/"+w.id {
+			t.Errorf("row %d = %+v, want %+v", i, list[i], w)
+		}
+	}
+	// The full variant list stays stored for the runtime.
+	if got := h.r.RuntimeModels(Antigravity); len(got) != 9 {
+		t.Fatalf("runtime models = %d", len(got))
 	}
 }

@@ -18,6 +18,7 @@ import (
 	"github.com/ridhomujizat/lana-harness/internal/agenthome"
 	"github.com/ridhomujizat/lana-harness/internal/id"
 	"github.com/ridhomujizat/lana-harness/internal/llmcall"
+	"github.com/ridhomujizat/lana-harness/internal/models"
 	"github.com/ridhomujizat/lana-harness/internal/projectctx"
 )
 
@@ -169,9 +170,11 @@ type resolvedAgent struct {
 	chain []core.LLMTarget
 	// cfg is the agent's config, legacy runtime key mapped (API-CCT-002).
 	cfg core.AgentConfig
-	// claudeEffort is the reasoning effort of a Claude Code turn: the
-	// session's, else the agent's, without the catalog default.
-	claudeEffort string
+	// runtimeEffort is the reasoning effort of an external runtime turn
+	// (Claude Code, Antigravity): the session's, else the agent's, without
+	// the catalog default. The runtime keeps it only when the model lists it
+	// (spec 76 REQ-MES-003).
+	runtimeEffort string
 	// requested is the combo or address the agent asked for, recorded by
 	// the router.
 	requested  string
@@ -290,16 +293,14 @@ func (rn *Runner) resolve(ctx context.Context) (resolvedAgent, error) {
 	// REQ-TFB-008 item 6: max_tokens is opt-in; 0 means the provider default.
 	maxTokens := cfg.MaxTokens
 	// REQ-MDL-001: the session's reasoning_effort wins, else the agent's, else
-	// the catalog default for the resolved model, else the provider default ("").
+	// the catalog's sent default for the resolved model (DefaultEffort, the
+	// DeepSeek thinking models), else the provider default (""). A display-only
+	// default (spec 76 DisplayDefault) is never sent.
 	effort := cfg.ReasoningEffort
 	if hasSelection && selection.ReasoningEffort != "" {
 		effort = selection.ReasoningEffort
 	}
-	// "off" has no --effort value, so a Claude Code turn leaves it out.
-	claudeEffort := effort
-	if claudeEffort == "off" {
-		claudeEffort = ""
-	}
+	runtimeEffort := effort
 	// The effort default and the vision flag come from the first target.
 	known, knownOK := llmcall.Lookup(targets)
 	if effort == "" && knownOK {
@@ -353,7 +354,7 @@ func (rn *Runner) resolve(ctx context.Context) (resolvedAgent, error) {
 		fullChain:       fullChain,
 		chain:           targets,
 		cfg:             cfg,
-		claudeEffort:    claudeEffort,
+		runtimeEffort:   runtimeEffort,
 		requested:       requested,
 		promptFile:      cfg.PromptFile,
 		channel:         info.Channel,
@@ -1373,7 +1374,7 @@ func (rn *Runner) runNativeTurn(ctx context.Context, initial inboxItem, turnID, 
 			}
 		}
 		step := steps + 1
-		if _, err := events.Append(writeCtx, core.EventDraft{Kind: core.KindStepStart, TurnID: turnID, Payload: core.StepStart{V: core.PayloadVersion, Step: step, Provider: resolved.provider, Model: resolved.model}}); err != nil {
+		if _, err := events.Append(writeCtx, core.EventDraft{Kind: core.KindStepStart, TurnID: turnID, Payload: core.StepStart{V: core.PayloadVersion, Step: step, Provider: resolved.provider, Model: resolved.model, Effort: models.EffortFor(resolved.model, resolved.reasoningEffort, nil)}}); err != nil {
 			runErr = runtimeError(err)
 			reason = "error"
 			goto finished
@@ -1676,7 +1677,7 @@ func (rn *Runner) runNativeTurn(ctx context.Context, initial inboxItem, turnID, 
 				}
 			}
 		}
-		if _, err := events.Append(writeCtx, core.EventDraft{Kind: core.KindStepEnd, TurnID: turnID, Payload: core.StepEnd{V: core.PayloadVersion, Step: step, Provider: served.Provider, Model: served.Model, Usage: usage}}); err != nil {
+		if _, err := events.Append(writeCtx, core.EventDraft{Kind: core.KindStepEnd, TurnID: turnID, Payload: core.StepEnd{V: core.PayloadVersion, Step: step, Provider: served.Provider, Model: served.Model, Usage: usage, Effort: models.EffortFor(served.Model, resolved.reasoningEffort, nil)}}); err != nil {
 			runErr = runtimeError(err)
 			reason = "error"
 			goto finished

@@ -134,6 +134,11 @@ type RouterModel struct {
 	Price         *models.Price    `json:"price"`
 	Source        string           `json:"source"`
 	UsedBy        RouterModelUsers `json:"used_by"`
+	// Efforts are the model's own reasoning effort levels, in order, and
+	// DefaultEffort its default (spec 76 REQ-MES-002); absent when the model
+	// has no effort control.
+	Efforts       []string `json:"efforts,omitempty"`
+	DefaultEffort string   `json:"default_effort,omitempty"`
 }
 
 // RouterModelUsers are the agents and combos that use a model address.
@@ -369,11 +374,20 @@ type routerComboJSON struct {
 	UsedBy      []string `json:"used_by"`
 }
 
-// routerChoiceJSON is one model picker entry (REQ-RTR-018).
+// routerChoiceJSON is one model picker entry (REQ-RTR-018). Efforts and
+// DefaultEffort are the model's own effort levels (spec 76 REQ-MES-002);
+// absent when the model has none (and on combos).
 type routerChoiceJSON struct {
-	Value string `json:"value"`
-	Label string `json:"label"`
-	Group string `json:"group"`
+	Value         string   `json:"value"`
+	Label         string   `json:"label"`
+	Group         string   `json:"group"`
+	Efforts       []string `json:"efforts,omitempty"`
+	DefaultEffort string   `json:"default_effort,omitempty"`
+}
+
+// modelChoice is the picker entry of a model with label and group.
+func modelChoice(model RouterModel, label, group string) routerChoiceJSON {
+	return routerChoiceJSON{Value: model.Address, Label: label, Group: group, Efforts: model.Efforts, DefaultEffort: model.DefaultEffort}
 }
 
 type routerProxyJSON struct {
@@ -497,7 +511,7 @@ func (s *Server) handleRouterOverview(w http.ResponseWriter, r *http.Request) {
 			if label == "" {
 				label = model.ID
 			}
-			response.Choices = append(response.Choices, routerChoiceJSON{Value: model.Address, Label: label, Group: name})
+			response.Choices = append(response.Choices, modelChoice(model, label, name))
 		}
 	}
 	// API-CCT-004: Claude Code models in their own group when the binary is
@@ -534,7 +548,7 @@ func (s *Server) claudeCodeChoices(ctx context.Context, accounts []string) []rou
 			if account != ClaudeCodeProvider {
 				label = "Claude Code (" + account + ") · " + strings.TrimPrefix(label, "Claude Code · ")
 			}
-			out = append(out, routerChoiceJSON{Value: model.Address, Label: label, Group: claudeCodeChoiceGroup})
+			out = append(out, modelChoice(model, label, claudeCodeChoiceGroup))
 		}
 	}
 	return out
@@ -586,6 +600,7 @@ func catalogRouterModels(name string, record providerRecord) []RouterModel {
 			ID: m.ID, Address: name + "/" + m.ID, Name: m.Name,
 			ContextWindow: m.ContextWindow, MaxOutput: m.MaxOutput,
 			Vision: m.Vision, Thinking: m.Thinking != "", Price: m.Price, Source: "catalog",
+			Efforts: m.Efforts, DefaultEffort: models.ShownDefault(m),
 		})
 	}
 	return out

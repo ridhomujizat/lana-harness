@@ -13,6 +13,7 @@ import (
 
 	"github.com/ridhomujizat/lana-harness/core"
 	"github.com/ridhomujizat/lana-harness/internal/agenthome"
+	"github.com/ridhomujizat/lana-harness/internal/models"
 	"github.com/ridhomujizat/lana-harness/internal/pattern"
 )
 
@@ -65,13 +66,11 @@ var runtimeForbiddenKeys = []string{"provider"}
 // runtimeAuthModes are the accepted agents.<name>.auth values.
 var runtimeAuthModes = []string{core.RuntimeAuthAPIKey, core.RuntimeAuthSubscription}
 
-// runtimeEfforts are the reasoning_effort values Claude Code accepts, passed
-// to --effort (API-CCR-001). An agent whose model is a claude-code address
-// may use them and the native values.
-var runtimeEfforts = []string{"high", "low", "max", "medium", "xhigh"}
-
-// nativeEfforts are the reasoning_effort values of a lana agent (REQ-MDL-001).
-var nativeEfforts = []string{"off", "low", "high", "max"}
+// effortMsg is the problem of a reasoning_effort that is not one token. Spec
+// 76 (revision 2026-11-26): the value is the model's own level name, so any
+// single token is accepted; a level the model does not list falls back to
+// its default at call time.
+const effortMsg = "must be one word of letters, digits, '-' or '_' (at most 20 characters)"
 
 // runtimeNames are the accepted agents.<name>.runtime values: claude-code and
 // any runtime registered with core.RegisterRuntime.
@@ -841,16 +840,11 @@ func validateAgent(v map[string]any, path string, add func(string, string)) {
 		}
 	}
 	if val, ok := v["reasoning_effort"]; ok {
-		s, ok := val.(string)
-		// A Claude Code agent's effort values differ; validateEffective
-		// checks an address model against the merged model, runtime, and
-		// providers (API-CCR-001, REQ-CCT-010).
-		runtime, _ := v["runtime"].(string)
-		model, _ := v["model"].(string)
-		if !ok {
+		// Spec 76 REQ-MES-001: any model's own level name, one token.
+		if s, ok := val.(string); !ok {
 			add(path+".reasoning_effort", typeMsg("string", val))
-		} else if runtime == "" && !isAddress(model) && s != "" && !contains(nativeEfforts, s) {
-			add(path+".reasoning_effort", enumMsg(s, nativeEfforts))
+		} else if !models.ValidEffort(s) {
+			add(path+".reasoning_effort", effortMsg)
 		}
 	}
 	// API-DKN-002: skill_write is "approve" (the default when empty) or
@@ -1863,7 +1857,6 @@ func validateClaudeKeys(agent map[string]any, path string, accounts claudeAccoun
 	model, _ := agent["model"].(string)
 	runtime, isString := agent["runtime"].(string)
 	legacy := isString && runtime != ""
-	claude := accounts.address(model)
 	if legacy {
 		names := runtimeNames()
 		if !contains(names, runtime) {
@@ -1877,20 +1870,9 @@ func validateClaudeKeys(agent map[string]any, path string, accounts claudeAccoun
 		if strings.HasPrefix(model, "-") {
 			add(path+".model", "must not start with '-'")
 		}
-		claude = true
 	}
-	if effort, ok := agent["reasoning_effort"].(string); ok && effort != "" && claude {
-		allowed := append(append([]string{}, runtimeEfforts...), "off")
-		if legacy {
-			allowed = runtimeEfforts
-		}
-		if !contains(allowed, effort) {
-			add(path+".reasoning_effort", enumMsg(effort, allowed))
-		}
-	} else if ok && effort != "" && isAddress(model) && !contains(nativeEfforts, effort) {
-		// The layer check leaves an address model to this merged check.
-		add(path+".reasoning_effort", enumMsg(effort, nativeEfforts))
-	}
+	// Spec 76: reasoning_effort is checked per layer as one token; a Claude
+	// Code turn sends --effort only for a level Claude Code lists.
 	return legacy
 }
 

@@ -16,6 +16,7 @@ import (
 
 	"github.com/ridhomujizat/lana-harness/core"
 	"github.com/ridhomujizat/lana-harness/internal/llmcall"
+	"github.com/ridhomujizat/lana-harness/internal/models"
 	"github.com/ridhomujizat/lana-harness/internal/spill"
 )
 
@@ -374,6 +375,8 @@ type externalTurn struct {
 	runtime  string
 	provider string
 	model    string
+	// effort is the --effort of a Claude Code turn; "" when none is sent.
+	effort string
 	// pendingMeta is the runtime session meta not yet stored. It is stored
 	// with the first content event or when the attempt did not fail early, so
 	// an account that failed before output leaves no session to resume or
@@ -447,7 +450,20 @@ func (x *externalTurn) ensureStep() {
 	}
 	x.stepStarted = true
 	x.started = time.Now()
-	x.append(core.KindStepStart, core.StepStart{V: core.PayloadVersion, Step: 1, Provider: x.provider, Model: x.model})
+	x.append(core.KindStepStart, core.StepStart{V: core.PayloadVersion, Step: 1, Provider: x.provider, Model: x.model, Effort: x.stepEffort(x.model)})
+}
+
+// stepEffort is the effort a runtime step runs with (spec 76 REQ-MES-003):
+// Claude Code's --effort, or the level suffix of the Antigravity variant the
+// runtime picked ("gemini-4-neon-high" runs at high).
+func (x *externalTurn) stepEffort(model string) string {
+	if x.runtime == llmcall.Antigravity {
+		if _, level, ok := models.SplitEffortVariant(model); ok {
+			return level
+		}
+		return ""
+	}
+	return x.effort
 }
 
 // assistantContent builds the content of one assistant/message: the thinking
@@ -708,7 +724,7 @@ func (rn *Runner) runExternalTurn(ctx context.Context, initial inboxItem, turnID
 		if x.usageModel != "" {
 			model = x.usageModel
 		}
-		x.append(core.KindStepEnd, core.StepEnd{V: core.PayloadVersion, Step: 1, Provider: x.provider, Model: model, Usage: x.usage})
+		x.append(core.KindStepEnd, core.StepEnd{V: core.PayloadVersion, Step: 1, Provider: x.provider, Model: model, Usage: x.usage, Effort: x.stepEffort(model)})
 		slog.Info("step finished", "session_id", rn.sessionID, "turn_id", turnID, "step", 1,
 			"provider", x.provider, "model", model,
 			"input_tokens", x.usage.InputTokens, "output_tokens", x.usage.OutputTokens,
@@ -974,9 +990,15 @@ func (rn *Runner) externalAttempt(ctx context.Context, x *externalTurn, prep ext
 		Approve:  rn.externalApprove(x.turnID, res.name),
 		OpenMCP:  openMCP,
 	}
-	if runtime == llmcall.ClaudeCode {
-		// The effort is a Claude Code flag; agy picks it by model.
-		turn.Config.Effort = res.claudeEffort
+	// Spec 76 REQ-MES-003: Claude Code gets --effort only for a level it
+	// lists ("off" and other providers' levels use its default); Antigravity
+	// picks the variant of the base model for the effort (REQ-MES-005).
+	switch runtime {
+	case llmcall.ClaudeCode:
+		turn.Config.Effort = models.PickEffort(res.runtimeEffort, models.ClaudeCodeEfforts(), "")
+		x.effort = turn.Config.Effort
+	case llmcall.Antigravity:
+		turn.Config.Effort = res.runtimeEffort
 	}
 	applyAccount(&turn.Config, rn.reg.home, runtime, target.Provider, account, res.cfg)
 	rn.setExternal(rt)

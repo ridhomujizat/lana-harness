@@ -438,6 +438,8 @@ func TestAntigravityFolderRemovable(t *testing.T) {
 func TestRouterAntigravityChoices(t *testing.T) {
 	builtinModels := RouterModelList{Provider: "antigravity", Models: []RouterModel{
 		{ID: "gemini-4-neon-high", Address: "antigravity/gemini-4-neon-high", Name: "Antigravity · Gemini 4 Neon (High)", Source: "runtime"},
+		{ID: "gemini-4-neon", Address: "antigravity/gemini-4-neon", Name: "Antigravity · Gemini 4 Neon", Source: "runtime",
+			Efforts: []string{"low", "medium", "high", "xhigh"}, DefaultEffort: "high"},
 	}}
 	work := RouterModelList{Provider: "agy-2", Models: []RouterModel{
 		{ID: "gemini-3.8-flash-low", Address: "agy-2/gemini-3.8-flash-low", Name: "Antigravity · Gemini 3.8 Flash (Low)", Source: "runtime"},
@@ -463,12 +465,17 @@ func TestRouterAntigravityChoices(t *testing.T) {
 		return out
 	}
 	one := groups(t, routerTestConfig, true)
-	if len(one) != 1 || len(one["Antigravity"]) != 1 || one["Antigravity"][0].Value != "antigravity/gemini-4-neon-high" ||
-		one["Antigravity"][0].Label != "Antigravity · Gemini 4 Neon (High)" {
+	if len(one) != 1 || len(one["Antigravity"]) != 2 || one["Antigravity"][0].Value != "antigravity/gemini-4-neon-high" ||
+		one["Antigravity"][0].Label != "Antigravity · Gemini 4 Neon (High)" || one["Antigravity"][0].Efforts != nil {
 		t.Fatalf("one account = %+v", one)
 	}
+	// Spec 76 REQ-MES-002: a choice carries the model's effort levels.
+	if base := one["Antigravity"][1]; base.Value != "antigravity/gemini-4-neon" ||
+		strings.Join(base.Efforts, ",") != "low,medium,high,xhigh" || base.DefaultEffort != "high" {
+		t.Fatalf("base choice = %+v", base)
+	}
 	two := groups(t, routerTestConfig+"\n[providers.agy-2]\nkind = \"antigravity\"\nlabel = \"Work\"\n", true)
-	if len(two) != 2 || len(two["Antigravity · antigravity"]) != 1 || len(two["Antigravity · Work"]) != 1 ||
+	if len(two) != 2 || len(two["Antigravity · antigravity"]) != 2 || len(two["Antigravity · Work"]) != 1 ||
 		two["Antigravity · Work"][0].Value != "agy-2/gemini-3.8-flash-low" {
 		t.Fatalf("two accounts = %+v", two)
 	}

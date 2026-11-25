@@ -905,7 +905,7 @@ func (s *Server) antigravityChoices(ctx context.Context, document providerDocume
 			if label == "" {
 				label = "Antigravity · " + model.ID
 			}
-			out = append(out, routerChoiceJSON{Value: model.Address, Label: label, Group: group})
+			out = append(out, modelChoice(model, label, group))
 		}
 	}
 	return out

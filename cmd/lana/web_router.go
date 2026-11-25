@@ -118,6 +118,7 @@ func (b *webBackend) RouterModels(ctx context.Context, provider string, refresh 
 			ID: info.ID, Address: info.Address, Name: info.Name,
 			ContextWindow: info.ContextWindow, MaxOutput: info.MaxOutput,
 			Vision: info.Vision, Thinking: info.Thinking, Price: info.Price, Source: info.Source,
+			Efforts: info.Efforts, DefaultEffort: info.DefaultEffort,
 		})
 	}
 	return list, nil

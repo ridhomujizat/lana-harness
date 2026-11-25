@@ -171,10 +171,17 @@ model = "agy-2/gemini-4-neon-high"
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("GET router = %d %s", resp.StatusCode, data)
 	}
-	for _, want := range []string{`"group":"Antigravity · antigravity"`, `"group":"Antigravity · Work"`, `"value":"agy-2/gemini-4-neon-high"`} {
+	// AC-MES-004: one base model per effort family, with its levels, and no
+	// variant addresses.
+	for _, want := range []string{`"group":"Antigravity · antigravity"`, `"group":"Antigravity · Work"`,
+		`{"value":"agy-2/gemini-4-neon","label":"Antigravity · Gemini 4 Neon","group":"Antigravity · Work","efforts":["low","medium","high","xhigh"],"default_effort":"high"}`,
+		`{"value":"agy-2/gpt-oss-120b","label":"Antigravity · GPT-OSS 120B","group":"Antigravity · Work","efforts":["medium"],"default_effort":"medium"}`} {
 		if !strings.Contains(string(data), want) {
 			t.Fatalf("router choices lack %s: %s", want, data)
 		}
+	}
+	if strings.Contains(string(data), "gemini-4-neon-high") || strings.Count(string(data), `"value":"agy-2/gemini-4-neon"`) != 1 {
+		t.Fatalf("router choices list effort variants: %s", data)
 	}
 	resp, data = webDo(t, http.MethodGet, ts.URL+"/router/v1/models", "", nil, "")
 	if strings.Contains(string(data), "gemini-4-neon-high") {

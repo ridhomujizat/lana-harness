@@ -162,7 +162,7 @@ func TestAntigravityAccountConfig(t *testing.T) {
 	}
 	work := turns[0].Config
 	if work.Account != "agy-work" || work.Home != filepath.Join(h.reg.home, "antigravity", "agy-work") || work.Binary != "/opt/agy" ||
-		work.Model != "gemini-4-neon-high" || work.Effort != "" || work.Auth != "" || work.APIKeyEnv != "" || work.ConfigDir != "" {
+		work.Model != "gemini-4-neon-high" || work.Effort != "high" || work.Auth != "" || work.APIKeyEnv != "" || work.ConfigDir != "" {
 		t.Fatalf("agy-work config = %+v", work)
 	}
 	if strings.Contains(work.AppendSystemPrompt, "mcp__lana__") {

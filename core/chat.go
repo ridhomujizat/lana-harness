@@ -70,8 +70,10 @@ type ChatRequest struct {
 	Tools       []ToolSpec
 	MaxTokens   int
 	Temperature *float64
-	// ReasoningEffort selects the thinking effort: "", "off", "low", "high",
-	// or "max". "" means the provider default (REQ-MDL-001).
+	// ReasoningEffort selects the thinking effort: one of the model's own
+	// levels (spec 76), or lana's "off" switch, which each adapter turns into
+	// its own off setting. "" means the provider default (REQ-MDL-001). An
+	// adapter sends a level the model does not list as the model's default.
 	ReasoningEffort string
 }
 

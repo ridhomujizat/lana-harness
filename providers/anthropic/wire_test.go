@@ -137,6 +137,12 @@ func TestEffortMapping(t *testing.T) {
 		{"claude-sonnet-4-6", "off", 0, "", "", true, 32000},
 		{"anthropic/claude-sonnet-4.6", "high", 0, `{"type":"adaptive"}`, "high", false, 32000},
 		{"claude-opus-4-6", "", 0, `{"type":"adaptive"}`, "", false, 32000},
+		// Spec 76 REQ-MES-003: 4.6 has no xhigh, so xhigh falls back to its
+		// default high; a foreign level does too; medium passes through.
+		{"claude-opus-4-6", "xhigh", 0, `{"type":"adaptive"}`, "high", false, 32000},
+		{"claude-opus-5-5", "minimal", 0, `{"type":"adaptive","display":"summarized"}`, "medium", false, 32000},
+		{"claude-opus-5-5", "medium", 0, `{"type":"adaptive","display":"summarized"}`, "medium", false, 32000},
+		{"claude-opus-5-5", "xhigh", 0, `{"type":"adaptive","display":"summarized"}`, "xhigh", false, 32000},
 		// Budget models: budget_tokens below max_tokens, no effort.
 		{"claude-haiku-4-5", "", 0, "", "", true, 32000},
 		{"claude-haiku-4-5", "low", 0, `{"type":"enabled","budget_tokens":4096}`, "", false, 32000},

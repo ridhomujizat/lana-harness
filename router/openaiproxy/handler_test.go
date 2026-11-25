@@ -559,7 +559,8 @@ func TestReasoningEffort(t *testing.T) {
 	p := &fakeProvider{events: textEvents("ok")}
 	e := newEnv(t, map[string]*fakeProvider{"a": p}, nil)
 	for in, want := range map[string]string{
-		"": "", "none": "off", "minimal": "low", "low": "low", "medium": "high", "high": "high", "xhigh": "max",
+		// Spec 76: levels pass through as the model's own names.
+		"": "", "none": "off", "minimal": "minimal", "low": "low", "medium": "medium", "high": "high", "xhigh": "xhigh",
 	} {
 		resp := e.post(t, map[string]any{"model": "a/m", "reasoning_effort": in, "messages": []any{userMsg("hi")}})
 		if resp.StatusCode != http.StatusOK {
