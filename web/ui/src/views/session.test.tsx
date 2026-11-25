@@ -110,7 +110,8 @@ const CATALOG: ModelsResponse = {
 
 function stubFetch(
   events: SessionEvent[],
-  overrides: Partial<SessionDetail> = {}
+  overrides: Partial<SessionDetail> = {},
+  router: unknown = null
 ) {
   const base: SessionDetail = { ...detail, ...overrides };
   const fetchMock = vi.fn(
@@ -123,6 +124,9 @@ function stubFetch(
       }
       if (url.includes("/events")) {
         return json({ events, last_seq: events.length });
+      }
+      if (router && url.endsWith("/v1/router")) {
+        return json(router);
       }
       if (url.includes("/models")) {
         return json(CATALOG);
@@ -370,15 +374,15 @@ describe("composer model catalog", () => {
     expect(screen.getByText("deepseek:flash")).toBeTruthy();
     expect(screen.getByText("Legacy")).toBeTruthy();
 
-    const current = screen.getByRole("menuitemradio", {
+    const current = screen.getByRole("option", {
       name: /DeepSeek Chat/,
     });
-    expect(current.getAttribute("aria-checked")).toBe("true");
-    const legacy = screen.getByRole("menuitemradio", { name: /DeepSeek Old/ });
-    expect(legacy.getAttribute("aria-checked")).toBe("false");
+    expect(current.getAttribute("aria-selected")).toBe("true");
+    const legacy = screen.getByRole("option", { name: /DeepSeek Old/ });
+    expect(legacy.getAttribute("aria-selected")).toBe("false");
 
     fireEvent.click(
-      screen.getByRole("menuitemradio", { name: /DeepSeek Flash/ })
+      screen.getByRole("option", { name: /DeepSeek Flash/ })
     );
 
     await waitFor(() => {
@@ -412,12 +416,46 @@ describe("composer model catalog", () => {
       await screen.findByRole("button", { name: "Model: deepseek:chat" })
     );
     const combos = await screen.findByRole("group", { name: "Combos" });
-    expect(within(combos).getByRole("menuitemradio", { name: /coding/ })).toBeTruthy();
+    expect(within(combos).getByRole("option", { name: /coding/ })).toBeTruthy();
     expect(screen.getByRole("group", { name: "deepseek" })).toBeTruthy();
-    fireEvent.click(within(combos).getByRole("menuitemradio", { name: /coding/ }));
+    fireEvent.click(within(combos).getByRole("option", { name: /coding/ }));
 
     await waitFor(() => {
       expect(patchBody(fetchMock)).toMatchObject({ model: "coding" });
+    });
+  });
+
+  it("searches the router choices and switches with Enter", async () => {
+    const fetchMock = stubFetch([]);
+    const base = fetchMock.getMockImplementation();
+    fetchMock.mockImplementation(async (input: RequestInfo | URL, init?: RequestInit) => {
+      if (String(input).endsWith("/v1/router")) {
+        return json({
+          version: "v1",
+          choices: [
+            { value: "coding", label: "coding", group: "Combos" },
+            { value: "deepseek/deepseek-flash", label: "DeepSeek Flash", group: "deepseek" },
+            { value: "antigravity/gemini-4-neon", label: "Gemini 4 Neon", group: "Antigravity" },
+          ],
+        });
+      }
+      return base ? base(input, init) : json({});
+    });
+
+    render(<SessionPage id="s1" />);
+    fireEvent.click(
+      await screen.findByRole("button", { name: "Model: deepseek:chat" })
+    );
+    await screen.findByRole("group", { name: "Antigravity" });
+    const search = screen.getByRole("combobox", { name: "Search models" });
+    fireEvent.change(search, { target: { value: "gemini neon" } });
+    expect(screen.getAllByRole("option").map((node) => node.getAttribute("data-value"))).toEqual([
+      "antigravity/gemini-4-neon",
+    ]);
+    fireEvent.keyDown(search, { key: "Enter" });
+
+    await waitFor(() => {
+      expect(patchBody(fetchMock)).toMatchObject({ model: "antigravity/gemini-4-neon" });
     });
   });
 
@@ -446,7 +484,7 @@ describe("composer model catalog", () => {
       await screen.findByRole("button", { name: "Model: deepseek:chat" })
     );
     fireEvent.click(
-      screen.getByRole("menuitemradio", { name: /DeepSeek Flash/ })
+      screen.getByRole("option", { name: /DeepSeek Flash/ })
     );
 
     await waitFor(() => {
@@ -470,7 +508,7 @@ describe("composer thinking chip", () => {
       name: "Thinking: Model default",
     });
     fireEvent.click(chip);
-    fireEvent.click(screen.getByRole("menuitemradio", { name: /High/ }));
+    fireEvent.click(screen.getByRole("menuitemradio", { name: /^High/ }));
 
     await waitFor(() => {
       expect(patchBody(fetchMock)).toMatchObject({ reasoning_effort: "high" });
@@ -580,5 +618,74 @@ describe("session reply to a workflow message", () => {
       )
     ).toBeTruthy();
     expect(screen.getByText("Replying to workflow Daily brief")).toBeTruthy();
+  });
+});
+
+/* Spec 76 (REQ-MES-002, REQ-MES-006): the levels come from the router choice;
+   a model switch keeps the level the new model lists, else resets it. */
+describe("composer effort from the router choice", () => {
+  const router = {
+    version: "v1",
+    providers: [],
+    combos: [],
+    cooling: [],
+    proxy: { enabled: false, base_url: "" },
+    choices: [
+      {
+        value: "antigravity/gemini-4-neon",
+        label: "Gemini 4 Neon",
+        group: "Antigravity",
+        efforts: ["low", "medium", "high", "xhigh"],
+        default_effort: "high",
+      },
+      {
+        value: "antigravity/gpt-oss-120b",
+        label: "GPT-OSS 120B",
+        group: "Antigravity",
+        efforts: ["medium"],
+        default_effort: "medium",
+      },
+    ],
+  };
+
+  it("lists the model's levels and resets a level the new model lacks", async () => {
+    const fetchMock = stubFetch(
+      [],
+      { model: "antigravity/gemini-4-neon", reasoning_effort: "xhigh" },
+      router
+    );
+
+    render(<SessionPage id="s1" />);
+    const chip = await screen.findByRole("button", { name: "Thinking: Extra high" });
+    fireEvent.click(chip);
+    expect(
+      screen.getAllByRole("menuitemradio").map((node) => node.querySelector(".mi-name")?.textContent)
+    ).toEqual(["Model default", "Low", "Medium", "High", "Extra high"]);
+    fireEvent.click(chip);
+
+    fireEvent.click(await screen.findByRole("button", { name: /^Model:/ }));
+    fireEvent.click(screen.getByRole("option", { name: /GPT-OSS 120B/ }));
+    await waitFor(() => {
+      expect(patchBody(fetchMock)).toEqual({
+        model: "antigravity/gpt-oss-120b",
+        reasoning_effort: "",
+      });
+    });
+  });
+
+  it("keeps a level the new model lists", async () => {
+    const fetchMock = stubFetch(
+      [],
+      { model: "antigravity/gemini-4-neon", reasoning_effort: "medium" },
+      router
+    );
+
+    render(<SessionPage id="s1" />);
+    await screen.findByRole("button", { name: "Thinking: Medium" });
+    fireEvent.click(await screen.findByRole("button", { name: /^Model:/ }));
+    fireEvent.click(screen.getByRole("option", { name: /GPT-OSS 120B/ }));
+    await waitFor(() => {
+      expect(patchBody(fetchMock)).toEqual({ model: "antigravity/gpt-oss-120b" });
+    });
   });
 });

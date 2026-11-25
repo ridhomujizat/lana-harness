@@ -341,7 +341,7 @@ func (r *Router) refreshBalances(ctx context.Context, snap *snapshot) {
 			defer wg.Done()
 			u, err := fetcher.FetchBalance(ctx)
 			if err != nil {
-				msg := truncate(Redact(err.Error(), snap.apiKey(r.opts.secrets, name)), maxRecordError)
+				msg := truncate(Redact(err.Error(), snap.apiKeys(r.opts.secrets, name)...), maxRecordError)
 				r.UpdateLimits(LimitUpdate{Provider: name, Kind: entry.kind, Error: &msg})
 				return
 			}

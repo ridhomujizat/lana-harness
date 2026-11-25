@@ -226,7 +226,14 @@ function hasUtilization(window: PlanWindow): boolean {
 /* AC-CCR-009: "5-hour window · 42 % used · resets <time>". Utilization is a
    fraction; a window without one says "usage not reported". */
 export function windowText(window: PlanWindow): string {
-  const parts = [planWindowLabel(window)];
+  return [planWindowLabel(window)].concat(windowDetail(window)).join(" · ");
+}
+
+/* The window text without its name: "42 % used", "resets in 1h 32m". A
+   name may hold " · " itself ("Gemini · 5 hours"), so the meter builds its
+   text from these parts, not by splitting windowText. */
+export function windowDetail(window: PlanWindow): string[] {
+  const parts: string[] = [];
   if (hasUtilization(window)) {
     parts.push(Math.round(Number(window.utilization) * 100) + " % used");
   } else if (window.status === "rejected") {
@@ -237,7 +244,7 @@ export function windowText(window: PlanWindow): string {
   if (window.resets_at) {
     parts.push(resetsIn(window.resets_at));
   }
-  return parts.join(" · ");
+  return parts;
 }
 
 /* A window's name: its label ("Weekly · Fable", spec 39 Revision 4), else
@@ -267,7 +274,7 @@ export function PlanWindows({ windows }: { windows: PlanWindow[] }) {
           <Meter
             key={window.type}
             label={planWindowLabel(window)}
-            text={windowText(window).split(" · ").slice(1).join(" · ")}
+            text={windowDetail(window).join(" · ")}
             value={window.status === "rejected" && (!reported || !used) ? 1 : used}
             tone={window.status === "rejected" ? "red" : usedTone(used)}
           />
@@ -368,6 +375,31 @@ export function ClaudeAccountCard({
         ) : null}
       </div>
       {limit ? <CardFoot limit={limit} /> : null}
+    </article>
+  );
+}
+
+/* Spec 74 (API-AGY-027, 033): one Antigravity account's quota windows on the
+   Quota page, one bar per model group and window ("Gemini · 5 hours"). */
+export function AntigravityLimitCard({ limit, title }: { limit: LimitSnapshot; title?: string }) {
+  const windows = Array.isArray(limit.windows) ? limit.windows : [];
+  return (
+    <article className="rt-limit rt-claude" aria-label={"Antigravity quota of " + limit.provider}>
+      <header className="rt-limit-h">
+        <ProviderLogo logo="antigravity" name="Antigravity" size={28} />
+        <span className="rt-limit-title">
+          <span className="rt-limit-name trunc">{title || "Antigravity"}</span>
+          <span className="rt-limit-sub mono trunc">{limit.provider}</span>
+        </span>
+      </header>
+      <div className="rt-limit-b">
+        {windows.length > 0 ? (
+          <PlanWindows windows={windows} />
+        ) : (
+          <p className="rt-limit-none">No quota windows reported yet. Refresh to check.</p>
+        )}
+      </div>
+      <CardFoot limit={limit} />
     </article>
   );
 }

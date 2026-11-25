@@ -39,6 +39,11 @@ type ModelInfo struct {
 	Price *Price `json:"price"`
 	// Source is "catalog", "provider", or "both".
 	Source string `json:"source"`
+	// Efforts are the model's own reasoning effort levels, in order, and
+	// DefaultEffort its default (spec 76 REQ-MES-002); none when the model
+	// has no effort control or is unknown.
+	Efforts       []string `json:"efforts,omitempty"`
+	DefaultEffort string   `json:"default_effort,omitempty"`
 }
 
 type modelCacheEntry struct {
@@ -84,6 +89,9 @@ func (c *modelCache) cachedPrice(entry *providerEntry, model string) *Price {
 func (r *Router) Models(ctx context.Context, provider string, refresh bool) ([]ModelInfo, error) {
 	if r.snap.Load().isClaude(provider) {
 		return r.claudeCodeModels(provider), nil
+	}
+	if r.snap.Load().isAntigravity(provider) {
+		return r.antigravityModels(provider), nil
 	}
 	entry, ok := r.snap.Load().providers[provider]
 	if !ok {
@@ -148,6 +156,9 @@ func (r *Router) Models(ctx context.Context, provider string, refresh bool) ([]M
 			}
 			info.Vision = info.Vision || fill.Vision
 			info.Thinking = info.Thinking || fill.Thinking
+			if len(info.Efforts) == 0 {
+				info.Efforts, info.DefaultEffort = fill.Efforts, fill.DefaultEffort
+			}
 		}
 		if info.Name == "" {
 			info.Name = m.ID
@@ -314,9 +325,9 @@ func (r *Router) refreshModelsAsync(entry *providerEntry) {
 
 // WarmModels fetches the model lists of the configured providers in the
 // background, so the catalog fallback (CachedModel) can resolve model facts
-// without ever blocking (REQ-MDL-010). Claude Code accounts are skipped:
-// they are not in providers and their model list comes from the runtime. It
-// returns at once; a nil ctx means the background context.
+// without ever blocking (REQ-MDL-010). Claude Code and Antigravity accounts
+// are skipped: they are not in providers and their model lists come from the
+// runtime. It returns at once; a nil ctx means the background context.
 func (r *Router) WarmModels(ctx context.Context) {
 	if ctx == nil {
 		ctx = context.Background()
@@ -371,6 +382,10 @@ func fromCatalog(m models.Model) ModelInfo {
 		MaxOutput:     m.MaxOutput,
 		Vision:        m.Vision,
 		Thinking:      m.Thinking != "",
+	}
+	if len(m.Efforts) > 0 {
+		info.Efforts = append([]string(nil), m.Efforts...)
+		info.DefaultEffort = models.ShownDefault(m)
 	}
 	if m.Price != nil {
 		p := *m.Price

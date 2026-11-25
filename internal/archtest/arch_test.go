@@ -1,8 +1,12 @@
 package archtest
 
 import (
+	"bytes"
 	"fmt"
+	"io/fs"
+	"os"
 	"os/exec"
+	"path/filepath"
 	"sort"
 	"strings"
 	"testing"
@@ -231,4 +235,74 @@ func TestRuntimeRules(t *testing.T) {
 	if got := checkRules(map[string][]string{"agent": {modulePath + "/runtime/mcphost"}}); len(got) != 1 {
 		t.Fatalf("agent importing runtime/mcphost: violations = %v", got)
 	}
+	// ADR 0022: the Antigravity runtime is a library too: core and internal
+	// only. No runtime imports another runtime.
+	ok = checkRules(map[string][]string{
+		"runtime/antigravity": {modulePath + "/core", modulePath + "/internal/pattern"},
+	})
+	if len(ok) > 0 {
+		t.Fatalf("allowed imports rejected: %v", ok)
+	}
+	for _, imp := range []string{"agent", "config", "channels/telegram", "web", "protocol", "tools", "runtime/claudecode"} {
+		if got := checkRules(map[string][]string{"runtime/antigravity": {modulePath + "/" + imp}}); len(got) != 1 {
+			t.Fatalf("runtime/antigravity importing %s: violations = %v", imp, got)
+		}
+	}
+	if !isLibrary("runtime/antigravity") {
+		t.Fatal("runtime/antigravity is not a library package")
+	}
+}
+
+// AC-AGY-005: no non-test Go file of the runtime packages or the root package
+// mentions an agy credential term or a Google API URL. lana learns about an
+// account only from agy's own output.
+func TestNoCredentialStrings(t *testing.T) {
+	root := repoRoot(t)
+	terms := []string{"antigravity-oauth-token", "acp_token", "find-generic-password", "googleapis.com"}
+	err := filepath.WalkDir(root, func(path string, d fs.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		if d.IsDir() {
+			switch d.Name() {
+			case ".git", "testdata", "node_modules", "dist":
+				return fs.SkipDir
+			}
+			return nil
+		}
+		if !strings.HasSuffix(path, ".go") || strings.HasSuffix(path, "_test.go") {
+			return nil
+		}
+		rel, err := filepath.Rel(root, path)
+		if err != nil {
+			return err
+		}
+		// Only the runtime packages and the root package (AC-AGY-005).
+		if strings.Contains(rel, string(filepath.Separator)) && !strings.HasPrefix(rel, "runtime"+string(filepath.Separator)) {
+			return nil
+		}
+		data, err := os.ReadFile(path)
+		if err != nil {
+			return err
+		}
+		for _, term := range terms {
+			if bytes.Contains(data, []byte(term)) {
+				t.Errorf("%s mentions %q", filepath.ToSlash(rel), term)
+			}
+		}
+		return nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+}
+
+// repoRoot is the module root: two levels above internal/archtest.
+func repoRoot(t *testing.T) string {
+	t.Helper()
+	root, err := filepath.Abs(filepath.Join("..", ".."))
+	if err != nil {
+		t.Fatal(err)
+	}
+	return root
 }

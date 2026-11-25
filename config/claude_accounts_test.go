@@ -114,7 +114,7 @@ func TestClaudeCodeAccountRules(t *testing.T) {
 		{"background", account + "\n[router]\nbackground_model = \"cw/haiku\"\n", "router.background_model", "cannot use claude-code"},
 		{"background combo", account + "\n[combos.c]\nmodels = [\"cw/haiku\"]\n\n[router]\nbackground_model = \"c\"\n", "router.background_model", "cannot use claude-code"},
 		{"embedding", account + "\n[knowledge]\nembedding_provider = \"cw\"\n", "knowledge.embedding_provider", "must have kind"},
-		{"native effort", "[providers.ds]\nkind = \"deepseek\"\n\n[agents.a]\nmodel = \"ds/deepseek-flash\"\nreasoning_effort = \"xhigh\"\n", "agents.a.reasoning_effort", "invalid value 'xhigh'"},
+		{"native effort", "[providers.ds]\nkind = \"deepseek\"\n\n[agents.a]\nmodel = \"ds/deepseek-flash\"\nreasoning_effort = \"x high\"\n", "agents.a.reasoning_effort", "must be one word"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {

@@ -114,10 +114,11 @@ func TestAgentsCreateClaudeAgentRejects(t *testing.T) {
 		key  string
 	}{
 		{`{"name":"a","runtime":"claude-code","template":"coder"}`, "template"},
-		{`{"name":"c","runtime":"claude-code","reasoning_effort":"off"}`, "agents.c.reasoning_effort"},
+		// Spec 76: any one-token level is accepted; a bad token is not.
+		{`{"name":"c","runtime":"claude-code","reasoning_effort":"two words"}`, "agents.c.reasoning_effort"},
 		{`{"name":"d","runtime":"claude-code","auth":"api_key"}`, "agents.d.api_key_env"},
 		{`{"name":"e","runtime":"nope"}`, "agents.e.runtime"},
-		{`{"name":"f","template":"coder","model":"claude-code/opus","reasoning_effort":"huge"}`, "reasoning_effort"},
+		{`{"name":"f","template":"coder","model":"claude-code/opus","reasoning_effort":"-huge"}`, "reasoning_effort"},
 	} {
 		rr := serveAuth(s, settingsRequest(http.MethodPost, "/v1/agents", tc.body, cookie, csrf))
 		if rr.Code != http.StatusUnprocessableEntity || !strings.Contains(rr.Body.String(), tc.key) {

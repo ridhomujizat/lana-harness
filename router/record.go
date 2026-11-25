@@ -2,6 +2,7 @@ package router
 
 import (
 	"errors"
+	"sort"
 	"strings"
 	"time"
 	"unicode/utf8"
@@ -26,6 +27,9 @@ type CallRecord struct {
 	Requested string `json:"requested"`
 	Provider  string `json:"provider"`
 	Model     string `json:"model"`
+	// Key is the secret name of the API key used, set only when the
+	// provider has more than one key (REQ-PAF-005). Never the key's value.
+	Key string `json:"key,omitempty"`
 	// Attempt is the 1-based attempt number on Provider/Model.
 	Attempt int `json:"attempt"`
 	// Outcome is "ok" or the error class.
@@ -82,8 +86,9 @@ func (r *Router) baseRecord(requested string, target Target, n int, start time.T
 	}
 }
 
-func (r *Router) recordFailure(snap *snapshot, requested string, target Target, n int, start time.Time, meta CallMeta, pe *core.ProviderError) {
+func (r *Router) recordFailure(snap *snapshot, requested string, target Target, key string, n int, start time.Time, meta CallMeta, pe *core.ProviderError) {
 	rec := r.baseRecord(requested, target, n, start, meta)
+	rec.Key = key
 	rec.Outcome = effectiveClass(pe)
 	rec.DurationMs = r.now().Sub(start).Milliseconds()
 	rec.Error = truncate(pe.Error(), maxRecordError)
@@ -174,28 +179,32 @@ func (r *Router) priceFor(snap *snapshot, target Target) *Price {
 	return nil
 }
 
-// apiKey returns the API key of a provider, or "" when it has none.
-func (s *snapshot) apiKey(secrets core.Secrets, provider string) string {
+// apiKeys returns the API key values of a provider, every key of its pool
+// (REQ-PAF-005), leaving out empty ones. It is empty when it has none.
+func (s *snapshot) apiKeys(secrets core.Secrets, provider string) []string {
 	entry, ok := s.providers[provider]
 	if !ok || secrets == nil {
-		return ""
+		return nil
 	}
-	env := EffectiveKeyEnv(entry.cfg, provider)
-	if env == "" {
-		return ""
+	var out []string
+	for _, env := range KeyEnvs(entry.cfg, provider) {
+		secret, ok := secrets.Lookup(env)
+		if !ok {
+			continue
+		}
+		if value := secret.Reveal(); value != "" {
+			out = append(out, value)
+		}
 	}
-	secret, ok := secrets.Lookup(env)
-	if !ok {
-		return ""
-	}
-	return secret.Reveal()
+	// Longest first, so a key that holds another is replaced whole.
+	sort.SliceStable(out, func(i, j int) bool { return len(out[i]) > len(out[j]) })
+	return out
 }
 
-// redactError returns pe with the provider's API key replaced by "***" in
+// redactError returns pe with the provider's API keys replaced by "***" in
 // its message. pe itself is returned when the message has no key.
 func (s *snapshot) redactError(secrets core.Secrets, provider string, pe *core.ProviderError) *core.ProviderError {
-	key := s.apiKey(secrets, provider)
-	redacted := Redact(pe.Message, key)
+	redacted := Redact(pe.Message, s.apiKeys(secrets, provider)...)
 	if redacted == pe.Message {
 		return pe
 	}
@@ -217,9 +226,8 @@ func (s *snapshot) redactStreamError(secrets core.Secrets, provider string, err 
 		}
 		return out
 	}
-	key := s.apiKey(secrets, provider)
 	message := err.Error()
-	redacted := Redact(message, key)
+	redacted := Redact(message, s.apiKeys(secrets, provider)...)
 	if redacted == message {
 		return err
 	}

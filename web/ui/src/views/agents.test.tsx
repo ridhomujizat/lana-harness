@@ -247,7 +247,7 @@ describe("Claude Code models", () => {
     fireEvent.click(screen.getByRole("combobox", { name: "Model" }));
     fireEvent.click(await screen.findByRole("option", { name: "Claude Code · Opus (latest)" }));
     expect(screen.getByText(/Runs in Claude Code with your Claude plan/)).toBeTruthy();
-    expect(screen.getByRole("combobox", { name: "Reasoning effort" })).toBeTruthy();
+    expect(screen.getByRole("radiogroup", { name: "Reasoning effort" })).toBeTruthy();
     fireEvent.click(screen.getByRole("button", { name: "Create agent" }));
 
     await waitFor(() => {

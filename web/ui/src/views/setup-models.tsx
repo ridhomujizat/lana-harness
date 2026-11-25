@@ -7,8 +7,10 @@ import * as routerApi from "../api/router";
 import type { ClaudeAccount, ClaudeSignIn } from "../api/router";
 import { useAnnounce } from "../ui/ui";
 import { Ic } from "../ui/icons";
-import { Badge, Button, Field, IconButton, Input, Select, Toggle, cn } from "../ui/gr8r";
+import { Badge, Button, Field, IconButton, Input, Toggle, cn } from "../ui/gr8r";
 import type { SelectOption } from "../ui/gr8r";
+import { ModelPicker as ModelSelect } from "./model-picker";
+import type { ModelOption } from "./model-picker";
 import { useClaudeAccounts } from "./router/claude-code";
 import { SIGN_IN_POLL_MS, SignInCard } from "./router/claude-code-page";
 import type { SignInFlow } from "./router/claude-code-page";
@@ -626,8 +628,8 @@ export function modelOptions(
   draft: SetupDraft,
   catalog: Catalog,
   include: (provider: string) => boolean
-): SelectOption[] {
-  const out: SelectOption[] = [];
+): ModelOption[] {
+  const out: ModelOption[] = [];
   const group = (provider: string, models: SetupModel[]) => {
     if (!include(provider)) {
       return;
@@ -640,7 +642,7 @@ export function modelOptions(
     for (const model of models) {
       out.push({ value: provider + "/" + model.id, label: prefix + (model.name || model.id), group: face.label, icon });
     }
-    out.push({ value: CUSTOM_PREFIX + provider, label: "Other model ID…", group: face.label, icon });
+    out.push({ value: CUSTOM_PREFIX + provider, label: "Other model ID…", group: face.label, icon, meta: "" });
   };
   if (draft.claudeCode) {
     group(CLAUDE_CODE_ID, catalog.claude.length > 0 ? catalog.claude : CLAUDE_CODE_MODELS);
@@ -672,13 +674,13 @@ interface ModelPickerProps {
   label: string;
   hint: ReactNode;
   value: string;
-  options: SelectOption[];
+  options: ModelOption[];
   placeholder: string;
   error?: string;
   onChange: (address: string) => void;
 }
 
-/* A grouped model Select with a model ID field for "Other model ID…". */
+/* A searchable, grouped model picker with a model ID field for "Other model ID…". */
 function ModelPicker({ id, label, hint, value, options, placeholder, error, onChange }: ModelPickerProps) {
   const selected = pickerValue(value, options);
   const custom = selected.startsWith(CUSTOM_PREFIX);
@@ -686,7 +688,7 @@ function ModelPicker({ id, label, hint, value, options, placeholder, error, onCh
   return (
     <div className="auth-group">
       <Field label={label} htmlFor={id} hint={custom ? undefined : hint} error={custom ? undefined : error}>
-        <Select
+        <ModelSelect
           id={id}
           options={options}
           value={selected}
@@ -747,7 +749,7 @@ export function ModelStep() {
   const mainOptions = useMemo(() => modelOptions(draft, catalog, () => true), [draft, catalog]);
   const fallbackOptions = useMemo(
     () =>
-      [{ value: NO_FALLBACK, label: "No fallback" } as SelectOption].concat(
+      [{ value: NO_FALLBACK, label: "No fallback" } as ModelOption].concat(
         modelOptions(draft, catalog, (provider) => provider !== mainProvider)
       ),
     [draft, catalog, mainProvider]

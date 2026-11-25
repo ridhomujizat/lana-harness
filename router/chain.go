@@ -65,39 +65,70 @@ targets:
 		if last {
 			retries = retriesOnLast
 		}
+		// REQ-PAF-005: a provider with several API keys moves to its next key
+		// before the chain moves on. tried holds the keys this target used.
+		entry := snap.providers[target.Provider]
+		key := r.pickKey(entry, nil)
+		var tried map[string]bool
+		// keyStart is the attempt number of the first call with key; retries
+		// and backoff count per key.
+		keyStart := 1
 		for n := 1; ; n++ {
+			k := n - keyStart + 1
 			start := r.now()
-			stream, err := r.attempt(ctx, snap, requested, target, n, start, req, meta)
+			stream, err := r.attempt(ctx, snap, requested, target, key, n, start, req, meta)
 			if err == nil {
 				r.cool.clear(target)
+				if entry.pooled() {
+					r.keyCool.clear(target.Provider, key.env)
+				}
 				return stream, target, nil
 			}
 			if ctx.Err() != nil {
 				return nil, Target{}, ctx.Err()
 			}
 			pe := snap.redactError(r.opts.secrets, target.Provider, asProviderError(err))
-			r.recordFailure(snap, requested, target, n, start, meta, pe)
+			r.recordFailure(snap, requested, target, recordKey(entry, key), n, start, meta, pe)
 			if onAttempt != nil {
 				onAttempt(Attempt{Target: target, N: n, Err: pe})
 			}
 			lastErr = pe
-			switch class := effectiveClass(pe); class {
+			class := effectiveClass(pe)
+			if entry.pooled() && key != nil && keySpent(class, pe, k, retries) {
+				r.coolKey(snap, target.Provider, key.env, class, pe)
+				if tried == nil {
+					tried = map[string]bool{}
+				}
+				tried[key.env] = true
+				if next := r.pickKey(entry, tried); next != nil {
+					// The next key is tried at once, without backoff.
+					key, keyStart = next, n+1
+					continue
+				}
+				// No key is left: the target is spent.
+				if class == "rate_limit" || class == "auth" || class == core.ErrorClassQuota {
+					r.coolDown(snap, target, pe)
+				}
+				continue targets
+			}
+			switch class {
 			case "rate_limit", "server", "network":
 				if class == "rate_limit" && pe.RetryAfter > moveOnRetryAfter && !last {
 					r.coolDown(snap, target, pe)
 					continue targets
 				}
-				if n > retries {
+				if k > retries {
 					if class == "rate_limit" {
 						r.coolDown(snap, target, pe)
 					}
 					continue targets
 				}
-				if err := r.sleep(ctx, r.backoff(n, pe)); err != nil {
+				if err := r.sleep(ctx, r.backoff(k, pe)); err != nil {
 					return nil, Target{}, err
 				}
-			case "auth", "missing_secret", core.ErrorClassNotFound:
-				if class == "auth" {
+			case "auth", core.ErrorClassQuota, "missing_secret", core.ErrorClassNotFound:
+				// spec 75: quota moves the chain like auth.
+				if class == "auth" || class == core.ErrorClassQuota {
 					r.coolDown(snap, target, pe)
 				}
 				continue targets
@@ -110,12 +141,133 @@ targets:
 	return nil, Target{}, lastErr
 }
 
-// attempt makes one call to one target and waits for its first event.
-func (r *Router) attempt(ctx context.Context, snap *snapshot, requested string, target Target, n int, start time.Time, req core.ChatRequest, meta CallMeta) (core.ChatStream, error) {
+// keySpent reports whether a failed attempt spends the API key it used, so a
+// provider with several keys moves to its next one (REQ-PAF-005): auth and
+// quota at once, rate_limit after the usual retries of the key or when the
+// provider asks for a long wait.
+func keySpent(class string, pe *core.ProviderError, k, retries int) bool {
+	switch class {
+	case "auth", core.ErrorClassQuota:
+		return true
+	case "rate_limit":
+		return k > retries || pe.RetryAfter > moveOnRetryAfter
+	}
+	return false
+}
+
+// pickKey returns the key a call on entry uses (REQ-PAF-005): the first key
+// not in tried that is not cooling down and has a value. With tried nil (the
+// first call on a target), when every key is cooling down or empty, it
+// returns the first key with a value, else the first key, so the call fails
+// as before key pools; with tried set it returns nil when no key is left.
+// A provider with one key always gets that key.
+func (r *Router) pickKey(entry *providerEntry, tried map[string]bool) *keyClient {
+	if entry == nil || len(entry.keys) == 0 {
+		return nil
+	}
+	if len(entry.keys) == 1 {
+		if tried[entry.keys[0].env] {
+			return nil
+		}
+		return &entry.keys[0]
+	}
+	now := r.now()
+	var present *keyClient
+	for i := range entry.keys {
+		key := &entry.keys[i]
+		if tried[key.env] || !r.keyPresent(entry, key.env) {
+			continue
+		}
+		if _, cooling := r.keyCool.cooling(entry.name, key.env, now); !cooling {
+			return key
+		}
+		if present == nil {
+			present = key
+		}
+	}
+	if tried != nil {
+		return nil
+	}
+	if present != nil {
+		return present
+	}
+	return &entry.keys[0]
+}
+
+// keyPresent reports whether the secret env of a provider key has a value.
+// Custom providers, keys without an env, and routers without a secret source
+// count as present.
+func (r *Router) keyPresent(entry *providerEntry, env string) bool {
+	if entry.custom || env == "" || r.opts.secrets == nil {
+		return true
+	}
+	secret, ok := r.opts.secrets.Lookup(env)
+	return ok && secret.Reveal() != ""
+}
+
+// coolKey cools one API key of a provider down (REQ-PAF-005): a rate-limited
+// key for max(router cooldown, Retry-After), or a minute when both are zero;
+// a refused key for 5 minutes; a key out of quota for an hour.
+func (r *Router) coolKey(snap *snapshot, provider, env, class string, pe *core.ProviderError) {
+	var d time.Duration
+	switch class {
+	case "rate_limit":
+		d = max(snap.cooldown, pe.RetryAfter)
+		if d <= 0 {
+			d = keyCooldownRateLimit
+		}
+	case "auth":
+		d = keyCooldownAuth
+	case core.ErrorClassQuota:
+		d = keyCooldownQuota
+	default:
+		return
+	}
+	r.keyCool.set(provider, env, r.now().Add(d))
+}
+
+// recordKey is the key name a call record carries: the secret name of the
+// key used, only when the provider has more than one key (REQ-PAF-005).
+func recordKey(entry *providerEntry, key *keyClient) string {
+	if !entry.pooled() || key == nil {
+		return ""
+	}
+	return key.env
+}
+
+// KeyCooling returns the API keys of provider that are cooling down, by
+// secret name, and until when (REQ-PAF-006).
+func (r *Router) KeyCooling(provider string) map[string]time.Time {
+	out := map[string]time.Time{}
+	entry, ok := r.snap.Load().providers[provider]
+	if !ok {
+		return out
+	}
+	now := r.now()
+	for _, key := range entry.keys {
+		if key.env == "" {
+			continue
+		}
+		if until, cooling := r.keyCool.cooling(provider, key.env, now); cooling {
+			out[key.env] = until
+		}
+	}
+	return out
+}
+
+// attempt makes one call to one target with one of its keys and waits for
+// its first event. key nil uses the provider's first adapter.
+func (r *Router) attempt(ctx context.Context, snap *snapshot, requested string, target Target, key *keyClient, n int, start time.Time, req core.ChatRequest, meta CallMeta) (core.ChatStream, error) {
 	if snap.isClaude(target.Provider) {
 		// ADR 0020: a Claude Code target runs in the Claude Code runtime; the
 		// agent dispatches it before the router, so this is never reached.
 		return nil, &core.ProviderError{Class: core.ErrorClassNotFound, Message: "claude-code targets run in the Claude Code runtime, not through the router"}
+	}
+	if snap.isAntigravity(target.Provider) {
+		// ADR 0022, AC-AGY-016: an Antigravity target runs in the Antigravity
+		// runtime; the agent dispatches it before the router, so this is never
+		// reached. This keeps it out of StreamChain, cooldown, and the proxy.
+		return nil, &core.ProviderError{Class: core.ErrorClassNotFound, Message: "antigravity targets run in the Antigravity runtime, not through the router"}
 	}
 	entry, ok := snap.providers[target.Provider]
 	if !ok {
@@ -126,12 +278,17 @@ func (r *Router) attempt(ctx context.Context, snap *snapshot, requested string, 
 	if entry.cfg.Disabled {
 		return nil, &core.ProviderError{Class: core.ErrorClassNotFound, Message: fmt.Sprintf("provider %q is disabled", target.Provider)}
 	}
-	if pe := r.missingKey(entry); pe != nil {
+	adapter := entry.adapter
+	env := EffectiveKeyEnv(entry.cfg, entry.name)
+	if key != nil {
+		adapter, env = key.adapter, key.env
+	}
+	if pe := r.missingKey(entry, env); pe != nil {
 		return nil, pe
 	}
 	one := req
 	one.Model = target.Model
-	stream, err := entry.adapter.Stream(ctx, one)
+	stream, err := adapter.Stream(ctx, one)
 	if err != nil {
 		return nil, err
 	}
@@ -145,6 +302,7 @@ func (r *Router) attempt(ctx context.Context, snap *snapshot, requested string, 
 		return nil, err
 	}
 	base := r.baseRecord(requested, target, n, start, meta)
+	base.Key = recordKey(entry, key)
 	base.TTFTMs = r.now().Sub(start).Milliseconds()
 	return r.recordedStream(snap, first, pump, base, start), nil
 }
@@ -153,12 +311,8 @@ func (r *Router) attempt(ctx context.Context, snap *snapshot, requested string, 
 // API key env whose value is empty, so the chain moves on without calling
 // the provider (spec 37 failure table). Providers added with WithProviders
 // and routers without a secret source are not checked.
-func (r *Router) missingKey(entry *providerEntry) *core.ProviderError {
-	if entry.custom || r.opts.secrets == nil {
-		return nil
-	}
-	env := EffectiveKeyEnv(entry.cfg, entry.name)
-	if env == "" {
+func (r *Router) missingKey(entry *providerEntry, env string) *core.ProviderError {
+	if entry.custom || r.opts.secrets == nil || env == "" {
 		return nil
 	}
 	if secret, ok := r.opts.secrets.Lookup(env); ok && secret.Reveal() != "" {
@@ -187,10 +341,17 @@ func (r *Router) coolDown(snap *snapshot, target Target, pe *core.ProviderError)
 }
 
 // effectiveClass maps an HTTP 404 that an adapter classed as client to
-// not_found.
+// not_found, and an HTTP error that means an exhausted balance, credit, or
+// quota (IsQuotaError) to quota, whatever class the adapter gave it.
 func effectiveClass(pe *core.ProviderError) string {
 	if pe.Class == "client" && pe.Status == 404 {
 		return core.ErrorClassNotFound
+	}
+	switch pe.Class {
+	case "client", "auth", "rate_limit":
+		if IsQuotaError(pe.Status, pe.Message) {
+			return core.ErrorClassQuota
+		}
 	}
 	return pe.Class
 }

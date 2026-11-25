@@ -19,6 +19,7 @@ import (
 	"github.com/ridhomujizat/lana-harness/core"
 	"github.com/ridhomujizat/lana-harness/internal/agenthome"
 	"github.com/ridhomujizat/lana-harness/internal/avatar"
+	"github.com/ridhomujizat/lana-harness/internal/models"
 	"github.com/ridhomujizat/lana-harness/internal/webfiles"
 )
 
@@ -112,10 +113,6 @@ const (
 	engineLabelLana   = "lana"
 	engineLabelClaude = "Claude Agent"
 )
-
-// runtimeAgentEfforts are the reasoning_effort values of a claude-code agent,
-// passed to --effort (API-CCR-001).
-var runtimeAgentEfforts = []string{"low", "medium", "high", "xhigh", "max"}
 
 // duplicateAgentKeys are the fields accepted by the duplicate endpoint.
 var duplicateAgentKeys = map[string]bool{"name": true, "display_name": true}
@@ -625,7 +622,7 @@ func (s *Server) handleCreateAgent(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
-	if problem := checkAgentEffort(record, s.claudeAccountSet(r.Context())); problem != "" {
+	if problem := checkAgentEffort(record); problem != "" {
 		writeAgentIssue(w, "agents."+name+".reasoning_effort", problem)
 		return
 	}
@@ -828,7 +825,7 @@ func (s *Server) handlePutAgent(w http.ResponseWriter, r *http.Request) {
 	switchAgentRuntime(&record, previousRuntime, body)
 	// API-CCT-002: a save writes the claude-code address and no runtime.
 	migrateLegacyRuntime(&record)
-	if problem := checkAgentEffort(record, claudeAccountsOf(file.Raw)); problem != "" {
+	if problem := checkAgentEffort(record); problem != "" {
 		writeAgentIssue(w, "agents."+name+".reasoning_effort", problem)
 		return
 	}
@@ -1169,11 +1166,10 @@ func applyAgentField(record *agentRecord, key string, raw json.RawMessage) error
 		if err := json.Unmarshal(raw, &value); err != nil {
 			return err
 		}
-		// REQ-MDL-001: an empty value uses the model's catalog default. The
-		// value is checked against the agent's final runtime once every field
-		// is applied (checkAgentEffort).
-		if value != "" && !validReasoningEffort(value) && !containsString(runtimeAgentEfforts, value) {
-			return errors.New("reasoning_effort must be one of off, low, medium, high, xhigh, max")
+		// REQ-MDL-001: an empty value uses the model's catalog default. Spec
+		// 76: any model's own level name, one token (checkAgentEffort).
+		if !validReasoningEffort(value) {
+			return errors.New(reasoningEffortProblem)
 		}
 		record.ReasoningEffort = value
 		return nil
@@ -1401,30 +1397,13 @@ func clearAgentField(record *agentRecord, key string) {
 	}
 }
 
-// checkAgentEffort checks reasoning_effort against the agent's runtime: off,
-// low, high, max for lana (REQ-MDL-001); low, medium, high, xhigh, max for a
-// Claude Agent (API-CCR-001). It returns "" when the value is valid.
-func checkAgentEffort(record agentRecord, accounts map[string]bool) string {
-	effort := record.ReasoningEffort
-	if effort == "" {
-		return ""
-	}
-	if record.Runtime == claudeCodeRuntime {
-		if !containsString(runtimeAgentEfforts, effort) {
-			return "reasoning_effort must be one of low, medium, high, xhigh, max"
-		}
-		return ""
-	}
-	// An agent on a Claude Code address (any account) takes Claude Code's
-	// efforts and lana's.
-	if isClaudeAccountModel(record.Model, accounts) {
-		if !validReasoningEffort(effort) && !containsString(runtimeAgentEfforts, effort) {
-			return "reasoning_effort must be one of off, low, medium, high, xhigh, max"
-		}
-		return ""
-	}
-	if !validReasoningEffort(effort) {
-		return "reasoning_effort must be one of off, low, high, max"
+// checkAgentEffort checks reasoning_effort: "" (the model default) or one
+// token, the model's own level name (spec 76 REQ-MES-001, revision
+// 2026-11-26). A level the model does not list falls back to its default at
+// call time. It returns "" when the value is valid.
+func checkAgentEffort(record agentRecord) string {
+	if !validReasoningEffort(record.ReasoningEffort) {
+		return reasoningEffortProblem
 	}
 	return ""
 }
@@ -1472,15 +1451,13 @@ func validAgentPermission(value string) bool {
 	return false
 }
 
-// validReasoningEffort reports whether value is one of the four efforts of
-// REQ-MDL-001.
+// reasoningEffortProblem is the message of an invalid reasoning_effort.
+const reasoningEffortProblem = "reasoning_effort must be one word of letters, digits, '-' or '_' (at most 20 characters)"
+
+// validReasoningEffort reports whether value is a reasoning_effort: "" or one
+// token (spec 76 REQ-MES-001).
 func validReasoningEffort(value string) bool {
-	for _, allowed := range []string{"off", "low", "high", "max"} {
-		if value == allowed {
-			return true
-		}
-	}
-	return false
+	return models.ValidEffort(value)
 }
 
 func writeAgentIssue(w http.ResponseWriter, key, message string) {

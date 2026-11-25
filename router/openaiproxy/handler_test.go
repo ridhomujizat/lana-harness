@@ -559,7 +559,8 @@ func TestReasoningEffort(t *testing.T) {
 	p := &fakeProvider{events: textEvents("ok")}
 	e := newEnv(t, map[string]*fakeProvider{"a": p}, nil)
 	for in, want := range map[string]string{
-		"": "", "none": "off", "minimal": "low", "low": "low", "medium": "high", "high": "high", "xhigh": "max",
+		// Spec 76: levels pass through as the model's own names.
+		"": "", "none": "off", "minimal": "minimal", "low": "low", "medium": "medium", "high": "high", "xhigh": "xhigh",
 	} {
 		resp := e.post(t, map[string]any{"model": "a/m", "reasoning_effort": in, "messages": []any{userMsg("hi")}})
 		if resp.StatusCode != http.StatusOK {
@@ -766,5 +767,49 @@ func TestRouting(t *testing.T) {
 	// A nil auth rejects everything.
 	if got := do(NewHandler(rt, nil), http.MethodGet, "/models"); got != 401 {
 		t.Fatalf("nil auth = %d", got)
+	}
+}
+
+// AC-AGY-016, API-AGY-026: an Antigravity address is never served through the
+// proxy: it answers 404 model_not_found, lists no Antigravity model, and runs
+// nothing upstream.
+func TestProxyRejectsAntigravity(t *testing.T) {
+	p := &fakeProvider{events: textEvents("ok")}
+	e := newEnv(t, map[string]*fakeProvider{"a": p}, nil)
+	// The built-in "antigravity" account always exists; add a named one.
+	cfg := e.router.Config()
+	providers := cfg.Providers
+	providers["agy-work"] = core.ProviderConfig{Kind: core.AntigravityKind}
+	if err := e.router.Apply(router.Config{Providers: providers, Combos: cfg.Combos}); err != nil {
+		t.Fatalf("apply: %v", err)
+	}
+	for _, model := range []string{"antigravity/gemini-4-neon-high", "agy-work/default"} {
+		resp := e.post(t, map[string]any{"model": model, "messages": []any{userMsg("hi")}})
+		if resp.StatusCode != http.StatusNotFound {
+			t.Fatalf("%s: status = %d: %s", model, resp.StatusCode, readBody(t, resp))
+		}
+		if got := decodeError(t, resp); got.Code != "model_not_found" {
+			t.Fatalf("%s: error = %+v", model, got)
+		}
+	}
+	if p.callCount() != 0 {
+		t.Fatalf("upstream called %d times", p.callCount())
+	}
+	// GET /models never names an Antigravity address.
+	req, _ := http.NewRequest(http.MethodGet, e.srv.URL+"/router/v1/models", nil)
+	req.Header.Set("Authorization", "Bearer "+testKey)
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+	var list modelList
+	if err := json.NewDecoder(resp.Body).Decode(&list); err != nil {
+		t.Fatal(err)
+	}
+	for _, m := range list.Data {
+		if strings.HasPrefix(m.ID, "antigravity/") || strings.HasPrefix(m.ID, "agy-work/") {
+			t.Fatalf("models list names %q", m.ID)
+		}
 	}
 }

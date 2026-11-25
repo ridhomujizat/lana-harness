@@ -2,6 +2,7 @@ package config
 
 import (
 	"fmt"
+	"math"
 	"regexp"
 	"sort"
 	"strconv"
@@ -12,21 +13,45 @@ import (
 
 	"github.com/ridhomujizat/lana-harness/core"
 	"github.com/ridhomujizat/lana-harness/internal/agenthome"
+	"github.com/ridhomujizat/lana-harness/internal/models"
 	"github.com/ridhomujizat/lana-harness/internal/pattern"
 )
 
 var topKeys = []string{"agents", "channels", "combos", "knowledge", "mcp", "modules", "providers", "router", "routes", "teams", "update", "version", "web"}
-var providerKeys = []string{"allow_scheduled", "api_key_env", "auth", "base_url", "binary", "config_dir", "disabled", "headers", "kind", "label", "stream_idle_timeout", "thinking_format", "timeout"}
+var providerKeys = []string{"allow_scheduled", "api_key_env", "api_key_envs", "auth", "base_url", "binary", "config_dir", "disabled", "headers", "home", "kind", "label", "pool", "priority", "stream_idle_timeout", "thinking_format", "timeout"}
 
 // claudeAccountKeys are the keys of a [providers.<name>] table of kind
 // "claude-code", a Claude Code account (API-CCT-010).
-var claudeAccountKeys = []string{"allow_scheduled", "api_key_env", "auth", "binary", "config_dir", "disabled", "kind", "label"}
+var claudeAccountKeys = []string{"allow_scheduled", "api_key_env", "auth", "binary", "config_dir", "disabled", "kind", "label", "pool", "priority"}
+
+// antigravityAccountKeys are the keys of a [providers.<name>] table of kind
+// "antigravity", an Antigravity account (API-AGY-002).
+var antigravityAccountKeys = []string{"allow_scheduled", "binary", "disabled", "home", "kind", "label", "pool", "priority"}
+
+// poolAccountKeys are the subscription pool keys of spec 75 (REQ-PAF-001):
+// allowed for kind claude-code and antigravity only.
+var poolAccountKeys = []string{"pool", "priority"}
+
+// apiKeyPoolKinds are the API kinds that may list backup keys in
+// api_key_envs (REQ-PAF-005).
+var apiKeyPoolKinds = []string{"anthropic", "commandcode", "deepseek", "openai", "openai_compat", "openrouter"}
 
 // builtinAccountRejectedKeys are the account keys the [providers.claude-code]
 // table of the built-in account must not set (spec 39 revision 5,
 // API-CCT-027): it always uses the owner's own Claude Code folder and has no
 // label.
 var builtinAccountRejectedKeys = []string{"config_dir", "label"}
+
+// antigravityBuiltinRejectedKeys are the account keys the
+// [providers.antigravity] table of the built-in account must not set
+// (API-AGY-003): it always runs agy with the owner's own HOME and login and
+// has no label.
+var antigravityBuiltinRejectedKeys = []string{"home", "label"}
+
+// antigravityProvider is the built-in account name of Antigravity
+// (API-AGY-003): [providers.antigravity] never defines it.
+const antigravityProvider = core.AntigravityKind
+
 var knowledgeKeys = []string{"agent", "auto_recall", "consolidate_at", "embedding_model", "embedding_provider", "journal", "path"}
 var agentKeys = []string{"allow_scheduled", "api_key_env", "auth", "binary", "color", "compaction_headroom", "compaction_retain", "compaction_threshold", "context_files", "context_window", "defer_tools", "description", "disabled_tools", "display_name", "fallback", "max_steps", "max_tokens", "mcp", "memory_capture", "model", "permission", "prompt_file", "provider", "reasoning_effort", "rules", "runtime", "skill_write", "skills", "subagents", "title", "tools", "toolset", "vision", "workspace", "workspace_only"}
 
@@ -41,13 +66,11 @@ var runtimeForbiddenKeys = []string{"provider"}
 // runtimeAuthModes are the accepted agents.<name>.auth values.
 var runtimeAuthModes = []string{core.RuntimeAuthAPIKey, core.RuntimeAuthSubscription}
 
-// runtimeEfforts are the reasoning_effort values Claude Code accepts, passed
-// to --effort (API-CCR-001). An agent whose model is a claude-code address
-// may use them and the native values.
-var runtimeEfforts = []string{"high", "low", "max", "medium", "xhigh"}
-
-// nativeEfforts are the reasoning_effort values of a lana agent (REQ-MDL-001).
-var nativeEfforts = []string{"off", "low", "high", "max"}
+// effortMsg is the problem of a reasoning_effort that is not one token. Spec
+// 76 (revision 2026-11-26): the value is the model's own level name, so any
+// single token is accepted; a level the model does not list falls back to
+// its default at call time.
+const effortMsg = "must be one word of letters, digits, '-' or '_' (at most 20 characters)"
 
 // runtimeNames are the accepted agents.<name>.runtime values: claude-code and
 // any runtime registered with core.RegisterRuntime.
@@ -80,7 +103,7 @@ var webRemoteTerminals = []string{core.WebRemoteTerminalView, core.WebRemoteTerm
 var webRemoteConfirms = []string{core.WebRemoteConfirmPassword, core.WebRemoteConfirmPasswordOrTelegram}
 
 // providerKinds are the accepted providers.<name>.kind values (API-RTR-001).
-var providerKinds = []string{"anthropic", core.ClaudeCodeKind, "commandcode", "deepseek", "openai", "openai_compat", "openrouter"}
+var providerKinds = []string{"anthropic", core.AntigravityKind, core.ClaudeCodeKind, "commandcode", "deepseek", "openai", "openai_compat", "openrouter"}
 
 // embeddingKinds are the provider kinds that can serve knowledge embeddings
 // (REQ-RTR-007).
@@ -404,18 +427,36 @@ func validateRouter(v map[string]any, path string, add func(string, string)) {
 func validateProvider(v map[string]any, path string, add func(string, string)) {
 	kindValue, _ := v["kind"].(string)
 	claude := kindValue == core.ClaudeCodeKind
+	antigravity := kindValue == core.AntigravityKind
 	for _, key := range sortedKeys(v) {
 		switch {
 		case !contains(providerKeys, key):
 			add(path+"."+key, unknownKeyMsg(key, providerKeys))
 		case claude && !contains(claudeAccountKeys, key):
 			add(path+"."+key, "not allowed for kind claude-code")
-		case !claude && kindValue != "" && contains(claudeAccountKeys, key) && !contains([]string{"api_key_env", "disabled", "kind"}, key):
+		case antigravity && !contains(antigravityAccountKeys, key):
+			add(path+"."+key, "not allowed for kind antigravity")
+		case !claude && !antigravity && kindValue != "" && contains(poolAccountKeys, key):
+			add(path+"."+key, "allowed only for kind claude-code or antigravity")
+		case key == "api_key_envs" && kindValue != "" && !contains(apiKeyPoolKinds, kindValue):
+			add(path+"."+key, "allowed only for API kinds ("+strings.Join(apiKeyPoolKinds, ", ")+")")
+		case !claude && !antigravity && kindValue != "" && contains(claudeAccountKeys, key) && !contains([]string{"api_key_env", "disabled", "kind"}, key):
 			add(path+"."+key, "allowed only for kind claude-code")
+		case !claude && !antigravity && kindValue != "" && contains(antigravityAccountKeys, key) && !contains(claudeAccountKeys, key):
+			add(path+"."+key, "allowed only for kind antigravity")
 		}
 	}
 	if claude {
 		validateClaudeAccount(v, path, add)
+	}
+	if antigravity {
+		validateAntigravityAccount(v, path, add)
+	}
+	if claude || antigravity {
+		validatePoolKeys(v, path, add)
+	}
+	if contains(apiKeyPoolKinds, kindValue) {
+		validateAPIKeyEnvs(v, path, add)
 	}
 	kind, ok := v["kind"]
 	if !ok {
@@ -471,6 +512,61 @@ func validateProvider(v map[string]any, path string, add func(string, string)) {
 	}
 }
 
+// validatePoolKeys checks the subscription pool keys of a Claude Code or
+// Antigravity account (REQ-PAF-001): priority is an integer >= 0 and pool a
+// boolean.
+func validatePoolKeys(v map[string]any, path string, add func(string, string)) {
+	if val, ok := v["priority"]; ok {
+		n, isInt := asInt(val)
+		switch {
+		case !isInt:
+			add(path+".priority", typeMsg("integer", val))
+		case n < 0:
+			add(path+".priority", fmt.Sprintf("must be 0 or more, got %d", n))
+		case n > math.MaxInt32:
+			add(path+".priority", fmt.Sprintf("must be at most %d, got %d", math.MaxInt32, n))
+		}
+	}
+	if val, ok := v["pool"]; ok {
+		if _, ok := val.(bool); !ok {
+			add(path+".pool", typeMsg("boolean", val))
+		}
+	}
+}
+
+// validateAPIKeyEnvs checks the backup keys of an API provider
+// (REQ-PAF-005): an array of secret names, each a valid env name, with no
+// name listed twice or equal to api_key_env.
+func validateAPIKeyEnvs(v map[string]any, path string, add func(string, string)) {
+	val, ok := v["api_key_envs"]
+	if !ok {
+		return
+	}
+	list, ok := asSlice(val)
+	if !ok {
+		add(path+".api_key_envs", typeMsg("array string", val))
+		return
+	}
+	seen := map[string]bool{}
+	if first, _ := v["api_key_env"].(string); first != "" {
+		seen[first] = true
+	}
+	for i, item := range list {
+		itemPath := fmt.Sprintf("%s.api_key_envs.%d", path, i)
+		name, ok := item.(string)
+		switch {
+		case !ok:
+			add(itemPath, typeMsg("string", item))
+		case !validEnvName(name):
+			add(itemPath, fmt.Sprintf("%q is not a valid secret name (letters, digits, and _, not starting with a digit)", name))
+		case seen[name]:
+			add(itemPath, fmt.Sprintf("duplicate key %q", name))
+		default:
+			seen[name] = true
+		}
+	}
+}
+
 // validateClaudeAccount checks the Claude Code keys of a provider of kind
 // "claude-code" (API-CCT-010).
 func validateClaudeAccount(v map[string]any, path string, add func(string, string)) {
@@ -506,6 +602,47 @@ func validateClaudeAccount(v map[string]any, path string, add func(string, strin
 		add(path+".binary", "must not start with '-'")
 	}
 	// REQ-CCT-012: the display label.
+	if val, ok := v["label"]; ok {
+		label, ok := val.(string)
+		switch {
+		case !ok:
+			add(path+".label", typeMsg("string", val))
+		case strings.ContainsAny(label, "\x00\r\n"):
+			add(path+".label", "must be one line")
+		case utf8.RuneCountInString(label) > MaxClaudeAccountLabel:
+			add(path+".label", fmt.Sprintf("must be at most %d characters (got %d)", MaxClaudeAccountLabel, utf8.RuneCountInString(label)))
+		}
+	}
+}
+
+// validateAntigravityAccount checks the Antigravity keys of a provider of
+// kind "antigravity" (API-AGY-002).
+func validateAntigravityAccount(v map[string]any, path string, add func(string, string)) {
+	for _, key := range []string{"binary", "home"} {
+		if val, ok := v[key]; ok {
+			if _, ok := val.(string); !ok {
+				add(path+"."+key, typeMsg("string", val))
+			}
+		}
+	}
+	if val, ok := v["allow_scheduled"]; ok {
+		if _, ok := val.(bool); !ok {
+			add(path+".allow_scheduled", typeMsg("boolean", val))
+		}
+	}
+	if home, ok := v["home"].(string); ok && home != "" {
+		switch {
+		case strings.ContainsAny(home, "\x00\r\n"):
+			add(path+".home", "must be one line")
+		case !strings.HasPrefix(home, "/") && home != "~" && !strings.HasPrefix(home, "~/") &&
+			!strings.HasPrefix(home, "$LANA_HOME") && !strings.HasPrefix(home, "${LANA_HOME}"):
+			add(path+".home", "must be an absolute path, or start with ~/ or $LANA_HOME")
+		}
+	}
+	if bin, ok := v["binary"].(string); ok && strings.HasPrefix(bin, "-") {
+		add(path+".binary", "must not start with '-'")
+	}
+	// REQ-AGY-001: the display label, as for a Claude Code account.
 	if val, ok := v["label"]; ok {
 		label, ok := val.(string)
 		switch {
@@ -703,16 +840,11 @@ func validateAgent(v map[string]any, path string, add func(string, string)) {
 		}
 	}
 	if val, ok := v["reasoning_effort"]; ok {
-		s, ok := val.(string)
-		// A Claude Code agent's effort values differ; validateEffective
-		// checks an address model against the merged model, runtime, and
-		// providers (API-CCR-001, REQ-CCT-010).
-		runtime, _ := v["runtime"].(string)
-		model, _ := v["model"].(string)
-		if !ok {
+		// Spec 76 REQ-MES-001: any model's own level name, one token.
+		if s, ok := val.(string); !ok {
 			add(path+".reasoning_effort", typeMsg("string", val))
-		} else if runtime == "" && !isAddress(model) && s != "" && !contains(nativeEfforts, s) {
-			add(path+".reasoning_effort", enumMsg(s, nativeEfforts))
+		} else if !models.ValidEffort(s) {
+			add(path+".reasoning_effort", effortMsg)
 		}
 	}
 	// API-DKN-002: skill_write is "approve" (the default when empty) or
@@ -1173,9 +1305,9 @@ func validateEffective(m map[string]any, positions map[string]pos, add func(stri
 	mcps, _ := asMap(m["mcp"])
 	combos, _ := asMap(m["combos"])
 	comboNames := sortedKeys(combos)
-	// The built-in account's optional table (API-CCT-027) is no configured
-	// provider: claude-code addresses are checked as Claude Code accounts.
-	providerNames := withoutString(sortedKeys(providers), core.ClaudeCodeProvider)
+	// The built-in accounts' optional tables (API-CCT-027, API-AGY-003) are no
+	// configured provider: their addresses are checked as runtime accounts.
+	providerNames := withoutString(withoutString(sortedKeys(providers), core.ClaudeCodeProvider), antigravityProvider)
 	agentNames := sortedKeys(agents)
 	teamNames := sortedKeys(teams)
 	mcpNames := sortedKeys(mcps)
@@ -1217,13 +1349,36 @@ func validateEffective(m map[string]any, positions map[string]pos, add func(stri
 			}
 		}
 	}
+	// API-AGY-001: antigravity is a built-in provider. API-AGY-003: an
+	// optional [providers.antigravity] table of kind "antigravity" holds the
+	// built-in account's settings only; it never moves the account off the
+	// owner's own agy login.
+	if raw, ok := providers[antigravityProvider]; ok {
+		table, _ := asMap(raw)
+		path := "providers." + antigravityProvider
+		if kind, _ := table["kind"].(string); kind != core.AntigravityKind {
+			add(path, "antigravity is built in")
+		} else {
+			for _, key := range antigravityBuiltinRejectedKeys {
+				if _, ok := table[key]; ok {
+					add(path+"."+key, "antigravity is built in")
+				}
+			}
+		}
+	}
 	// REQ-CCT-010: the Claude Code accounts are the built-in claude-code and
 	// every provider of kind claude-code.
 	accounts := claudeAccounts{core.ClaudeCodeProvider: true}
+	// REQ-AGY-001: the Antigravity accounts are the built-in antigravity and
+	// every provider of kind antigravity.
+	agyAccounts := antigravityAccounts{antigravityProvider: true}
 	for _, name := range providerNames {
 		provider, _ := asMap(providers[name])
-		if kind, _ := provider["kind"].(string); kind == core.ClaudeCodeKind {
+		switch kind, _ := provider["kind"].(string); kind {
+		case core.ClaudeCodeKind:
 			accounts[name] = true
+		case core.AntigravityKind:
+			agyAccounts[name] = true
 		}
 	}
 	// API-RTR-001: base_url is required only for openai_compat; the other
@@ -1243,7 +1398,7 @@ func validateEffective(m map[string]any, positions map[string]pos, add func(stri
 	for _, name := range comboNames {
 		combo, _ := asMap(combos[name])
 		path := "combos." + name
-		if contains(providerNames, name) || name == core.ClaudeCodeProvider {
+		if contains(providerNames, name) || name == core.ClaudeCodeProvider || name == antigravityProvider {
 			add(path, "name is already used by a provider")
 		}
 		raw, hasModels := combo["models"]
@@ -1269,6 +1424,12 @@ func validateEffective(m map[string]any, positions map[string]pos, add func(stri
 				add(itemPath, fmt.Sprintf("%q is not a provider/model address", item))
 			case accounts.address(item):
 				if msg := claudeCodeModelMsg(item); msg != "" {
+					add(itemPath, msg)
+				} else if seen[item] {
+					add(itemPath, fmt.Sprintf("model %q is listed twice", item))
+				}
+			case agyAccounts.address(item):
+				if msg := antigravityModelMsg(item); msg != "" {
 					add(itemPath, msg)
 				} else if seen[item] {
 					add(itemPath, fmt.Sprintf("model %q is listed twice", item))
@@ -1304,6 +1465,10 @@ func validateEffective(m map[string]any, positions map[string]pos, add func(stri
 			if msg := claudeCodeModelMsg(model); msg != "" {
 				add(path+".model", msg)
 			}
+		case provider == "" && agyAccounts.address(model):
+			if msg := antigravityModelMsg(model); msg != "" {
+				add(path+".model", msg)
+			}
 		case provider == "" && isModelRef(model) && !contains(providerNames, addressProvider(model)):
 			add(path+".model", fmt.Sprintf("unknown provider or combo %q", model))
 		}
@@ -1319,6 +1484,10 @@ func validateEffective(m map[string]any, positions map[string]pos, add func(stri
 				add(itemPath, fmt.Sprintf("%q is not provider:model or provider/model", item))
 			case accounts.address(item):
 				if msg := claudeCodeModelMsg(item); msg != "" {
+					add(itemPath, msg)
+				}
+			case agyAccounts.address(item):
+				if msg := antigravityModelMsg(item); msg != "" {
 					add(itemPath, msg)
 				}
 			case !contains(providerNames, addressProvider(item)):
@@ -1386,7 +1555,7 @@ func validateEffective(m map[string]any, positions map[string]pos, add func(stri
 	}
 	if router, ok := asMap(m["router"]); ok {
 		if background, ok := router["background_model"].(string); ok && background != "" {
-			validateBackgroundModel(background, combos, providerNames, accounts, add)
+			validateBackgroundModel(background, combos, providerNames, accounts, agyAccounts, add)
 		}
 	}
 	rows, _ := asSlice(m["modules"])
@@ -1614,16 +1783,46 @@ func claudeCodeModelMsg(address string) string {
 	return ""
 }
 
-// validateBackgroundModel checks [router] background_model (API-CCT-003): a
-// combo or address of a known provider, never with a claude-code target.
-func validateBackgroundModel(value string, combos map[string]any, providerNames []string, accounts claudeAccounts, add func(string, string)) {
+// antigravityAccounts is the set of Antigravity account names: the built-in
+// antigravity and every provider of kind antigravity (REQ-AGY-001).
+type antigravityAccounts map[string]bool
+
+// address reports whether s is a "<account>/<model>" address of an account.
+func (a antigravityAccounts) address(s string) bool {
+	return isAddress(s) && a[addressProvider(s)]
+}
+
+// antigravityModelMsg checks the model part of an Antigravity address
+// (REQ-AGY-001): "" means valid. "default" is agy's current model.
+func antigravityModelMsg(address string) string {
+	model := address
+	if i := strings.IndexByte(address, '/'); i >= 0 {
+		model = address[i+1:]
+	}
+	if strings.HasPrefix(model, "-") {
+		return "an antigravity model must not start with '-'"
+	}
+	if model != "default" && (model == "" || strings.IndexFunc(model, unicode.IsSpace) >= 0) {
+		return fmt.Sprintf("invalid antigravity model %q", model)
+	}
+	return ""
+}
+
+// validateBackgroundModel checks [router] background_model (API-CCT-003,
+// API-AGY-004): a combo or address of a known provider, never with a Claude
+// Code or Antigravity target.
+func validateBackgroundModel(value string, combos map[string]any, providerNames []string, accounts claudeAccounts, agyAccounts antigravityAccounts, add func(string, string)) {
 	const path = "router.background_model"
 	if raw, ok := combos[value]; ok {
 		combo, _ := asMap(raw)
 		list, _ := asStringSlice(combo["models"])
 		for _, item := range list {
-			if accounts.address(item) {
+			switch {
+			case accounts.address(item):
 				add(path, fmt.Sprintf("combo %q lists %q; background passes cannot use claude-code", value, item))
+				return
+			case agyAccounts.address(item):
+				add(path, fmt.Sprintf("combo %q lists %q; background passes cannot use antigravity", value, item))
 				return
 			}
 		}
@@ -1632,6 +1831,8 @@ func validateBackgroundModel(value string, combos map[string]any, providerNames 
 	switch {
 	case accounts[addressProvider(value)]:
 		add(path, "background passes cannot use claude-code")
+	case agyAccounts[addressProvider(value)]:
+		add(path, "background passes cannot use antigravity")
 	case !isModelRef(value):
 		add(path, fmt.Sprintf("unknown provider or combo %q", value))
 	case !contains(providerNames, addressProvider(value)):
@@ -1656,7 +1857,6 @@ func validateClaudeKeys(agent map[string]any, path string, accounts claudeAccoun
 	model, _ := agent["model"].(string)
 	runtime, isString := agent["runtime"].(string)
 	legacy := isString && runtime != ""
-	claude := accounts.address(model)
 	if legacy {
 		names := runtimeNames()
 		if !contains(names, runtime) {
@@ -1670,20 +1870,9 @@ func validateClaudeKeys(agent map[string]any, path string, accounts claudeAccoun
 		if strings.HasPrefix(model, "-") {
 			add(path+".model", "must not start with '-'")
 		}
-		claude = true
 	}
-	if effort, ok := agent["reasoning_effort"].(string); ok && effort != "" && claude {
-		allowed := append(append([]string{}, runtimeEfforts...), "off")
-		if legacy {
-			allowed = runtimeEfforts
-		}
-		if !contains(allowed, effort) {
-			add(path+".reasoning_effort", enumMsg(effort, allowed))
-		}
-	} else if ok && effort != "" && isAddress(model) && !contains(nativeEfforts, effort) {
-		// The layer check leaves an address model to this merged check.
-		add(path+".reasoning_effort", enumMsg(effort, nativeEfforts))
-	}
+	// Spec 76: reasoning_effort is checked per layer as one token; a Claude
+	// Code turn sends --effort only for a level Claude Code lists.
 	return legacy
 }
 

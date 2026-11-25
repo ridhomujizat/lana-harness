@@ -1,0 +1,220 @@
+/* The model picker (views/model-picker.tsx): a Gr8r .pop with a search pin,
+   a scrolling grouped listbox, and an optional footer. The popover itself does
+   not scroll; the list does, so the search stays on top. */
+.pop.mp-pop,
+.pop.mp-pop[popover] {
+  display: flex;
+  flex-direction: column;
+  width: 380px;
+  min-width: 300px;
+  max-width: min(440px, calc(100vw - 16px));
+  padding: 0;
+  overflow: hidden;
+}
+.mp-panel {
+  display: flex;
+  flex-direction: column;
+  flex: 1 1 auto;
+  min-height: 0;
+}
+.pop .mp-search {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex: none;
+  margin: 0;
+  padding: 8px 10px;
+  color: var(--text-3);
+}
+.mp-search input {
+  flex: 1;
+  min-width: 0;
+  color: var(--text);
+}
+.mp-clear {
+  display: inline-grid;
+  place-items: center;
+  width: 22px;
+  height: 22px;
+  border-radius: var(--r-sm);
+  color: var(--text-3);
+}
+.mp-clear:hover {
+  background: var(--surface-2);
+  color: var(--text);
+}
+.mp-list {
+  flex: 1 1 auto;
+  min-height: 0;
+  max-height: 380px;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  padding: 0 4px 4px;
+}
+.mp-group + .mp-group {
+  margin-top: 2px;
+}
+.mp-gh {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  width: 100%;
+  min-height: 30px;
+  padding: 0 8px;
+  background: var(--surface);
+  color: var(--text-3);
+  font-size: var(--fs-2xs);
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  text-align: left;
+}
+.mp-gh:hover,
+.mp-gh:focus-visible {
+  color: var(--text);
+  outline: none;
+}
+.mp-gh .select-icon {
+  margin-right: 0;
+}
+.mp-count {
+  font-weight: 500;
+  letter-spacing: 0;
+  color: var(--text-4, var(--text-3));
+}
+.mi.mp-opt {
+  min-height: 34px;
+  padding: 4px 8px;
+  gap: 8px;
+  cursor: pointer;
+  /* Keep the active option clear of the sticky group heading. */
+  scroll-margin-top: 34px;
+}
+.mi.mp-opt .select-icon {
+  margin-right: 0;
+}
+.mi.mp-opt.on {
+  font-weight: 500;
+}
+.mp-text {
+  display: flex;
+  flex-direction: column;
+  flex: 1 1 auto;
+  min-width: 0;
+  line-height: 1.3;
+}
+.mp-name {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+.mp-meta {
+  color: var(--text-3);
+  font-family: var(--mono);
+  font-size: var(--fs-2xs);
+  font-weight: 400;
+}
+.mp-hint {
+  flex: none;
+  color: var(--text-3);
+  font-size: var(--fs-2xs);
+  font-weight: 400;
+}
+.mi.mp-opt .mp-ck {
+  flex: none;
+  width: 14px;
+  margin-left: 0;
+}
+.mp-panel .tag {
+  flex: none;
+  padding: 0 5px;
+  border-radius: var(--r-sm);
+  background: var(--surface-2);
+  color: var(--text-3);
+  font-size: var(--fs-2xs);
+  font-weight: 500;
+}
+.mp-empty {
+  margin: 0;
+  padding: 10px 12px;
+  color: var(--text-3);
+  font-size: var(--fs-xs);
+}
+.mp-footer {
+  flex: none;
+  border-top: 1px solid var(--divider);
+  padding: 6px 8px;
+}
+.mp-footer .mi-custom {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.mp-footer .mi-custom-input {
+  flex: 1;
+  min-width: 0;
+}
+.mp-footer .mi-empty {
+  margin: 0 0 6px;
+  color: var(--text-3);
+  font-size: var(--fs-xs);
+}
+
+/* The trigger: the selected model's label, then its group muted. */
+.mp-trigger-label {
+  min-width: 0;
+}
+.mp-trigger-group {
+  margin-left: 6px;
+  color: var(--text-3);
+  font-weight: 400;
+}
+
+/* Phone: the picker becomes a bottom sheet with the search on top and touch
+   targets of at least 40px. The inline placement styles are overridden. */
+@media (max-width: 640px) {
+  .pop.mp-pop,
+  .pop.mp-pop[popover] {
+    left: 0 !important;
+    right: 0 !important;
+    top: auto !important;
+    bottom: 0 !important;
+    width: 100% !important;
+    min-width: 0 !important;
+    max-width: none;
+    max-height: 85vh !important;
+    max-height: 85dvh !important;
+    border-radius: var(--r-lg) var(--r-lg) 0 0;
+    padding-bottom: env(safe-area-inset-bottom, 0);
+    transform-origin: bottom center;
+  }
+  .mp-list {
+    max-height: none;
+  }
+  .pop .mp-search {
+    padding: 10px 12px;
+  }
+  .mp-search input {
+    min-height: 32px;
+    font-size: 16px;
+  }
+  .mp-clear {
+    width: 40px;
+    height: 40px;
+  }
+  .mp-gh {
+    min-height: 40px;
+  }
+  .mi.mp-opt {
+    min-height: 44px;
+    scroll-margin-top: 40px;
+  }
+  .mp-footer .mi-custom-input,
+  .mp-footer .btn {
+    min-height: 40px;
+  }
+}

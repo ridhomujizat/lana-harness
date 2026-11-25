@@ -134,6 +134,11 @@ type RouterModel struct {
 	Price         *models.Price    `json:"price"`
 	Source        string           `json:"source"`
 	UsedBy        RouterModelUsers `json:"used_by"`
+	// Efforts are the model's own reasoning effort levels, in order, and
+	// DefaultEffort its default (spec 76 REQ-MES-002); absent when the model
+	// has no effort control.
+	Efforts       []string `json:"efforts,omitempty"`
+	DefaultEffort string   `json:"default_effort,omitempty"`
 }
 
 // RouterModelUsers are the agents and combos that use a model address.
@@ -238,9 +243,12 @@ type ClaudeAgentStatus struct {
 	Running          int      `json:"running"`
 	Queued           int      `json:"queued"`
 	MaxConcurrent    int      `json:"max_concurrent"`
-	// Accounts are the Claude Code accounts, the built-in one first
-	// (API-CCT-011). The fields above describe the built-in account.
+	// Accounts are the Claude Code accounts in pool order (API-CCT-011,
+	// spec 75 REQ-PAF-006). The fields above describe the built-in account.
 	Accounts []ClaudeCodeAccountStatus `json:"accounts"`
+	// PoolWarning is true with more than one pooled personal account
+	// (REQ-PAF-006).
+	PoolWarning bool `json:"pool_warning"`
 }
 
 // ClaudeCodeAccountStatus is one account row of GET /v1/router/claude-agent
@@ -272,6 +280,12 @@ type ClaudeCodeAccountStatus struct {
 	Label       string              `json:"label"`
 	DisplayName string              `json:"display_name"`
 	SignIn      *ClaudeSignInStatus `json:"sign_in"`
+	// Priority, Pool, and CoolingUntil are the pool order, whether a pooled
+	// address may use the account, and the end of its cooldown (spec 75
+	// REQ-PAF-006).
+	Priority     int        `json:"priority"`
+	Pool         bool       `json:"pool"`
+	CoolingUntil *time.Time `json:"cooling_until"`
 }
 
 // SetRouterBackend installs the Router port directly. SetBackend also
@@ -316,6 +330,8 @@ func (s *Server) registerRouterRoutes() {
 	s.Handle("GET /v1/router/claude-agent", http.HandlerFunc(s.handleClaudeAgentStatus))
 	s.Handle("PUT /v1/router/claude-code/models", http.HandlerFunc(s.handlePutClaudeCodeModels))
 	s.registerClaudeSignInRoutes()
+	s.registerAntigravityRoutes()
+	s.Handle("PUT /v1/router/pool-order", http.HandlerFunc(s.handlePutPoolOrder))
 	s.mux.Handle(RouterProxyPrefix+"/", s.checkHost(http.HandlerFunc(s.serveRouterProxy)))
 }
 
@@ -358,11 +374,20 @@ type routerComboJSON struct {
 	UsedBy      []string `json:"used_by"`
 }
 
-// routerChoiceJSON is one model picker entry (REQ-RTR-018).
+// routerChoiceJSON is one model picker entry (REQ-RTR-018). Efforts and
+// DefaultEffort are the model's own effort levels (spec 76 REQ-MES-002);
+// absent when the model has none (and on combos).
 type routerChoiceJSON struct {
-	Value string `json:"value"`
-	Label string `json:"label"`
-	Group string `json:"group"`
+	Value         string   `json:"value"`
+	Label         string   `json:"label"`
+	Group         string   `json:"group"`
+	Efforts       []string `json:"efforts,omitempty"`
+	DefaultEffort string   `json:"default_effort,omitempty"`
+}
+
+// modelChoice is the picker entry of a model with label and group.
+func modelChoice(model RouterModel, label, group string) routerChoiceJSON {
+	return routerChoiceJSON{Value: model.Address, Label: label, Group: group, Efforts: model.Efforts, DefaultEffort: model.DefaultEffort}
 }
 
 type routerProxyJSON struct {
@@ -463,15 +488,18 @@ func (s *Server) handleRouterOverview(w http.ResponseWriter, r *http.Request) {
 		response.Choices = append(response.Choices, routerChoiceJSON{Value: name, Label: name, Group: "Combos"})
 	}
 	// A disabled provider is no agent model choice (API-RTR-001 revision 2).
-	// Claude Code accounts are listed with the Claude Code group below.
+	// Claude Code and Antigravity accounts are listed with their own groups
+	// below.
 	enabled := make([]string, 0, len(providers))
-	var accounts []string
+	var accounts, agyAccounts []string
 	for _, name := range providers {
 		record := providerRecordFromMap(document.Providers[name])
 		switch {
 		case record.Disabled:
 		case record.Kind == core.ClaudeCodeKind:
 			accounts = append(accounts, name)
+		case record.Kind == core.AntigravityKind:
+			agyAccounts = append(agyAccounts, name)
 		default:
 			enabled = append(enabled, name)
 		}
@@ -483,13 +511,15 @@ func (s *Server) handleRouterOverview(w http.ResponseWriter, r *http.Request) {
 			if label == "" {
 				label = model.ID
 			}
-			response.Choices = append(response.Choices, routerChoiceJSON{Value: model.Address, Label: label, Group: name})
+			response.Choices = append(response.Choices, modelChoice(model, label, name))
 		}
 	}
 	// API-CCT-004: Claude Code models in their own group when the binary is
 	// found, the built-in account first, then each enabled account
 	// (REQ-CCT-010).
 	response.Choices = append(response.Choices, s.claudeCodeChoices(r.Context(), accounts)...)
+	// API-AGY-026: Antigravity models of each enabled account.
+	response.Choices = append(response.Choices, s.antigravityChoices(r.Context(), document, agyAccounts)...)
 	writeJSON(w, http.StatusOK, response)
 }
 
@@ -518,7 +548,7 @@ func (s *Server) claudeCodeChoices(ctx context.Context, accounts []string) []rou
 			if account != ClaudeCodeProvider {
 				label = "Claude Code (" + account + ") · " + strings.TrimPrefix(label, "Claude Code · ")
 			}
-			out = append(out, routerChoiceJSON{Value: model.Address, Label: label, Group: claudeCodeChoiceGroup})
+			out = append(out, modelChoice(model, label, claudeCodeChoiceGroup))
 		}
 	}
 	return out
@@ -570,6 +600,7 @@ func catalogRouterModels(name string, record providerRecord) []RouterModel {
 			ID: m.ID, Address: name + "/" + m.ID, Name: m.Name,
 			ContextWindow: m.ContextWindow, MaxOutput: m.MaxOutput,
 			Vision: m.Vision, Thinking: m.Thinking != "", Price: m.Price, Source: "catalog",
+			Efforts: m.Efforts, DefaultEffort: models.ShownDefault(m),
 		})
 	}
 	return out

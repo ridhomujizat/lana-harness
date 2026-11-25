@@ -5,7 +5,7 @@ import { RouterCombos } from "./combos";
 import { RouterLogs } from "./logs";
 import { RouterProxy } from "./proxy";
 import { RouterQuota } from "./quota";
-import { CLAUDE_CODE_ID, presetById } from "./presets";
+import { ANTIGRAVITY_ID, CLAUDE_CODE_ID, presetById } from "./presets";
 
 /* The Router pages (spec 37, API-RTR-017 revision 2). Each page is its own
    sidebar item under the Router group, like 9router's dashboard:
@@ -53,6 +53,9 @@ export function routerHref(tab: string): string {
 export function providerPageLabel(id: string): string {
   if (id === CLAUDE_CODE_ID) {
     return "Claude Code";
+  }
+  if (id === ANTIGRAVITY_ID) {
+    return "Antigravity";
   }
   const preset = presetById(id);
   return preset ? preset.label : id;

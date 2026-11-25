@@ -15,7 +15,7 @@ import (
 // Store implements routerdb.Store (spec 37, migration 0008).
 var _ routerdb.Store = (*Store)(nil)
 
-const routerCallColumns = "id, at, source, agent, session_id, turn_id, requested, provider, model, attempt, outcome, input_tokens, output_tokens, cached_tokens, cost_usd, ttft_ms, duration_ms, error"
+const routerCallColumns = "id, at, source, agent, session_id, turn_id, requested, provider, model, attempt, outcome, input_tokens, output_tokens, cached_tokens, cost_usd, ttft_ms, duration_ms, error, key"
 
 const routerKeyColumns = "id, name, prefix, hash, created_at, last_used_at, revoked_at"
 
@@ -35,11 +35,13 @@ func scanRouterCall(row rowScanner) (routerdb.Call, error) {
 	var c routerdb.Call
 	var at int64
 	var cost sql.NullFloat64
+	var key sql.NullString
 	if err := row.Scan(&c.ID, &at, &c.Source, &c.Agent, &c.SessionID, &c.TurnID, &c.Requested, &c.Provider, &c.Model,
-		&c.Attempt, &c.Outcome, &c.InputTokens, &c.OutputTokens, &c.CachedTokens, &cost, &c.TTFTMs, &c.DurationMs, &c.Error); err != nil {
+		&c.Attempt, &c.Outcome, &c.InputTokens, &c.OutputTokens, &c.CachedTokens, &cost, &c.TTFTMs, &c.DurationMs, &c.Error, &key); err != nil {
 		return routerdb.Call{}, err
 	}
 	c.At = msTime(at)
+	c.Key = key.String
 	if cost.Valid {
 		v := cost.Float64
 		c.CostUSD = &v
@@ -68,7 +70,7 @@ func (s *Store) InsertRouterCalls(ctx context.Context, calls []routerdb.Call) er
 	}
 	return s.withWrite(ctx, func(conn *sql.Conn) error {
 		stmt, err := conn.PrepareContext(ctx, `INSERT INTO router_calls (at, source, agent, session_id, turn_id, requested, provider, model, attempt, outcome,
-			input_tokens, output_tokens, cached_tokens, cost_usd, ttft_ms, duration_ms, error) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
+			input_tokens, output_tokens, cached_tokens, cost_usd, ttft_ms, duration_ms, error, key) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
 		if err != nil {
 			return err
 		}
@@ -78,8 +80,13 @@ func (s *Store) InsertRouterCalls(ctx context.Context, calls []routerdb.Call) er
 			if c.CostUSD != nil {
 				cost = *c.CostUSD
 			}
+			// Spec 75: the key's secret name, NULL when none was recorded.
+			var key any
+			if c.Key != "" {
+				key = c.Key
+			}
 			if _, err := stmt.ExecContext(ctx, c.At.UnixMilli(), c.Source, c.Agent, c.SessionID, c.TurnID, c.Requested, c.Provider, c.Model,
-				c.Attempt, c.Outcome, c.InputTokens, c.OutputTokens, c.CachedTokens, cost, c.TTFTMs, c.DurationMs, c.Error); err != nil {
+				c.Attempt, c.Outcome, c.InputTokens, c.OutputTokens, c.CachedTokens, cost, c.TTFTMs, c.DurationMs, c.Error, key); err != nil {
 				return err
 			}
 		}

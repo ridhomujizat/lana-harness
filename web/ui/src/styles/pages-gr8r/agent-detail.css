@@ -1646,3 +1646,37 @@
   color: var(--text-3);
   font-size: var(--fs-2xs);
 }
+
+/* Spec 76 (REQ-MES-006): the effort control beside a model picker. The
+   segments wrap instead of overflowing a narrow row; a saved level the model
+   does not list is dimmed. */
+.effort-control {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px 10px;
+  min-width: 0;
+}
+
+.effort-seg {
+  flex-wrap: wrap;
+  max-width: 100%;
+}
+
+.effort-seg button {
+  white-space: nowrap;
+}
+
+.effort-seg button.effort-stale {
+  color: var(--text-3);
+  font-style: italic;
+}
+
+.effort-seg[aria-disabled="true"] {
+  opacity: 0.6;
+}
+
+.agent-ctl .effort-control .select,
+.agent-ctl .effort-control .select-btn {
+  width: 100%;
+}

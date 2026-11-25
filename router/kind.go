@@ -65,6 +65,57 @@ func EffectiveKeyEnv(cfg core.ProviderConfig, name string) string {
 	return ""
 }
 
+// KeyEnvs returns the API key envs of provider name in pool order
+// (REQ-PAF-005): EffectiveKeyEnv first, then each api_key_envs entry, with
+// empty and repeated names left out. It is empty for a provider without a
+// key.
+func KeyEnvs(cfg core.ProviderConfig, name string) []string {
+	var out []string
+	seen := map[string]bool{}
+	add := func(env string) {
+		env = strings.TrimSpace(env)
+		if env == "" || seen[env] {
+			return
+		}
+		seen[env] = true
+		out = append(out, env)
+	}
+	add(EffectiveKeyEnv(cfg, name))
+	for _, env := range cfg.APIKeyEnvs {
+		add(env)
+	}
+	return out
+}
+
+// quotaPhrases are the provider messages that mean the balance, credit, or
+// quota of the key is used up (REQ-PAF-005).
+var quotaPhrases = []string{
+	"insufficient balance",
+	"insufficient_quota",
+	"credit balance is too low",
+	"exceeded your current quota",
+	"quota exceeded",
+}
+
+// IsQuotaError reports whether an HTTP error status and message mean an
+// exhausted balance, credit, or quota (core.ErrorClassQuota): HTTP 402, or a
+// 400, 403, or 429 whose message holds one of the quota phrases (any case).
+// Adapters use it to classify; the router applies it again to every error.
+func IsQuotaError(status int, message string) bool {
+	switch status {
+	case http.StatusPaymentRequired:
+		return true
+	case http.StatusBadRequest, http.StatusForbidden, http.StatusTooManyRequests:
+		lower := strings.ToLower(message)
+		for _, phrase := range quotaPhrases {
+			if strings.Contains(lower, phrase) {
+				return true
+			}
+		}
+	}
+	return false
+}
+
 // Factory builds the adapter of one provider.
 type Factory func(name string, cfg core.ProviderConfig, deps Deps) (Adapter, error)
 

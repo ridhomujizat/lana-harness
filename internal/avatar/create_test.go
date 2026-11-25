@@ -123,6 +123,10 @@ func TestCreateRefusesClaudeCode(t *testing.T) {
 	if _, err := Create(context.Background(), r, Request{Model: "claude-code/sonnet", Mode: ModeAIParts, Seed: 3}); !errors.Is(err, ErrClaudeCodeModel) {
 		t.Fatalf("claude-code model: %v", err)
 	}
+	// Spec 74: an Antigravity model is refused the same way.
+	if _, err := Create(context.Background(), r, Request{Model: "antigravity/gemini-4-neon-high", Mode: ModeAIParts, Seed: 3}); !errors.Is(err, ErrClaudeCodeModel) {
+		t.Fatalf("antigravity model: %v", err)
+	}
 	if _, err := Create(context.Background(), r, Request{Model: "nope/x", Mode: ModeAIParts, Seed: 3}); !errors.Is(err, ErrUnknownModel) {
 		t.Fatalf("unknown model: %v", err)
 	}

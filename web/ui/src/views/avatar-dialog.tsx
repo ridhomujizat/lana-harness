@@ -26,6 +26,8 @@ import {
 import type { ButtonProps, SelectOption } from "../ui/gr8r";
 import { AgentAvatar } from "./agent-avatar";
 import { choiceOptions } from "./agent-runtime";
+import { ModelPicker } from "./model-picker";
+import type { ModelOption } from "./model-picker";
 import { PixelSprite } from "./pixel-sprite";
 import { claudeAccountNames, claudeTargetAccount } from "./router/claude-code";
 
@@ -153,7 +155,7 @@ function modelOptions(
   choices: RouterChoice[],
   providers: RouterProvider[],
   combos: Parameters<typeof claudeTargetAccount>[2]
-): SelectOption[] {
+): ModelOption[] {
   const names = claudeAccountNames(choices, providers);
   const allowed = choices.filter(
     (choice) => claudeTargetAccount(choice.value, choices, combos, names) === ""
@@ -206,7 +208,7 @@ export function AvatarDialog({
   const [catalog, setCatalog] = useState<AvatarCatalog | null>(null);
   const [prompt, setPrompt] = useState("");
   const [model, setModel] = useState(BACKGROUND_MODEL);
-  const [options, setOptions] = useState<SelectOption[]>([
+  const [options, setOptions] = useState<ModelOption[]>([
     { value: BACKGROUND_MODEL, label: "Background model" },
   ]);
   const [busy, setBusy] = useState<"" | "random" | "render" | "ai" | "save" | "delete">("");
@@ -655,7 +657,7 @@ export function AvatarDialog({
               onChange={(event) => setPrompt(event.target.value)}
             />
             <div className="avatar-dialog-ai-row">
-              <Select
+              <ModelPicker
                 id="avatar-model"
                 size="sm"
                 aria-label="Model"

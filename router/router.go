@@ -113,10 +113,16 @@ type Router struct {
 	// recorder is the call recorder: WithRecorder, or AttachStores later.
 	recorder atomic.Pointer[recorderBox]
 	cool     cooldowns
-	limits   limitState
-	models   modelCache
+	// keyCool holds the API keys cooling down (REQ-PAF-005).
+	keyCool keyCooldowns
+	limits  limitState
+	models  modelCache
 	// claudeModels is the model list Claude Code reported (nil: none yet).
 	claudeModels atomic.Pointer[[]core.RuntimeModel]
+	// agyModelsMu guards agyModels, the model list each Antigravity account
+	// reported through SetRuntimeModels (REQ-AGY-009).
+	agyModelsMu sync.Mutex
+	agyModels   map[string][]core.RuntimeModel
 }
 
 type providerEntry struct {
@@ -127,7 +133,22 @@ type providerEntry struct {
 	raw     core.Provider
 	adapter Adapter
 	custom  bool
+	// keys are the clients of the provider's API keys in pool order
+	// (REQ-PAF-005): one per key env, the first being adapter. A provider
+	// without a key, or a custom one, has one client with an empty env.
+	keys []keyClient
 }
+
+// keyClient is the adapter of one API key of a provider. env is the
+// secret's name, never its value.
+type keyClient struct {
+	env     string
+	adapter Adapter
+}
+
+// pooled reports whether the provider has more than one API key, so call
+// records name the key (REQ-PAF-005).
+func (e *providerEntry) pooled() bool { return e != nil && len(e.keys) > 1 }
 
 type snapshot struct {
 	cfg       Config
@@ -139,7 +160,12 @@ type snapshot struct {
 	// account (spec 39 revision 5, API-CCT-027): allow_scheduled, disabled,
 	// binary, auth, api_key_env. Kind is always set.
 	builtin core.ProviderConfig
-	combos  map[string]Combo
+	// agy holds the Antigravity accounts (REQ-AGY-001): the built-in
+	// "antigravity" (its optional [providers.antigravity] table, API-AGY-003)
+	// and every provider of kind "antigravity". They have no adapter: their
+	// targets run in the Antigravity runtime.
+	agy    map[string]core.ProviderConfig
+	combos map[string]Combo
 	// cooldown is the normalized cooldown; 0 means off.
 	cooldown time.Duration
 }
@@ -157,6 +183,7 @@ func New(cfg Config, opts ...Option) (*Router, error) {
 		r.opts.jitter = randomJitter
 	}
 	r.cool.until = map[Target]time.Time{}
+	r.keyCool.until = map[string]time.Time{}
 	r.recorder.Store(&recorderBox{rec: r.opts.recorder})
 	r.limits.init(r.opts.limitStore)
 	r.models.entries = map[string]modelCacheEntry{}
@@ -221,6 +248,7 @@ func (r *Router) build(cfg Config, old *snapshot) (*snapshot, error) {
 		providers: map[string]*providerEntry{},
 		claude:    map[string]core.ProviderConfig{},
 		builtin:   core.ProviderConfig{Kind: core.ClaudeCodeKind},
+		agy:       map[string]core.ProviderConfig{Antigravity: {Kind: core.AntigravityKind}},
 		combos:    map[string]Combo{},
 	}
 	// Work on the copy so a caller that changes its maps later cannot
@@ -237,6 +265,18 @@ func (r *Router) build(cfg Config, old *snapshot) (*snapshot, error) {
 		pc.Label = ""
 		next.builtin = pc
 	}
+	if pc, ok := cfg.Providers[Antigravity]; ok {
+		// API-AGY-003: the built-in account's settings, never its folder
+		// (it runs agy with the owner's own HOME and login).
+		switch {
+		case pc.Kind != core.AntigravityKind:
+			return nil, fmt.Errorf("providers.%s: antigravity is built in", Antigravity)
+		case strings.TrimSpace(pc.Home) != "":
+			return nil, fmt.Errorf("providers.%s.home: not allowed for the built-in account", Antigravity)
+		}
+		pc.Label = ""
+		next.agy[Antigravity] = pc
+	}
 	for name, p := range r.opts.providers {
 		kind := "custom"
 		if pc, ok := cfg.Providers[name]; ok && pc.Kind != "" {
@@ -248,20 +288,28 @@ func (r *Router) build(cfg Config, old *snapshot) (*snapshot, error) {
 				continue
 			}
 		}
+		adapter := WrapProvider(p)
 		next.providers[name] = &providerEntry{
 			name: name, kind: kind, cfg: cfg.Providers[name],
-			raw: p, adapter: WrapProvider(p), custom: true,
+			raw: p, adapter: adapter, custom: true,
+			keys: []keyClient{{adapter: adapter}},
 		}
 	}
 	for _, name := range sortedKeys(cfg.Providers) {
-		if _, custom := next.providers[name]; custom || name == ClaudeCode {
+		if _, custom := next.providers[name]; custom || name == ClaudeCode || name == Antigravity {
 			continue
 		}
 		pc := cfg.Providers[name]
-		if pc.Kind == core.ClaudeCodeKind {
+		switch pc.Kind {
+		case core.ClaudeCodeKind:
 			// REQ-CCT-010: a Claude Code account, run by the agent in the
 			// Claude Code runtime.
 			next.claude[name] = pc
+			continue
+		case core.AntigravityKind:
+			// REQ-AGY-001: an Antigravity account, run by the agent in the
+			// Antigravity runtime.
+			next.agy[name] = pc
 			continue
 		}
 		if old != nil {
@@ -270,18 +318,11 @@ func (r *Router) build(cfg Config, old *snapshot) (*snapshot, error) {
 				continue
 			}
 		}
-		factory, ok := kindFactory(pc.Kind)
-		if !ok {
-			return nil, fmt.Errorf("provider '%s' kind '%s' is not supported in this build", name, pc.Kind)
-		}
-		adapter, err := factory(name, pc, r.deps(name, pc.Kind))
+		entry, err := r.buildEntry(name, pc)
 		if err != nil {
 			return nil, err
 		}
-		if adapter == nil {
-			return nil, fmt.Errorf("provider '%s' kind '%s' returned no adapter", name, pc.Kind)
-		}
-		next.providers[name] = &providerEntry{name: name, kind: pc.Kind, cfg: pc, raw: adapter, adapter: adapter}
+		next.providers[name] = entry
 	}
 	for _, name := range sortedKeys(cfg.Combos) {
 		combo := cfg.Combos[name]
@@ -299,6 +340,53 @@ func (r *Router) build(cfg Config, old *snapshot) (*snapshot, error) {
 	return next, nil
 }
 
+// buildEntry builds the adapters of a configured provider: one per API key
+// (REQ-PAF-005). A provider with one key or none gets one adapter built from
+// its config as is, so it behaves as before key pools.
+func (r *Router) buildEntry(name string, pc core.ProviderConfig) (*providerEntry, error) {
+	factory, ok := kindFactory(pc.Kind)
+	if !ok {
+		return nil, fmt.Errorf("provider '%s' kind '%s' is not supported in this build", name, pc.Kind)
+	}
+	make1 := func(cfg core.ProviderConfig) (Adapter, error) {
+		adapter, err := factory(name, cfg, r.deps(name, pc.Kind))
+		if err != nil {
+			return nil, err
+		}
+		if adapter == nil {
+			return nil, fmt.Errorf("provider '%s' kind '%s' returned no adapter", name, pc.Kind)
+		}
+		return adapter, nil
+	}
+	envs := KeyEnvs(pc, name)
+	entry := &providerEntry{name: name, kind: pc.Kind, cfg: pc}
+	if len(envs) <= 1 {
+		adapter, err := make1(pc)
+		if err != nil {
+			return nil, err
+		}
+		env := ""
+		if len(envs) == 1 {
+			env = envs[0]
+		}
+		entry.raw, entry.adapter = adapter, adapter
+		entry.keys = []keyClient{{env: env, adapter: adapter}}
+		return entry, nil
+	}
+	for _, env := range envs {
+		one := pc
+		one.APIKeyEnv = env
+		one.APIKeyEnvs = nil
+		adapter, err := make1(one)
+		if err != nil {
+			return nil, err
+		}
+		entry.keys = append(entry.keys, keyClient{env: env, adapter: adapter})
+	}
+	entry.raw, entry.adapter = entry.keys[0].adapter, entry.keys[0].adapter
+	return entry, nil
+}
+
 func validateCombo(name string, combo Combo, snap *snapshot, combos map[string]Combo) error {
 	providers := snap.providers
 	path := "combos." + name
@@ -307,7 +395,7 @@ func validateCombo(name string, combo Combo, snap *snapshot, combos map[string]C
 		return fmt.Errorf("combos: a combo name is empty")
 	case strings.ContainsAny(name, "/:"):
 		return fmt.Errorf("%s: a combo name must not contain '/' or ':'", path)
-	case providers[name] != nil || snap.isClaude(name):
+	case providers[name] != nil || snap.isClaude(name) || snap.isAntigravity(name):
 		return fmt.Errorf("%s: a combo name must not equal a provider name", path)
 	case len(combo.Models) == 0:
 		return fmt.Errorf("%s.models: a combo needs at least one model", path)
@@ -324,6 +412,10 @@ func validateCombo(name string, combo Combo, snap *snapshot, combos map[string]C
 		}
 		if snap.isClaude(target.Provider) {
 			if err := claudeCodeTarget(target); err != nil {
+				return fmt.Errorf("%s: %w", item, err)
+			}
+		} else if snap.isAntigravity(target.Provider) {
+			if err := antigravityTarget(target); err != nil {
 				return fmt.Errorf("%s: %w", item, err)
 			}
 		} else if providers[target.Provider] == nil {
@@ -368,8 +460,9 @@ func (r *Router) Names() []string {
 	return sortedKeys(r.snap.Load().providers)
 }
 
-// Disabled reports whether a configured provider (or Claude Code account) is
-// switched off with disabled = true. An unknown provider is not disabled.
+// Disabled reports whether a configured provider (or Claude Code or
+// Antigravity account) is switched off with disabled = true. An unknown
+// provider is not disabled.
 func (r *Router) Disabled(provider string) bool {
 	snap := r.snap.Load()
 	if provider == ClaudeCode {
@@ -378,17 +471,24 @@ func (r *Router) Disabled(provider string) bool {
 	if pc, ok := snap.claude[provider]; ok {
 		return pc.Disabled
 	}
+	if pc, ok := snap.agy[provider]; ok {
+		return pc.Disabled
+	}
 	entry, ok := snap.providers[provider]
 	return ok && entry.cfg.Disabled
 }
 
 // Kind returns the kind of a provider ("custom" for one added with
 // WithProviders and not in the config). A Claude Code account, the built-in
-// one included, has kind "claude-code".
+// one included, has kind "claude-code"; an Antigravity account has kind
+// "antigravity".
 func (r *Router) Kind(provider string) (string, bool) {
 	snap := r.snap.Load()
 	if snap.isClaude(provider) {
 		return core.ClaudeCodeKind, true
+	}
+	if snap.isAntigravity(provider) {
+		return core.AntigravityKind, true
 	}
 	entry, ok := snap.providers[provider]
 	if !ok {
@@ -434,6 +534,15 @@ func cloneConfig(cfg Config) Config {
 					headers[k] = v
 				}
 				pc.Headers = headers
+			}
+			pc.APIKeyEnvs = append([]string(nil), pc.APIKeyEnvs...)
+			if pc.Priority != nil {
+				p := *pc.Priority
+				pc.Priority = &p
+			}
+			if pc.Pool != nil {
+				p := *pc.Pool
+				pc.Pool = &p
 			}
 			out.Providers[name] = pc
 		}

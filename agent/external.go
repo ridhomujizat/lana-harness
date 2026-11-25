@@ -16,6 +16,7 @@ import (
 
 	"github.com/ridhomujizat/lana-harness/core"
 	"github.com/ridhomujizat/lana-harness/internal/llmcall"
+	"github.com/ridhomujizat/lana-harness/internal/models"
 	"github.com/ridhomujizat/lana-harness/internal/spill"
 )
 
@@ -58,6 +59,9 @@ type ExternalHooks struct {
 	Limits func(provider, runtime string, windows []core.RuntimeLimitWindow)
 	// Models receives the model list a runtime learned from its binary.
 	Models func(runtime string, models []core.RuntimeModel)
+	// Tier receives the plan tier a runtime reported in its session meta
+	// (Antigravity, spec 74), with the runtime key and the account name.
+	Tier func(runtime, account, tier string)
 }
 
 // SetToolHost installs the loopback MCP host that serves lana's tools to
@@ -208,54 +212,92 @@ func (r *Registry) shutdownRuntimes(ctx context.Context) {
 	}
 }
 
-// isClaudeProvider reports whether a step's provider is a Claude Code account
-// of llm (REQ-CCT-010); spec 38 steps used "claude-agent".
-func isClaudeProvider(llm core.LLMRegistry, provider string) bool {
-	if provider == "claude-agent" {
-		return true
+// metaAccountName returns the account of a runtime session meta: its
+// Account, else the built-in account of its runtime (spec 38 metas named the
+// runtime "claude-agent").
+func metaAccountName(p core.SystemMessage) string {
+	if p.Account != "" {
+		return p.Account
 	}
-	_, ok := llmcall.ClaudeCodeAccount(llm, provider)
-	return ok
+	if p.Runtime == "claude-agent" {
+		return llmcall.ClaudeCode
+	}
+	return p.Runtime
 }
 
-// claudeResume returns the Claude session of account to resume for the next
-// Claude Code turn: the newest runtime session meta (API-CCR-002), unless a
-// turn ran in lana's loop after it (REQ-CCT-003: an engine switch starts a
-// new Claude session) or the meta belongs to another account (REQ-CCT-010:
-// sessions never mix accounts). switched reports that a stored Claude session
-// was dropped. The model is the one the meta names. isClaude tells Claude
-// Code step providers from lana's.
-func claudeResume(events []core.SessionEvent, account string, isClaude func(string) bool) (resumeID, model string, switched bool) {
-	metaAccount := ""
+// stepAccount returns the account a step ran on: its provider, with the spec
+// 38 provider "claude-agent" read as the built-in Claude Code account.
+func stepAccount(provider string) string {
+	if provider == "claude-agent" {
+		return llmcall.ClaudeCode
+	}
+	return provider
+}
+
+// runtimeMeta decodes a runtime session meta event that names a runtime
+// session.
+func runtimeMeta(event core.SessionEvent) (core.SystemMessage, bool) {
+	if event.Kind != core.KindSystemMessage {
+		return core.SystemMessage{}, false
+	}
+	var payload core.SystemMessage
+	if json.Unmarshal(event.Payload, &payload) != nil || payload.Subtype != core.SystemSubtypeRuntime || payload.ClaudeSessionID == "" {
+		return core.SystemMessage{}, false
+	}
+	return payload, true
+}
+
+// resumeState is what externalResume found for the next external turn.
+type resumeState struct {
+	// resumeID and model name the runtime session to resume; empty starts a
+	// new one.
+	resumeID, model string
+	// switched reports that a stored runtime session of this runtime was
+	// dropped, so the runtime's live process must not be reused.
+	switched bool
+	// previous is the account of the newest runtime session meta of any
+	// runtime, "" when the session has none.
+	previous string
+}
+
+// externalResume returns the runtime session of runtime and account to resume
+// for the next external turn: the newest runtime session meta (API-CCR-002)
+// of the same runtime and account, unless a step ran on another provider
+// after it (REQ-CCT-003: an engine switch starts a new runtime session) or a
+// newer meta of another account of the runtime followed it (REQ-CCT-010,
+// REQ-AGY-004: sessions never mix accounts). The model is the one the meta
+// names.
+func externalResume(events []core.SessionEvent, runtime, account string) resumeState {
+	var st resumeState
+	stored := false
 	for _, event := range events {
 		switch event.Kind {
 		case core.KindSystemMessage:
-			var payload core.SystemMessage
-			if json.Unmarshal(event.Payload, &payload) != nil || payload.Subtype != core.SystemSubtypeRuntime {
+			payload, ok := runtimeMeta(event)
+			if !ok {
 				continue
 			}
-			if payload.Runtime != llmcall.ClaudeCode || payload.ClaudeSessionID == "" {
+			metaAccount := metaAccountName(payload)
+			st.previous = metaAccount
+			if payload.Runtime != runtime {
 				continue
 			}
-			resumeID, model, switched = payload.ClaudeSessionID, payload.Model, false
-			metaAccount = payload.Account
-			if metaAccount == "" {
-				metaAccount = llmcall.ClaudeCode
+			stored = true
+			if metaAccount == account {
+				st.resumeID, st.model = payload.ClaudeSessionID, payload.Model
+			} else {
+				st.resumeID, st.model = "", ""
 			}
 		case core.KindStepStart:
 			var payload core.StepStart
-			if json.Unmarshal(event.Payload, &payload) != nil || isClaude(payload.Provider) {
+			if json.Unmarshal(event.Payload, &payload) != nil || stepAccount(payload.Provider) == account {
 				continue
 			}
-			if resumeID != "" {
-				resumeID, model, switched = "", "", true
-			}
+			st.resumeID, st.model = "", ""
 		}
 	}
-	if resumeID != "" && metaAccount != account {
-		return "", "", true
-	}
-	return resumeID, model, switched
+	st.switched = stored && st.resumeID == ""
+	return st
 }
 
 // claudeToolNote tells Claude how lana's tools are named over MCP. tools are
@@ -270,6 +312,26 @@ func claudeToolNote(tools []string) string {
 	sort.Strings(names)
 	return "## lana tools\nlana's own tools are available as MCP tools named mcp__lana__<tool>: " +
 		strings.Join(names, ", ") + ". The tool notes above use the plain names. Use your own tools for files and shell commands."
+}
+
+// antigravityToolNote tells Antigravity which of lana's tools its lana MCP
+// server serves (spec 74). agy has its own shell, file, and search tools.
+func antigravityToolNote(tools []string) string {
+	if len(tools) == 0 {
+		return ""
+	}
+	names := append([]string(nil), tools...)
+	sort.Strings(names)
+	return "## lana tools\nlana's own tools are available as MCP tools named mcp_lana_<tool>: " +
+		strings.Join(names, ", ") + ". The tool notes above use the plain names. Use your own tools for files, shell commands, and search."
+}
+
+// externalToolNote is the prompt-head tool note of runtime.
+func externalToolNote(runtime string, tools []string) string {
+	if runtime == llmcall.Antigravity {
+		return antigravityToolNote(tools)
+	}
+	return claudeToolNote(tools)
 }
 
 // claudeOwnTools are the lana tools Claude Code has itself: they are not
@@ -289,12 +351,14 @@ func claudeMCPTools(offered []string) []string {
 	return out
 }
 
-// mcpToolName returns the lana tool name of a Claude tool call to the lana MCP
-// server ("mcp__lana__memory_write" -> "memory_write").
+// mcpToolName returns the lana tool name of a runtime tool call to the lana
+// MCP server: Claude Code names it "mcp__lana__memory_write", agy 1.5.17
+// "mcp_lana_memory_write" (recorded live 2026-11-26) -> "memory_write".
 func mcpToolName(name string) (string, bool) {
-	const prefix = "mcp__lana__"
-	if strings.HasPrefix(name, prefix) && len(name) > len(prefix) {
-		return name[len(prefix):], true
+	for _, prefix := range []string{"mcp__lana__", "mcp_lana_"} {
+		if strings.HasPrefix(name, prefix) && len(name) > len(prefix) {
+			return name[len(prefix):], true
+		}
 	}
 	return "", false
 }
@@ -307,8 +371,17 @@ type externalTurn struct {
 	writeCtx context.Context
 	turnID   string
 	agent    resolvedAgent
+	// runtime is the runtime key of the turn: "claude-code" or "antigravity".
+	runtime  string
 	provider string
 	model    string
+	// effort is the --effort of a Claude Code turn; "" when none is sent.
+	effort string
+	// pendingMeta is the runtime session meta not yet stored. It is stored
+	// with the first content event or when the attempt did not fail early, so
+	// an account that failed before output leaves no session to resume or
+	// stick to (REQ-PAF-003).
+	pendingMeta *core.SystemMessage
 	// requested is the chain's requested value (API-CCT-008).
 	requested string
 	// content is set by the first text, thinking, or tool event.
@@ -338,10 +411,20 @@ type externalTurn struct {
 // metaAccount is the account of the runtime session meta: "" for the
 // built-in one, so its events read as before accounts existed.
 func (x *externalTurn) metaAccount() string {
-	if x.provider == llmcall.ClaudeCode {
+	if x.provider == x.runtime {
 		return ""
 	}
 	return x.provider
+}
+
+// flushMeta stores the pending runtime session meta.
+func (x *externalTurn) flushMeta() {
+	if x.pendingMeta == nil {
+		return
+	}
+	meta := *x.pendingMeta
+	x.pendingMeta = nil
+	x.append(core.KindSystemMessage, meta)
 }
 
 func (x *externalTurn) append(kind string, payload any) {
@@ -367,7 +450,20 @@ func (x *externalTurn) ensureStep() {
 	}
 	x.stepStarted = true
 	x.started = time.Now()
-	x.append(core.KindStepStart, core.StepStart{V: core.PayloadVersion, Step: 1, Provider: x.provider, Model: x.model})
+	x.append(core.KindStepStart, core.StepStart{V: core.PayloadVersion, Step: 1, Provider: x.provider, Model: x.model, Effort: x.stepEffort(x.model)})
+}
+
+// stepEffort is the effort a runtime step runs with (spec 76 REQ-MES-003):
+// Claude Code's --effort, or the level suffix of the Antigravity variant the
+// runtime picked ("gemini-4-neon-high" runs at high).
+func (x *externalTurn) stepEffort(model string) string {
+	if x.runtime == llmcall.Antigravity {
+		if _, level, ok := models.SplitEffortVariant(model); ok {
+			return level
+		}
+		return ""
+	}
+	return x.effort
 }
 
 // assistantContent builds the content of one assistant/message: the thinking
@@ -406,11 +502,14 @@ func (x *externalTurn) handle(ev core.RuntimeEvent) {
 			x.model = ev.Model
 		}
 		if ev.ClaudeSessionID != "" {
-			x.append(core.KindSystemMessage, core.SystemMessage{
-				V: core.PayloadVersion, Subtype: core.SystemSubtypeRuntime, Runtime: llmcall.ClaudeCode,
+			x.pendingMeta = &core.SystemMessage{
+				V: core.PayloadVersion, Subtype: core.SystemSubtypeRuntime, Runtime: x.runtime,
 				ClaudeSessionID: ev.ClaudeSessionID, Model: ev.Model, Tools: ev.Tools, Version: ev.Version,
 				Account: x.metaAccount(),
-			})
+			}
+		}
+		if h := x.rn.reg.hooksExternal(); h.Tier != nil && ev.Tier != "" {
+			h.Tier(x.runtime, x.provider, ev.Tier)
 		}
 		return
 	case core.RuntimeEnd:
@@ -420,7 +519,7 @@ func (x *externalTurn) handle(ev core.RuntimeEvent) {
 	case core.RuntimeLimits:
 		// API-CCT-012: one limit snapshot per account.
 		if h := x.rn.reg.hooksExternal(); h.Limits != nil && len(ev.Windows) > 0 {
-			h.Limits(x.provider, llmcall.ClaudeCode, ev.Windows)
+			h.Limits(x.provider, x.runtime, ev.Windows)
 		}
 		return
 	case core.RuntimeUsage:
@@ -433,6 +532,7 @@ func (x *externalTurn) handle(ev core.RuntimeEvent) {
 		return
 	}
 	x.content = true
+	x.flushMeta()
 	x.ensureStep()
 	switch ev.Kind {
 	case core.RuntimeTextDelta:
@@ -544,15 +644,18 @@ func (rn *Runner) externalApprove(turnID, agentName string) func(context.Context
 	}
 }
 
-// runExternalTurn runs one turn in the Claude Code runtime (ADR 0018, ADR
-// 0020). It writes the same events as a native turn: turn/start,
-// user/message, one step/start, assistant/message, tool/call, tool/result,
-// step/end with the usage, and turn/end. Claude gets lana's prompt head and
-// tools (REQ-CCT-005, REQ-CCT-006); lana's compaction, loop guard, and step cap
-// do not run. When Claude Code fails before any output and the chain has a
-// target outside Claude Code, it writes the attempt and reports fallback
-// without ending the turn; runTurn then continues it in lana's loop
-// (REQ-CCT-004).
+// runExternalTurn runs one turn in an external runtime: Claude Code or
+// Antigravity (ADR 0018, ADR 0020, ADR 0022). It writes the same events as a
+// native turn: turn/start, user/message, one step/start, assistant/message,
+// tool/call, tool/result, step/end with the usage, and turn/end. The runtime
+// gets lana's prompt head and tools (REQ-CCT-005, REQ-CCT-006); lana's
+// compaction, loop guard, and step cap do not run. A pooled address tries the
+// accounts of its pool in order (spec 75, REQ-PAF-001): an account that fails
+// before any output with auth, rate_limit, or quota is cooled down and the
+// next one runs. When the runtime fails before any output and no account is
+// left, and the chain has a target outside the external runtimes, it reports
+// fallback without ending the turn; runTurn then continues it in lana's loop
+// (REQ-CCT-004, REQ-AGY-008).
 func (rn *Runner) runExternalTurn(ctx context.Context, initial inboxItem, turnID, continueReason string, res resolvedAgent) (result TurnResult, fallback bool) {
 	result = TurnResult{SessionID: rn.sessionID, TurnID: turnID}
 	writeCtx := context.WithoutCancel(ctx)
@@ -563,26 +666,54 @@ func (rn *Runner) runExternalTurn(ctx context.Context, initial inboxItem, turnID
 		result.Err = &core.ProviderError{Class: "runtime", Message: err.Error()}
 		return result, false
 	}
-	target := res.fullChain[0]
-	// API-CCT-012: the record provider is the account name.
-	x := &externalTurn{
-		rn: rn, events: events, writeCtx: writeCtx, turnID: turnID, agent: res,
-		provider: target.Provider, model: target.Model, requested: res.requested,
-		toolNames: map[string]string{},
+	head := res.fullChain[0]
+	runtime, ok := llmcall.ExternalRuntime(rn.reg.llm, head.Provider)
+	if !ok {
+		runtime = llmcall.ClaudeCode
 	}
+	// API-CCT-012: the record provider is the account name.
+	newTurn := func(target core.LLMTarget) *externalTurn {
+		return &externalTurn{
+			rn: rn, events: events, writeCtx: writeCtx, turnID: turnID, agent: res, runtime: runtime,
+			provider: target.Provider, model: target.Model, requested: res.requested,
+			toolNames: map[string]string{},
+		}
+	}
+	x := newTurn(head)
 	reason := "end_turn"
-	run := rn.externalRun(ctx, x, initial, continueReason, target)
+	prep, run, ok := rn.externalPrepare(ctx, x, initial, continueReason, runtime)
+	if ok {
+		candidates := rn.externalCandidates(writeCtx, runtime, head, res.cfg)
+		for i, target := range candidates {
+			x = newTurn(target)
+			run = rn.externalAttempt(ctx, x, prep, target)
+			early := run.early
+			if early == nil {
+				break
+			}
+			pe := core.ProviderError{Class: early.Class, Message: early.Message}
+			rn.writeStepAttempt(writeCtx, events, 1, target, turnID, i+1, pe)
+			rn.recordExternalUsage(x, "error", &pe)
+			pooled := poolFailure(early.Class)
+			if pooled {
+				// REQ-PAF-004: the account rests until its window resets.
+				rn.reg.coolAccount(target.Provider, cooldownUntil(early, time.Now()))
+			}
+			if !pooled || ctx.Err() != nil || i == len(candidates)-1 {
+				break
+			}
+			slog.Info("external account failed before output; the turn moves to the next account",
+				"session_id", rn.sessionID, "turn_id", turnID, "account", target.Provider, "class", early.Class, "next", candidates[i+1].Provider)
+		}
+	}
 	runErr := run.err
 	if run.stop != "" {
 		reason = run.stop
 	}
 	if early := run.early; early != nil {
-		pe := core.ProviderError{Class: early.Class, Message: early.Message}
-		rn.writeStepAttempt(writeCtx, events, 1, target, turnID, 1, pe)
-		rn.recordExternalUsage(x, "error", &pe)
 		if len(res.chain) > 0 && ctx.Err() == nil {
-			slog.Info("claude code failed before output; the turn continues in lana's loop",
-				"session_id", rn.sessionID, "turn_id", turnID, "target", llmcall.Address(target), "class", early.Class, "next", llmcall.Address(res.chain[0]))
+			slog.Info("external runtime failed before output; the turn continues in lana's loop",
+				"session_id", rn.sessionID, "turn_id", turnID, "runtime", runtime, "target", llmcall.Address(head), "class", early.Class, "next", llmcall.Address(res.chain[0]))
 			return result, true
 		}
 		runErr = &core.ProviderError{Class: "runtime", Message: early.Message}
@@ -593,7 +724,7 @@ func (rn *Runner) runExternalTurn(ctx context.Context, initial inboxItem, turnID
 		if x.usageModel != "" {
 			model = x.usageModel
 		}
-		x.append(core.KindStepEnd, core.StepEnd{V: core.PayloadVersion, Step: 1, Provider: x.provider, Model: model, Usage: x.usage})
+		x.append(core.KindStepEnd, core.StepEnd{V: core.PayloadVersion, Step: 1, Provider: x.provider, Model: model, Usage: x.usage, Effort: x.stepEffort(model)})
 		slog.Info("step finished", "session_id", rn.sessionID, "turn_id", turnID, "step", 1,
 			"provider", x.provider, "model", model,
 			"input_tokens", x.usage.InputTokens, "output_tokens", x.usage.OutputTokens,
@@ -623,7 +754,7 @@ func (rn *Runner) runExternalTurn(ctx context.Context, initial inboxItem, turnID
 	if err := writeTurnEnd(writeCtx, events, core.EventDraft{Kind: core.KindTurnEnd, TurnID: turnID, Payload: end}); err != nil {
 		slog.Error("failed to write turn/end", "session_id", rn.sessionID, "turn_id", turnID, "error", err)
 	}
-	// REQ-MEM-010, REQ-CCT-007: memory capture runs after a Claude Code turn
+	// REQ-MEM-010, REQ-CCT-007: memory capture runs after an external turn
 	// too, over the mirrored transcript, with the agent's background chain.
 	if captureEligible(reason, res.child, run.owner, run.specs, res.cfg) {
 		if c := rn.reg.memoryCapturer(); c != nil {
@@ -635,7 +766,7 @@ func (rn *Runner) runExternalTurn(ctx context.Context, initial inboxItem, turnID
 		}
 	}
 	// Spec 40, REQ-TTL-001: the title pass uses the background chain, never
-	// Claude Code.
+	// an external runtime.
 	rn.reg.titleTurnEnd(reason, res.child, run.owner, core.TitleRequest{
 		SessionID: rn.sessionID, AgentName: res.name,
 		Targets: res.fullChain, Requested: res.requested,
@@ -647,7 +778,7 @@ func (rn *Runner) runExternalTurn(ctx context.Context, initial inboxItem, turnID
 	return result, false
 }
 
-// externalOutcome is what externalRun hands back to runExternalTurn.
+// externalOutcome is what an external attempt hands back to runExternalTurn.
 type externalOutcome struct {
 	err   *core.ProviderError
 	stop  string // "" = end_turn
@@ -659,9 +790,21 @@ type externalOutcome struct {
 	system string
 }
 
-// externalRun stores the owner message with its <context> block, builds
-// Claude's prompt head and lana tool set, and runs the turn on the runtime.
-func (rn *Runner) externalRun(ctx context.Context, x *externalTurn, initial inboxItem, continueReason string, target core.LLMTarget) externalOutcome {
+// externalPrep is the part of an external turn every account of a pool
+// shares: the stored owner message as the runtime input, and the prompt head
+// and lana tools.
+type externalPrep struct {
+	input  []core.ContentBlock
+	tools  []string
+	specs  []core.ToolSpec
+	system string
+}
+
+// externalPrepare stores the owner message with its <context> block and
+// builds the runtime's prompt head and lana tool set. ok is false when the
+// turn ends without running the runtime (a rejected message, a write error);
+// out then says how.
+func (rn *Runner) externalPrepare(ctx context.Context, x *externalTurn, initial inboxItem, continueReason, runtime string) (prep externalPrep, out externalOutcome, ok bool) {
 	res := x.agent
 	text := initial.text
 	// REQ-ATT-002: an owner message with attachments and no text is stored
@@ -675,13 +818,13 @@ func (rn *Runner) externalRun(ctx context.Context, x *externalTurn, initial inbo
 	})
 	if err != nil {
 		if ctx.Err() != nil {
-			return externalOutcome{stop: core.RuntimeStopCancelled}
+			return prep, externalOutcome{stop: core.RuntimeStopCancelled}, false
 		}
-		return externalOutcome{err: runtimeError(err)}
+		return prep, externalOutcome{err: runtimeError(err)}, false
 	}
 	if decision.Reject {
 		slog.Info("agent.pre_step rejected message", "session_id", rn.sessionID, "turn_id", x.turnID, "reason", decision.Reason)
-		return externalOutcome{}
+		return prep, externalOutcome{}, false
 	}
 	if len(decision.Input.Content) > 0 {
 		input = decision.Input
@@ -700,26 +843,27 @@ func (rn *Runner) externalRun(ctx context.Context, x *externalTurn, initial inbo
 	}
 
 	// REQ-CCT-005, REQ-CCT-006: the prompt head and the lana tools of a
-	// native turn of this agent, without the tools Claude Code has itself.
+	// native turn of this agent, without the tools the runtime has itself
+	// (Claude Code and agy both have shell, file, and search tools).
 	offered, unavailable, skills := rn.offeredTools(ctx, res)
 	tools := claudeMCPTools(offered)
 	specs, err := rn.reg.tools.Specs(tools)
 	if err != nil {
-		slog.Warn("lana tools for claude code", "session_id", rn.sessionID, "error", err)
+		slog.Warn("lana tools for the external runtime", "session_id", rn.sessionID, "runtime", runtime, "error", err)
 		specs, tools = nil, nil
 	}
-	// Spec 64 scope: Claude Code reads its own CLAUDE.md, so its prompt gets no
-	// project section.
+	// Spec 64 scope: the external runtime reads its own project files
+	// (CLAUDE.md), so its prompt gets no project section.
 	res.contextFiles = nil
 	built, err := rn.buildPrompt(res, skills, unavailable, rn.toolNotes(tools), len(res.mcp) > 0, text, tools)
 	if err != nil {
-		return externalOutcome{err: runtimeError(err)}
+		return prep, externalOutcome{err: runtimeError(err)}, false
 	}
 	system := built.text
-	if note := claudeToolNote(tools); note != "" {
+	if note := externalToolNote(runtime, tools); note != "" {
 		system += "\n\n" + note
 	}
-	out := externalOutcome{specs: specs, system: system}
+	out = externalOutcome{specs: specs, system: system}
 
 	// REQ-CCT-005: the <context> block (time, relevant memory, knowledge
 	// recall, jobs) goes in front of the owner message, as in native turns.
@@ -742,11 +886,26 @@ func (rn *Runner) externalRun(ctx context.Context, x *externalTurn, initial inbo
 	}
 	if _, err := x.events.Append(x.writeCtx, core.EventDraft{Kind: core.KindUserMessage, TurnID: x.turnID, Payload: payload}); err != nil {
 		out.err = runtimeError(err)
-		return out
+		return prep, out, false
 	}
 	out.owner = true
+	return externalPrep{input: input.Content, tools: tools, specs: specs, system: system}, out, true
+}
 
-	account, ok := llmcall.ClaudeCodeAccount(rn.reg.llm, target.Provider)
+// externalAccount returns the config of the account of target in runtime.
+func externalAccount(llm core.LLMRegistry, runtime, provider string) (core.ProviderConfig, bool) {
+	if runtime == llmcall.Antigravity {
+		return llmcall.AntigravityAccount(llm, provider)
+	}
+	return llmcall.ClaudeCodeAccount(llm, provider)
+}
+
+// externalAttempt runs the turn on one account of the runtime.
+func (rn *Runner) externalAttempt(ctx context.Context, x *externalTurn, prep externalPrep, target core.LLMTarget) externalOutcome {
+	res := x.agent
+	runtime := x.runtime
+	out := externalOutcome{owner: true, specs: prep.specs, system: prep.system}
+	account, ok := externalAccount(rn.reg.llm, runtime, target.Provider)
 	switch {
 	case !ok:
 		out.early = &core.RuntimeEarlyError{Class: core.ErrorClassNotFound, Message: fmt.Sprintf("provider %q is not configured", target.Provider)}
@@ -758,7 +917,7 @@ func (rn *Runner) externalRun(ctx context.Context, x *externalTurn, initial inbo
 		return out
 	}
 
-	rt, err := rn.reg.Runtime(llmcall.ClaudeCode)
+	rt, err := rn.reg.Runtime(runtime)
 	if err != nil {
 		out.early = &core.RuntimeEarlyError{Class: "runtime", Message: err.Error()}
 		return out
@@ -768,41 +927,48 @@ func (rn *Runner) externalRun(ctx context.Context, x *externalTurn, initial inbo
 		out.err = runtimeError(err)
 		return out
 	}
-	isClaude := func(provider string) bool { return isClaudeProvider(rn.reg.llm, provider) }
-	resumeID, metaModel, switched := claudeResume(chain, target.Provider, isClaude)
-	if switched {
+	st := externalResume(chain, runtime, target.Provider)
+	if st.switched {
 		// REQ-CCT-003, REQ-CCT-010: a turn ran in lana's loop or on another
-		// account since the stored Claude session, so this turn starts a new
+		// account since the stored runtime session, so this turn starts a new
 		// one.
 		rt.Close(rn.sessionID)
 	}
-	if resumeID != "" && metaModel != "" {
+	if st.resumeID != "" && st.model != "" {
 		// A live process sends no new session meta, so the stored one names
 		// the model; a new process sends its own before the step starts.
-		x.model = metaModel
+		x.model = st.model
 	}
 	if x.model == "" {
 		x.model = "default"
 	}
+	input := prep.input
+	if st.resumeID == "" {
+		// REQ-PAF-002: a new runtime session gets the conversation so far from
+		// lana's own log.
+		if block := movedContext(chain, x.turnID, st.previous, target.Provider); block != "" {
+			input = append([]core.ContentBlock{{Kind: core.BlockText, Text: block}}, input...)
+		}
+	}
 
 	// REQ-CCT-006: lana's tools over the loopback MCP host. A host that
-	// cannot serve leaves Claude without lana's tools, with a note.
+	// cannot serve leaves the runtime without lana's tools, with a note.
 	var openMCP func() (string, func(), error)
 	mcpKey := ""
-	if host := rn.reg.toolHostFor(); host != nil && len(specs) > 0 {
+	if host := rn.reg.toolHostFor(); host != nil && len(prep.specs) > 0 {
 		// REQ-DKN-021, REQ-DKN-032: a tool sees an owner turn only for a root
 		// turn that stored an owner message, the same value captureEligible
 		// uses (REQ-MEM-010).
-		ownerTurn := !res.child && out.owner
-		if err := host.Bind(rn.sessionID, specs, rn.claudeToolCall(ctx, x.turnID, res, tools, ownerTurn)); err != nil {
-			slog.Warn("lana tools are not available to claude code", "session_id", rn.sessionID, "error", err)
+		ownerTurn := !res.child
+		if err := host.Bind(rn.sessionID, prep.specs, rn.claudeToolCall(ctx, x.turnID, res, prep.tools, ownerTurn)); err != nil {
+			slog.Warn("lana tools are not available to the external runtime", "session_id", rn.sessionID, "runtime", runtime, "error", err)
 			x.append(core.KindSystemMessage, core.SystemMessage{V: core.PayloadVersion, Subtype: core.SystemSubtypeNote,
-				Text: "lana's tools are not available to Claude Code in this turn: " + err.Error()})
+				Text: "lana's tools are not available to " + runtimeTitle(runtime) + " in this turn: " + err.Error()})
 		} else {
 			defer host.Unbind(rn.sessionID)
 			sessionID := rn.sessionID
 			openMCP = func() (string, func(), error) { return host.Open(sessionID) }
-			mcpKey = strings.Join(tools, ",")
+			mcpKey = strings.Join(prep.tools, ",")
 		}
 	}
 
@@ -815,16 +981,26 @@ func (rn *Runner) externalRun(ctx context.Context, x *externalTurn, initial inbo
 		TurnID:    x.turnID,
 		AgentName: res.name,
 		Config: core.RuntimeConfig{
-			Model: model, Effort: res.claudeEffort, Workspace: res.workspace,
-			AppendSystemPrompt: system, MCPKey: mcpKey,
+			Model: model, Workspace: res.workspace,
+			AppendSystemPrompt: prep.system, MCPKey: mcpKey,
 		},
-		ResumeID: resumeID,
-		Input:    input.Content,
+		ResumeID: st.resumeID,
+		Input:    input,
 		Emit:     x.handle,
 		Approve:  rn.externalApprove(x.turnID, res.name),
 		OpenMCP:  openMCP,
 	}
-	applyAccount(&turn.Config, rn.reg.home, target.Provider, account, res.cfg)
+	// Spec 76 REQ-MES-003: Claude Code gets --effort only for a level it
+	// lists ("off" and other providers' levels use its default); Antigravity
+	// picks the variant of the base model for the effort (REQ-MES-005).
+	switch runtime {
+	case llmcall.ClaudeCode:
+		turn.Config.Effort = models.PickEffort(res.runtimeEffort, models.ClaudeCodeEfforts(), "")
+		x.effort = turn.Config.Effort
+	case llmcall.Antigravity:
+		turn.Config.Effort = res.runtimeEffort
+	}
+	applyAccount(&turn.Config, rn.reg.home, runtime, target.Provider, account, res.cfg)
 	rn.setExternal(rt)
 	defer rn.setExternal(nil)
 	runErr := rt.RunTurn(ctx, turn)
@@ -833,6 +1009,7 @@ func (rn *Runner) externalRun(ctx context.Context, x *externalTurn, initial inbo
 		out.early = early
 		return out
 	}
+	x.flushMeta()
 	if !x.ended {
 		// The contract promises an end event; a runtime that broke it still
 		// ends the turn.
@@ -861,13 +1038,28 @@ func (rn *Runner) externalRun(ctx context.Context, x *externalTurn, initial inbo
 	return out
 }
 
-// applyAccount sets the account keys of a Claude Code turn (REQ-CCT-010): the
-// built-in account takes the binary, auth, and api_key_env of its optional
-// [providers.claude-code] table (API-CCT-027), else the agent's (the keys of
-// spec 38 agents), and keeps the daemon's CLAUDE_CONFIG_DIR; another account
-// takes its own keys and folder.
-func applyAccount(cfg *core.RuntimeConfig, home, name string, account core.ProviderConfig, agent core.AgentConfig) {
+// runtimeTitle is the product name of an external runtime in notes.
+func runtimeTitle(runtime string) string {
+	if runtime == llmcall.Antigravity {
+		return "Antigravity"
+	}
+	return "Claude Code"
+}
+
+// applyAccount sets the account keys of an external turn. Claude Code
+// (REQ-CCT-010): the built-in account takes the binary, auth, and api_key_env
+// of its optional [providers.claude-code] table (API-CCT-027), else the
+// agent's (the keys of spec 38 agents), and keeps the daemon's
+// CLAUDE_CONFIG_DIR; another account takes its own keys and folder.
+// Antigravity (REQ-AGY-001): the account's binary, and its HOME ("" for the
+// built-in account, which runs with the daemon's HOME).
+func applyAccount(cfg *core.RuntimeConfig, home, runtime, name string, account core.ProviderConfig, agent core.AgentConfig) {
 	cfg.Account = name
+	if runtime == llmcall.Antigravity {
+		cfg.Binary = account.Binary
+		cfg.Home = llmcall.AntigravityHomeDir(home, name, account)
+		return
+	}
 	if name == llmcall.ClaudeCode {
 		cfg.Binary = firstSet(account.Binary, agent.Binary)
 		cfg.Auth = firstSet(account.Auth, agent.Auth)
@@ -935,7 +1127,7 @@ func (rn *Runner) recordExternalUsage(x *externalTurn, reason string, runErr *co
 	}
 	x.recorded = true
 	h.Usage(ExternalUsage{
-		Runtime: llmcall.ClaudeCode, Provider: x.provider, Requested: x.requested, Agent: x.agent.name,
+		Runtime: x.runtime, Provider: x.provider, Requested: x.requested, Agent: x.agent.name,
 		SessionID: rn.sessionID, TurnID: x.turnID, Model: model,
 		Usage: x.usage, CostUSD: x.costUSD, Started: started, DurationMS: duration,
 		Outcome: outcome, Error: message,

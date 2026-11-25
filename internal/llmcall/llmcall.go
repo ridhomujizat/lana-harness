@@ -15,6 +15,7 @@ import (
 	"strings"
 	"sync"
 	"time"
+	"unicode"
 
 	"github.com/ridhomujizat/lana-harness/core"
 	"github.com/ridhomujizat/lana-harness/internal/models"
@@ -40,12 +41,17 @@ const (
 var ErrUnknownModel = errors.New("unknown provider or combo")
 
 // ErrNoBackgroundModel is returned by BackgroundChain when an agent's chain
-// has no target outside Claude Code and [router] background_model is empty
-// (REQ-CCT-007). The pass is skipped.
-var ErrNoBackgroundModel = errors.New("no background model: the chain has only claude-code targets and [router] background_model is empty")
+// has no target outside an external runtime (Claude Code or Antigravity) and
+// [router] background_model is empty (REQ-CCT-007, REQ-AGY-008). The pass is
+// skipped.
+var ErrNoBackgroundModel = errors.New("no background model: the chain has only external targets and [router] background_model is empty")
 
 // ClaudeCode is the built-in provider of Claude Code targets (ADR 0020).
 const ClaudeCode = core.ClaudeCodeProvider
+
+// Antigravity is the built-in provider of Antigravity targets (ADR 0022). The
+// account runs agy with the daemon's own HOME and login.
+const Antigravity = core.AntigravityKind
 
 // ClaudeCodeAliases are the model aliases of Claude Code targets, in picker
 // order (API-CCT-004).
@@ -80,6 +86,28 @@ func ClaudeCodeAccount(llm core.LLMRegistry, name string) (core.ProviderConfig, 
 	return core.ProviderConfig{}, false
 }
 
+// AntigravityAccounts is implemented by an LLM registry (the router) that
+// knows the Antigravity accounts (REQ-AGY-001): the built-in "antigravity"
+// and every [providers.<name>] table of kind "antigravity".
+type AntigravityAccounts interface {
+	// AntigravityAccount returns the config of an Antigravity account. The
+	// built-in account has an empty config with Kind set.
+	AntigravityAccount(name string) (core.ProviderConfig, bool)
+}
+
+// AntigravityAccount returns the config of the Antigravity account name
+// through llm. Without a registry that knows accounts, only the built-in
+// "antigravity" is one.
+func AntigravityAccount(llm core.LLMRegistry, name string) (core.ProviderConfig, bool) {
+	if a, ok := llm.(AntigravityAccounts); ok {
+		return a.AntigravityAccount(name)
+	}
+	if name == Antigravity {
+		return core.ProviderConfig{Kind: core.AntigravityKind}, true
+	}
+	return core.ProviderConfig{}, false
+}
+
 // IsClaudeCodeProvider reports whether name is a Claude Code account in a
 // config's providers: the built-in "claude-code" or a table of kind
 // "claude-code".
@@ -89,6 +117,17 @@ func IsClaudeCodeProvider(providers map[string]core.ProviderConfig, name string)
 	}
 	cfg, ok := providers[name]
 	return ok && cfg.Kind == core.ClaudeCodeKind
+}
+
+// IsAntigravityProvider reports whether name is an Antigravity account in a
+// config's providers: the built-in "antigravity" or a table of kind
+// "antigravity".
+func IsAntigravityProvider(providers map[string]core.ProviderConfig, name string) bool {
+	if name == Antigravity {
+		return true
+	}
+	cfg, ok := providers[name]
+	return ok && cfg.Kind == core.AntigravityKind
 }
 
 // IsClaudeCode reports whether a target runs in Claude Code (ADR 0020): its
@@ -140,6 +179,84 @@ func HasClaudeCode(llm core.LLMRegistry, chain []core.LLMTarget) bool {
 	return false
 }
 
+// ExternalRuntime returns the runtime of a provider when it is an external
+// runtime (ADR 0020, ADR 0022): "claude-code" for the built-in claude-code or
+// a provider of kind "claude-code", "antigravity" for the built-in
+// antigravity or a provider of kind "antigravity". ok is false otherwise.
+func ExternalRuntime(llm core.LLMRegistry, provider string) (string, bool) {
+	if _, ok := ClaudeCodeAccount(llm, provider); ok {
+		return ClaudeCode, true
+	}
+	if _, ok := AntigravityAccount(llm, provider); ok {
+		return Antigravity, true
+	}
+	return "", false
+}
+
+// ExternalRuntimeIn is ExternalRuntime over a config's providers.
+func ExternalRuntimeIn(providers map[string]core.ProviderConfig, name string) (string, bool) {
+	switch {
+	case IsClaudeCodeProvider(providers, name):
+		return ClaudeCode, true
+	case IsAntigravityProvider(providers, name):
+		return Antigravity, true
+	}
+	return "", false
+}
+
+// IsExternal reports whether a target runs in an external runtime: its
+// provider is a Claude Code or Antigravity account of llm (REQ-AGY-001).
+func IsExternal(llm core.LLMRegistry, t core.LLMTarget) bool {
+	_, ok := ExternalRuntime(llm, t.Provider)
+	return ok
+}
+
+// IsExternalAddress reports whether value is a "<account>/<model>" address of
+// a Claude Code or Antigravity account of llm.
+func IsExternalAddress(llm core.LLMRegistry, value string) bool {
+	t, ok := ParseTarget(value)
+	return ok && value[len(t.Provider)] == '/' && IsExternal(llm, t)
+}
+
+// IsExternalAddressIn is IsExternalAddress over a config's providers.
+func IsExternalAddressIn(providers map[string]core.ProviderConfig, value string) bool {
+	t, ok := ParseTarget(value)
+	if !ok || value[len(t.Provider)] != '/' {
+		return false
+	}
+	_, ok = ExternalRuntimeIn(providers, t.Provider)
+	return ok
+}
+
+// WithoutExternal returns chain without its external runtime targets: the part
+// lana's own loop and the background passes can call.
+func WithoutExternal(llm core.LLMRegistry, chain []core.LLMTarget) []core.LLMTarget {
+	out := make([]core.LLMTarget, 0, len(chain))
+	for _, t := range chain {
+		if !IsExternal(llm, t) {
+			out = append(out, t)
+		}
+	}
+	return out
+}
+
+// HasExternal reports whether chain has a Claude Code or Antigravity target.
+func HasExternal(llm core.LLMRegistry, chain []core.LLMTarget) bool {
+	for _, t := range chain {
+		if IsExternal(llm, t) {
+			return true
+		}
+	}
+	return false
+}
+
+// ValidAntigravityModel reports whether model may follow an Antigravity
+// account: a non-empty value that does not start with "-" and has no
+// whitespace anywhere (REQ-AGY-001).
+func ValidAntigravityModel(model string) bool {
+	return model != "" && !strings.HasPrefix(model, "-") && strings.IndexFunc(model, unicode.IsSpace) < 0
+}
+
 // ClaudeConfigDir returns the CLAUDE_CONFIG_DIR of the Claude Code account
 // name (REQ-CCT-010): "" for the built-in account (the daemon's environment
 // stays as it is), else config_dir with a leading ~ or $LANA_HOME expanded,
@@ -157,6 +274,12 @@ func ClaudeConfigDir(home, name string, cfg core.ProviderConfig) string {
 	if dir == "" {
 		return filepath.Clean(filepath.Join(home, "claude", name))
 	}
+	return expandAccountDir(home, dir)
+}
+
+// expandAccountDir expands a leading $LANA_HOME (home) or ~ of an account
+// folder and takes a relative result from home.
+func expandAccountDir(home, dir string) string {
 	for _, prefix := range []string{"$LANA_HOME", "${LANA_HOME}"} {
 		if rest, ok := strings.CutPrefix(dir, prefix); ok && (rest == "" || rest[0] == '/') {
 			dir = home + rest
@@ -172,6 +295,79 @@ func ClaudeConfigDir(home, name string, cfg core.ProviderConfig) string {
 		dir = filepath.Join(home, dir)
 	}
 	return filepath.Clean(dir)
+}
+
+// AntigravityHomeDir returns the HOME of the Antigravity account name for a
+// turn (REQ-AGY-001): "" for the built-in account (the daemon's own HOME),
+// else home with a leading ~ or $LANA_HOME expanded, or
+// $LANA_HOME/antigravity/<name> when home is empty. A relative result is taken
+// from lanaHome. An empty lanaHome is $LANA_HOME, else ~/.lana.
+func AntigravityHomeDir(lanaHome, name string, cfg core.ProviderConfig) string {
+	if name == Antigravity || name == "" {
+		return ""
+	}
+	if lanaHome == "" {
+		lanaHome = defaultHome()
+	}
+	dir := strings.TrimSpace(cfg.Home)
+	if dir == "" {
+		return filepath.Clean(filepath.Join(lanaHome, "antigravity", name))
+	}
+	return expandAccountDir(lanaHome, dir)
+}
+
+// PoolAccounts is implemented by an LLM registry (the router) that knows the
+// subscription pools of the external runtimes (spec 75, REQ-PAF-001).
+type PoolAccounts interface {
+	// PoolAccounts returns the accounts of runtime ("claude-code" or
+	// "antigravity") a pooled address may use: enabled, pool not false,
+	// sorted by priority then name, the built-in account included unless it
+	// is left out.
+	PoolAccounts(runtime string) []string
+}
+
+// Pool returns the targets a turn on t tries in order (REQ-PAF-001). For a
+// pooled address (the built-in claude-code or antigravity provider) on a
+// registry that knows pools, it is one target per pooled account of that
+// runtime with t's model. A pinned account address, a target outside the
+// external runtimes, an empty pool, or a registry without pools returns
+// [t].
+func Pool(llm core.LLMRegistry, t core.LLMTarget) []core.LLMTarget {
+	if t.Provider != ClaudeCode && t.Provider != Antigravity {
+		return []core.LLMTarget{t}
+	}
+	p, ok := llm.(PoolAccounts)
+	if !ok {
+		return []core.LLMTarget{t}
+	}
+	accounts := p.PoolAccounts(t.Provider)
+	if len(accounts) == 0 {
+		return []core.LLMTarget{t}
+	}
+	out := make([]core.LLMTarget, 0, len(accounts))
+	seen := make(map[string]bool, len(accounts))
+	for _, name := range accounts {
+		if name == "" || seen[name] {
+			continue
+		}
+		seen[name] = true
+		out = append(out, core.LLMTarget{Provider: name, Model: t.Model})
+	}
+	if len(out) == 0 {
+		return []core.LLMTarget{t}
+	}
+	return out
+}
+
+// AntigravityHome returns the HOME of the Antigravity account name
+// (REQ-AGY-001): "" for the built-in account (it runs with the daemon's own
+// HOME), else $LANA_HOME/antigravity/<name> (as config.HomeDir, else
+// ~/.lana).
+func AntigravityHome(name string) string {
+	if name == Antigravity || name == "" {
+		return ""
+	}
+	return filepath.Clean(filepath.Join(defaultHome(), "antigravity", name))
 }
 
 // defaultHome is LANA_HOME, else ~/.lana.
@@ -324,8 +520,9 @@ func Chain(llm core.LLMRegistry, provider, model string, fallback []string) ([]c
 
 // AgentChain is the chain of an agent's configured model with its fallback,
 // and the requested value for call records. A legacy runtime agent is read
-// as its claude-code address (API-CCT-002). The chain may hold Claude Code
-// targets; background passes use AgentBackgroundChain instead.
+// as its claude-code address (API-CCT-002). The chain may hold external
+// runtime targets (Claude Code or Antigravity); background passes use
+// AgentBackgroundChain instead.
 func AgentChain(llm core.LLMRegistry, cfg core.AgentConfig) ([]core.LLMTarget, string, error) {
 	cfg = NormalizeAgent(cfg)
 	chain, err := Chain(llm, cfg.Provider, cfg.Model, cfg.Fallback)
@@ -343,15 +540,16 @@ type BackgroundModeler interface {
 
 // BackgroundChain returns the chain a background pass (compaction, memory
 // capture, knowledge passes) uses for an agent whose turn chain is chain
-// (REQ-CCT-007): chain without its Claude Code targets, else [router]
-// background_model resolved through llm, else ErrNoBackgroundModel. requested
-// is kept when targets of chain remain, else it is the background model.
+// (REQ-CCT-007, REQ-AGY-008): chain without its external runtime targets
+// (Claude Code or Antigravity), else [router] background_model resolved
+// through llm, else ErrNoBackgroundModel. requested is kept when targets of
+// chain remain, else it is the background model.
 func BackgroundChain(llm core.LLMRegistry, chain []core.LLMTarget, requested string) ([]core.LLMTarget, string, error) {
-	if !HasClaudeCode(llm, chain) {
+	if !HasExternal(llm, chain) {
 		return chain, requested, nil
 	}
-	if rest := WithoutClaudeCode(llm, chain); len(rest) > 0 {
-		if IsClaudeCodeAddress(llm, requested) {
+	if rest := WithoutExternal(llm, chain); len(rest) > 0 {
+		if IsExternalAddress(llm, requested) {
 			requested = Address(rest[0])
 		}
 		return rest, requested, nil
@@ -367,7 +565,7 @@ func BackgroundChain(llm core.LLMRegistry, chain []core.LLMTarget, requested str
 	if err != nil {
 		return nil, "", fmt.Errorf("[router] background_model: %w", err)
 	}
-	resolved = WithoutClaudeCode(llm, resolved)
+	resolved = WithoutExternal(llm, resolved)
 	if len(resolved) == 0 {
 		return nil, "", ErrNoBackgroundModel
 	}
@@ -393,8 +591,9 @@ var (
 )
 
 // WarnNoBackground logs that a background pass of agent was skipped because
-// it has no model outside Claude Code, at most once per agent per hour
-// (REQ-CCT-007). It reports whether it logged.
+// it has no model outside an external runtime (Claude Code or Antigravity),
+// at most once per agent per hour (REQ-CCT-007, REQ-AGY-008). It reports
+// whether it logged.
 func WarnNoBackground(agent, pass string) bool {
 	now := time.Now()
 	backgroundWarnMu.Lock()
@@ -405,7 +604,7 @@ func WarnNoBackground(agent, pass string) bool {
 	}
 	backgroundWarned[agent] = now
 	backgroundWarnMu.Unlock()
-	slog.Warn("background pass skipped: the agent uses only Claude Code and [router] background_model is empty",
+	slog.Warn("background pass skipped: the agent uses only an external runtime and [router] background_model is empty",
 		"agent", agent, "pass", pass)
 	return true
 }

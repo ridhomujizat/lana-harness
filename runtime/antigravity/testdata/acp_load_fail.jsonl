@@ -1,0 +1,9 @@
+{"dir": "send", "msg": {"jsonrpc": "2.0", "id": 1, "method": "initialize", "params": {"protocolVersion": 1, "clientCapabilities": {}, "clientInfo": {"name": "lana", "version": "dev"}}}}
+{"dir": "recv", "msg": {"jsonrpc": "2.0", "result": {"protocolVersion": 1, "agentCapabilities": {"loadSession": true}, "agentInfo": {"name": "Antigravity ACP Server", "version": "1.5.17"}}, "id": 1}}
+{"dir": "send", "msg": {"jsonrpc": "2.0", "id": 2, "method": "session/load", "params": {"sessionId": "gone-session", "cwd": "/workspace", "mcpServers": []}}}
+{"dir": "recv", "msg": {"jsonrpc": "2.0", "result": {"sessionId": "gone-session"}, "id": 2}}
+{"dir": "send", "msg": {"jsonrpc": "2.0", "id": 3, "method": "session/new", "params": {"cwd": "/workspace", "mcpServers": []}}}
+{"dir": "recv", "msg": {"jsonrpc": "2.0", "result": {"sessionId": "new-session", "models": {"availableModels": []}, "_meta": {"antigravity": {"tier": {"name": "Google AI Pro"}}}}, "id": 3}}
+{"dir": "send", "msg": {"jsonrpc": "2.0", "id": 4, "method": "session/prompt", "params": {"sessionId": "new-session", "prompt": [{"type": "text", "text": "hi"}]}}}
+{"dir": "recv", "msg": {"jsonrpc": "2.0", "method": "session/update", "params": {"sessionId": "new-session", "update": {"sessionUpdate": "agent_message_chunk", "content": {"type": "text", "text": "hello"}}}}}
+{"dir": "recv", "msg": {"jsonrpc": "2.0", "result": {"stopReason": "end_turn", "usage": {"inputTokens": 5, "outputTokens": 2}}, "id": 4}}

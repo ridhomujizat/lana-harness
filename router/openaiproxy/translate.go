@@ -75,14 +75,17 @@ type toolFunction struct {
 // emptySchema is the input schema of a function tool without parameters.
 var emptySchema = json.RawMessage(`{"type":"object","properties":{}}`)
 
-// effortMap maps OpenAI reasoning_effort values to core efforts.
+// effortMap maps OpenAI reasoning_effort values to core efforts. Spec 76: a
+// level is the model's own name, so the values pass through as they are (a
+// target model that does not list one uses its default); "none" is lana's
+// "off" switch, which every adapter turns into its own off setting.
 var effortMap = map[string]string{
 	"none":    "off",
-	"minimal": "low",
+	"minimal": "minimal",
 	"low":     "low",
-	"medium":  "high",
+	"medium":  "medium",
 	"high":    "high",
-	"xhigh":   "max",
+	"xhigh":   "xhigh",
 }
 
 // toChatRequest translates an OpenAI request into a core.ChatRequest. Model

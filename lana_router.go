@@ -183,7 +183,7 @@ func routerCallRow(rec router.CallRecord) routerdb.Call {
 	}
 	return routerdb.Call{
 		At: rec.At, Source: rec.Source, Agent: rec.Agent, SessionID: rec.SessionID, TurnID: rec.TurnID,
-		Requested: rec.Requested, Provider: rec.Provider, Model: rec.Model, Attempt: rec.Attempt, Outcome: rec.Outcome,
+		Requested: rec.Requested, Provider: rec.Provider, Model: rec.Model, Key: rec.Key, Attempt: rec.Attempt, Outcome: rec.Outcome,
 		InputTokens: rec.InputTokens, OutputTokens: rec.OutputTokens, CachedTokens: rec.CachedTokens,
 		CostUSD: cost, TTFTMs: rec.TTFTMs, DurationMs: rec.DurationMs, Error: rec.Error,
 	}
@@ -289,6 +289,8 @@ func (rt *Runtime) attachRouterStores() {
 	}
 	rt.router.AttachStores(rec, limits)
 	rt.loadClaudeCodeModels()
+	// API-AGY-026: the Antigravity model lists and tiers of the last run.
+	rt.loadAntigravityState()
 	rt.wireModelFacts()
 }
 

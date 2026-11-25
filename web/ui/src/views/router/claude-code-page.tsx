@@ -16,6 +16,8 @@ import { CreateAgentDialog } from "../agents";
 import { Alert, SettingsRestartBanner, StatusLine, markSettingsSaved } from "../settings-pages";
 import { ACCOUNTS_TERMS_NOTE, useClaudeAccounts } from "./claude-code";
 import { LoginCommand, PlanWindows, UsageProbeError, accountWindows, planLabel } from "./limits";
+import { AccountOrderList, POOL_TERMS_NOTE } from "./account-order";
+import type { OrderItem } from "./account-order";
 import { RefreshControl, claudeLimitsStale, claudeUpdatedAt } from "./limits-refresh";
 import { TestResult, usedByList, usedByText } from "./models";
 import type { TestState } from "./models";
@@ -1025,6 +1027,25 @@ export function ClaudeCodeDetail() {
     }
   }
 
+  /* Spec 75 (REQ-PAF-006): the pool order, saved on every move. */
+  async function saveOrder(order: string[], unpooled: string[]) {
+    const result = await routerApi.savePoolOrder("claude-code", order, unpooled, version || undefined);
+    markSettingsSaved();
+    if (result.version) {
+      setVersion(result.version);
+    }
+    void reloadStatus();
+  }
+
+  const orderItems: OrderItem[] = accounts.map((account) => ({
+    id: account.name,
+    label: accountDisplayName(account),
+    detail: account.plan ? planLabel(account.plan) : account.logged_in ? "" : "Not signed in",
+    windows: accountWindows(account, limitOf(account.name)),
+    coolingUntil: account.cooling_until || null,
+    pool: account.pool !== false,
+  }));
+
   async function saveLabel(account: ClaudeAccount, label: string) {
     setBusyRow(account.name);
     clearNotes();
@@ -1163,6 +1184,13 @@ export function ClaudeCodeDetail() {
         ) : null}
         <p className="hint rt-conn-note">{ACCOUNTS_TERMS_NOTE}</p>
       </Panel>
+
+      {accounts.length > 1 ? (
+        <Panel title="Account order" className="rt-order-panel">
+          <AccountOrderList label="Claude Code account order" items={orderItems} onSave={saveOrder} />
+          {status && status.pool_warning ? <p className="hint rt-conn-note">{POOL_TERMS_NOTE}</p> : null}
+        </Panel>
+      ) : null}
 
       <ClaudeModelsPanel
         accounts={accounts}

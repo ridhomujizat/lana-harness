@@ -38,20 +38,24 @@ var ErrInvalidFilter = errors.New("invalid router call filter")
 
 // Call is one stored attempt of one LLM call (REQ-RTR-009, API-RTR-012).
 type Call struct {
-	ID           int64     `json:"id"`
-	At           time.Time `json:"at"`
-	Source       string    `json:"source"`
-	Agent        string    `json:"agent"`
-	SessionID    string    `json:"session_id"`
-	TurnID       string    `json:"turn_id,omitempty"`
-	Requested    string    `json:"requested"`
-	Provider     string    `json:"provider"`
-	Model        string    `json:"model"`
-	Attempt      int       `json:"attempt"`
-	Outcome      string    `json:"outcome"`
-	InputTokens  int64     `json:"input_tokens"`
-	OutputTokens int64     `json:"output_tokens"`
-	CachedTokens int64     `json:"cached_tokens"`
+	ID        int64     `json:"id"`
+	At        time.Time `json:"at"`
+	Source    string    `json:"source"`
+	Agent     string    `json:"agent"`
+	SessionID string    `json:"session_id"`
+	TurnID    string    `json:"turn_id,omitempty"`
+	Requested string    `json:"requested"`
+	Provider  string    `json:"provider"`
+	Model     string    `json:"model"`
+	// Key is the secret name of the API key that served the call when the
+	// provider has a key pool (spec 75 REQ-PAF-005), never its value; "" for
+	// none.
+	Key          string `json:"key,omitempty"`
+	Attempt      int    `json:"attempt"`
+	Outcome      string `json:"outcome"`
+	InputTokens  int64  `json:"input_tokens"`
+	OutputTokens int64  `json:"output_tokens"`
+	CachedTokens int64  `json:"cached_tokens"`
 	// CostUSD is nil when the price was unknown.
 	CostUSD    *float64 `json:"cost_usd"`
 	TTFTMs     int64    `json:"ttft_ms"`

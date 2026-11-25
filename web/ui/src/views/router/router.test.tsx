@@ -32,6 +32,7 @@ vi.mock("../../api/router", async (importOriginal) => {
     cancelClaudeSignIn: vi.fn(),
     signOutClaudeAccount: vi.fn(),
     setClaudeAccountLabel: vi.fn(),
+    getAntigravity: vi.fn(),
   };
 });
 

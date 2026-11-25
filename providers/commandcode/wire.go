@@ -166,20 +166,28 @@ func clampMaxTokens(n int, model string) int {
 	return n
 }
 
-// reasoningEffort maps lana's effort ("", off, low, high, max) to the
-// OpenAI-style value the provider takes. "" sends no field; off turns thinking
-// off at the provider (REQ-KBG-001).
-func reasoningEffort(effort string) string {
-	switch effort {
-	case "off":
-		return "off"
-	case "low":
-		return "low"
-	case "high", "max":
-		return "high"
-	default:
-		return ""
+// wireEfforts are the reasoning_effort values /alpha/generate takes (the
+// official CLI's effort set); a model's own levels are a subset of them
+// (GET /provider/v1/models?view=client reasoningEfforts).
+var wireEfforts = []string{"off", "low", "medium", "high", "xhigh", "max"}
+
+// wireLevels returns the levels of list the wire takes, in list order.
+func wireLevels(list []string) []string {
+	out := []string{}
+	for _, level := range list {
+		if models.PickEffort(level, wireEfforts, "") != "" {
+			out = append(out, level)
+		}
 	}
+	return out
+}
+
+// reasoningEffort returns the reasoning_effort of a request without a model
+// list: a level the wire takes is sent as is (spec 76 REQ-MES-003); "" and
+// any other value send no field. "off" turns thinking off at the provider
+// (REQ-KBG-001). Adapter.Stream narrows it to the model's own levels.
+func reasoningEffort(effort string) string {
+	return models.PickEffort(effort, wireEfforts, "")
 }
 
 // threadID derives a conversation-stable UUID from the system prompt and the

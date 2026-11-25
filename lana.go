@@ -264,6 +264,15 @@ type Runtime struct {
 	// claudeUsage throttles the usage probes of Claude Code accounts
 	// (spec 39 Revision 4).
 	claudeUsage claudeUsageThrottle
+	// agySignIns are the background sign-ins of Antigravity accounts
+	// (REQ-AGY-010).
+	agySignIns agySignIns
+	// agyUsage throttles the usage probes of Antigravity accounts
+	// (REQ-AGY-009).
+	agyUsage claudeUsageThrottle
+	// agyTiers are the last plan tiers of the Antigravity accounts
+	// (API-AGY-020).
+	agyTiers agyTiers
 	// consolidateWG tracks the in-flight nightly knowledge consolidation started
 	// by KnowledgeConsolidate, so Close joins it after cancelling rt.ctx and
 	// before the store is shut down (REQ-KNU-041).
@@ -1249,6 +1258,8 @@ func (rt *Runtime) Close() error {
 	rt.closed.Store(true)
 	// REQ-CCT-012: stop the running Claude Code sign-ins.
 	rt.cancelClaudeSignIns()
+	// REQ-AGY-010: stop the running Antigravity sign-ins.
+	rt.cancelAntigravitySignIns()
 	// REQ-JOB-018: kill every background job's process group on shutdown.
 	if rt.jobs != nil {
 		rt.jobs.Shutdown()
