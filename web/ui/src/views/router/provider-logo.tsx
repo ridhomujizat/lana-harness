@@ -35,6 +35,7 @@ const LOGO_FILES: Record<string, string> = {
   together: "together-color",
   fireworks: "fireworks-color",
   cerebras: "cerebras-color",
+  commandcode: "commandcode",
 };
 
 /* The vendored files keep their upstream markup; the inline copy drops the
