@@ -2679,6 +2679,10 @@ html[data-shell="macos-app"]:not([data-shell-fullscreen]) .wbg-panel.wbg-sheet.i
 }
 
 .wbr-notice {
+  flex: 0 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
   height: 22px;
   margin-right: 6px;
   padding: 0 9px;
