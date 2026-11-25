@@ -710,19 +710,44 @@ func TestRiskForKind(t *testing.T) {
 }
 
 func TestPermCall(t *testing.T) {
-	tool, input := permCall("execute", "run_command", json.RawMessage(`{"CommandLine":"rm -rf build"}`))
-	if tool != "bash" || !strings.Contains(string(input), `"command":"rm -rf build"`) {
-		t.Fatalf("execute = %q %s", tool, input)
+	cases := []struct {
+		kind, name, raw, tool, rule string
+	}{
+		{"execute", "run_command", `{"CommandLine":"rm -rf build"}`, "bash", "bash(rm -rf build)"},
+		{"edit", "edit", `{"FilePath":"a.txt"}`, "edit_file", "edit_file(a.txt)"},
+		{"read", "view_file", `{"AbsolutePath":"/etc/hosts"}`, "read_file", "read_file(/etc/hosts)"},
+		{"read", "view_file", `{"FilePath":"a.txt"}`, "read_file", "read_file(a.txt)"},
+		{"search", "grep_search", `{"SearchPath":"src"}`, "grep", "grep(src)"},
+		{"search", "grep_search", `{"path":"."}`, "grep", "grep(.)"},
+		{"fetch", "fetch", `{"Url":"http://x/y"}`, "web_fetch", "web_fetch(http://x/y)"},
+		{"fetch", "fetch", `{"url":"http://x/z"}`, "web_fetch", "web_fetch(http://x/z)"},
 	}
-	if rule := ruleString("execute", "run_command", json.RawMessage(`{"CommandLine":"rm -rf build"}`)); rule != "bash(rm -rf build)" {
-		t.Fatalf("execute rule = %q", rule)
+	for _, tc := range cases {
+		tool, input := permCall(tc.kind, tc.name, json.RawMessage(tc.raw))
+		if tool != tc.tool {
+			t.Errorf("%s/%s: tool = %q, want %q", tc.kind, tc.name, tool, tc.tool)
+		}
+		if rule := ruleString(tc.kind, tc.name, json.RawMessage(tc.raw)); rule != tc.rule {
+			t.Errorf("%s/%s: rule = %q, want %q", tc.kind, tc.name, rule, tc.rule)
+		}
+		if !strings.Contains(string(input), `":`) {
+			t.Errorf("%s/%s: input = %s", tc.kind, tc.name, input)
+		}
 	}
-	tool, input = permCall("edit", "edit", json.RawMessage(`{"FilePath":"a.txt"}`))
-	if tool != "edit" || !strings.Contains(string(input), `"path":"a.txt"`) {
-		t.Fatalf("edit = %q %s", tool, input)
-	}
-	tool, input = permCall("read", "view_file", json.RawMessage(`{"Path":"a.txt"}`))
-	if tool != "view_file" || !strings.Contains(string(input), `"Path"`) {
+	// Other kinds keep the lowercased agy name and the raw input.
+	tool, input := permCall("think", "Think", json.RawMessage(`{"x":1}`))
+	if tool != "think" || string(input) != `{"x":1}` {
 		t.Fatalf("other = %q %s", tool, input)
+	}
+	if rule := ruleString("think", "Think", json.RawMessage(`{"x":1}`)); rule != "think" {
+		t.Fatalf("other rule = %q", rule)
+	}
+	// An other kind with no input gets {}.
+	if _, input := permCall("other", "Other", nil); string(input) != "{}" {
+		t.Fatalf("empty other input = %s", input)
+	}
+	// A read without a path renders no argument.
+	if rule := ruleString("read", "view_file", json.RawMessage(`{}`)); rule != "read_file()" {
+		t.Fatalf("read no path rule = %q", rule)
 	}
 }

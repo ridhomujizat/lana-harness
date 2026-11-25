@@ -156,6 +156,11 @@ type RuntimeAccount struct {
 	Binary    string
 	Auth      string
 	APIKeyEnv string
+	// Home is the account's HOME for an Antigravity account: the probe and
+	// the sign-in run with it, so the account's own Google login is used
+	// (ADR 0022); "" keeps the daemon's HOME (the built-in account). Claude
+	// Code accounts leave it empty.
+	Home string
 }
 
 // RuntimeAccountStatus is the health of one Claude Code account

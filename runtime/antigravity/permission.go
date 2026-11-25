@@ -44,32 +44,45 @@ func riskForKind(kind string) core.Risk {
 }
 
 // permCall returns the lana tool name and input lana's permission engine
-// matches for an ACP tool call, so rules such as bash(rm *) match an agy
-// command the way they match a native one: execute -> bash{command}, edit ->
-// edit{path}; other kinds keep the agy name and raw input (REQ-AGY-006).
+// matches for an ACP tool call, so rules written for native tools apply the
+// way they match a native one: execute -> bash{command}, edit -> edit_file{path},
+// read -> read_file{path}, search -> grep{path}, fetch -> web_fetch{url}.
+// Other kinds keep the lowercased agy name and raw input (REQ-AGY-006).
 func permCall(kind, name string, rawInput json.RawMessage) (string, json.RawMessage) {
 	value := decodeInput(rawInput)
 	switch kind {
 	case "execute":
 		return "bash", mustRaw(map[string]any{"command": stringField(value, "CommandLine")})
 	case "edit":
-		return "edit", mustRaw(map[string]any{"path": editPath(value)})
+		return "edit_file", mustRaw(map[string]any{"path": editPath(value)})
+	case "read":
+		return "read_file", mustRaw(map[string]any{"path": readPath(value)})
+	case "search":
+		return "grep", mustRaw(map[string]any{"path": searchPath(value)})
+	case "fetch":
+		return "web_fetch", mustRaw(map[string]any{"url": fetchURL(value)})
 	}
 	if len(rawInput) == 0 {
 		rawInput = json.RawMessage("{}")
 	}
-	return name, rawInput
+	return strings.ToLower(name), rawInput
 }
 
 // ruleString renders the rule-match string of an ACP tool call, for example
-// "bash(ls -la)" or "edit(a.txt)".
+// "bash(ls -la)", "edit_file(a.txt)", or "read_file(/etc/hosts)".
 func ruleString(kind, name string, rawInput json.RawMessage) string {
 	value := decodeInput(rawInput)
 	switch kind {
 	case "execute":
 		return "bash(" + stringField(value, "CommandLine") + ")"
 	case "edit":
-		return "edit(" + editPath(value) + ")"
+		return "edit_file(" + editPath(value) + ")"
+	case "read":
+		return "read_file(" + readPath(value) + ")"
+	case "search":
+		return "grep(" + searchPath(value) + ")"
+	case "fetch":
+		return "web_fetch(" + fetchURL(value) + ")"
 	}
 	return strings.ToLower(name)
 }
@@ -78,6 +91,23 @@ func ruleString(kind, name string, rawInput json.RawMessage) string {
 func editPath(value map[string]any) string {
 	return firstNonEmpty(stringField(value, "FilePath"), stringField(value, "file_path"),
 		stringField(value, "path"), stringField(value, "TargetFile"), stringField(value, "target_file"))
+}
+
+// readPath reads the path-ish field of a read tool call.
+func readPath(value map[string]any) string {
+	return firstNonEmpty(stringField(value, "AbsolutePath"), stringField(value, "FilePath"),
+		stringField(value, "file_path"), stringField(value, "path"), stringField(value, "TargetFile"))
+}
+
+// searchPath reads the folder-ish field of a search tool call.
+func searchPath(value map[string]any) string {
+	return firstNonEmpty(stringField(value, "SearchPath"), stringField(value, "DirectoryPath"),
+		stringField(value, "path"))
+}
+
+// fetchURL reads the URL field of a fetch tool call.
+func fetchURL(value map[string]any) string {
+	return firstNonEmpty(stringField(value, "Url"), stringField(value, "url"))
 }
 
 // answerPermission routes a session/request_permission through lana's approval

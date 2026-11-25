@@ -63,6 +63,9 @@ type Options struct {
 	LookPath func(string) (string, error)
 	// Environ returns the daemon environment the child env is built from.
 	Environ func() []string
+	// SignInTimeout bounds `agy acp --login` (REQ-AGY-010); 15 minutes when
+	// unset.
+	SignInTimeout time.Duration
 }
 
 // Runtime is the antigravity AgentRuntime.
@@ -77,6 +80,10 @@ type Runtime struct {
 	starting map[string]bool     // sessions whose process is starting
 	acpIDs   map[string]acpRef   // ACP session by lana session ID
 	closed   bool
+
+	// agy caches the per-account status and model probes and holds the
+	// running sign-in and usage runs (REQ-AGY-009, REQ-AGY-010).
+	agy *agyState
 
 	versionMu sync.Mutex
 	versions  map[string]versionInfo
@@ -136,6 +143,9 @@ func New(deps core.RuntimeDeps, opts Options) *Runtime {
 	if opts.Environ == nil {
 		opts.Environ = os.Environ
 	}
+	if opts.SignInTimeout <= 0 {
+		opts.SignInTimeout = DefaultSignInTimeout
+	}
 	log := deps.Logger
 	if log == nil {
 		log = slog.New(slog.NewTextHandler(io.Discard, nil))
@@ -143,7 +153,7 @@ func New(deps core.RuntimeDeps, opts Options) *Runtime {
 	return &Runtime{
 		deps: deps, log: log, opts: opts, sem: newFIFOSem(opts.MaxConcurrent),
 		procs: map[string]*process{}, starting: map[string]bool{}, acpIDs: map[string]acpRef{},
-		versions: map[string]versionInfo{},
+		agy: newAgyState(), versions: map[string]versionInfo{},
 	}
 }
 
@@ -714,6 +724,7 @@ func (r *Runtime) Shutdown(ctx context.Context) error {
 	}
 	r.procs = map[string]*process{}
 	r.mu.Unlock()
+	r.cancelProbes()
 	for _, p := range procs {
 		r.interrupt(p)
 		p.stop(r.opts.KillGrace)

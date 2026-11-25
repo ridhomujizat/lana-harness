@@ -8,6 +8,11 @@
 //	FAKEAGY_GATE           file the {"fake":"gate"} directive waits for
 //	FAKEAGY_IGNORE_CANCEL  "1" hangs after receiving session/cancel
 //	FAKEAGY_FAIL_LOAD      "1" answers session/load with a JSON-RPC error
+//	FAKEAGY_MODELS         `models` prints this file (default testdata/models.txt)
+//	FAKEAGY_MODELS_ERROR    `models` prints this line and exits 1 instead
+//	FAKEAGY_SIGNED_OUT     "1" makes `models` print the signed-out error and exit 1
+//	FAKEAGY_USAGE          `-p /usage` prints this file
+//	FAKEAGY_LOGIN_CODE     `acp --login` succeeds only when stdin matches this
 //
 // The fixture is the recorded `agy acp` conversation. Each line is a one-line
 // JSON object the recorder wrote: {"dir":"send"|"recv","msg":{…}}, where
@@ -26,6 +31,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"path/filepath"
 	"strings"
 	"sync"
 	"time"
@@ -55,20 +61,101 @@ var (
 
 func main() {
 	args := os.Args[1:]
-	if len(args) == 1 && args[0] == "--version" {
+	switch {
+	case len(args) == 1 && args[0] == "--version":
 		v := os.Getenv("FAKEAGY_VERSION")
 		if v == "" {
 			v = "1.5.17"
 		}
 		fmt.Println(v)
-		return
-	}
-	if len(args) == 1 && args[0] == "acp" {
+	case len(args) == 1 && args[0] == "acp":
 		runACP(args)
+	case len(args) == 2 && args[0] == "acp" && args[1] == "--login":
+		runLogin(args)
+	case len(args) == 1 && args[0] == "models":
+		runModels()
+	case isUsageArgs(args):
+		runUsage(args)
+	default:
+		fmt.Fprintf(os.Stderr, "fakeagy: unsupported args %v\n", args)
+		os.Exit(2)
+	}
+}
+
+// isUsageArgs reports whether argv is the `/usage` print mode ("-p /usage").
+func isUsageArgs(args []string) bool {
+	for i, a := range args {
+		if a == "-p" && i+1 < len(args) && args[i+1] == "/usage" {
+			return true
+		}
+	}
+	return false
+}
+
+// runModels fakes `agy models`: the model list, or the signed-out error, or a
+// forced error line.
+func runModels() {
+	cwd, _ := os.Getwd()
+	logStart([]string{"models"}, cwd)
+	if os.Getenv("FAKEAGY_SIGNED_OUT") == "1" {
+		fmt.Println("Fetching available models...")
+		fmt.Println("Error: Please sign in to view available models. Launch the CLI without arguments to sign in.")
+		os.Exit(1)
+	}
+	if text := os.Getenv("FAKEAGY_MODELS_ERROR"); text != "" {
+		fmt.Fprintln(os.Stderr, text)
+		os.Exit(1)
+	}
+	path := os.Getenv("FAKEAGY_MODELS")
+	if path == "" {
+		path = filepath.Join("testdata", "models.txt")
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		fmt.Fprintln(os.Stderr, "fakeagy: "+err.Error())
+		os.Exit(2)
+	}
+	_, _ = os.Stdout.Write(data)
+}
+
+// runUsage fakes `agy -p /usage --output-format json`: it prints the file
+// named by FAKEAGY_USAGE (nothing when unset) and records its cwd.
+func runUsage(argv []string) {
+	cwd, _ := os.Getwd()
+	logStart(argv, cwd)
+	path := os.Getenv("FAKEAGY_USAGE")
+	if path == "" {
 		return
 	}
-	fmt.Fprintf(os.Stderr, "fakeagy: unsupported args %v\n", args)
-	os.Exit(2)
+	data, err := os.ReadFile(path)
+	if err != nil {
+		fmt.Fprintln(os.Stderr, "fakeagy: "+err.Error())
+		os.Exit(2)
+	}
+	_, _ = os.Stdout.Write(data)
+}
+
+// runLogin fakes `agy acp --login`: it prints the link and the code prompt,
+// reads one stdin line, records it, and exits 0 only when it matches
+// FAKEAGY_LOGIN_CODE.
+func runLogin(argv []string) {
+	cwd, _ := os.Getwd()
+	logStart(argv, cwd)
+	fmt.Println("Open this link in a browser to log in with Google:")
+	fmt.Println("https://accounts.google.com/o/oauth2/auth?client_id=fake&redirect_uri=x&state=x")
+	fmt.Println("Then paste the authorization code, or the full URL of the page you land on, and press Enter:")
+	sc := bufio.NewScanner(os.Stdin)
+	if !sc.Scan() {
+		fmt.Fprintln(os.Stderr, "login cancelled: no authorization code was entered")
+		os.Exit(1)
+	}
+	line := strings.TrimRight(sc.Text(), "\r")
+	writeRecord(map[string]any{"kind": "login", "line": line})
+	if line != "" && line == os.Getenv("FAKEAGY_LOGIN_CODE") {
+		return
+	}
+	fmt.Fprintln(os.Stderr, "login failed: bad code")
+	os.Exit(1)
 }
 
 // writeRecord appends one JSON object to FAKEAGY_RECORD.
