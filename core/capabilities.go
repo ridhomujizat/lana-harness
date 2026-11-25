@@ -14,6 +14,9 @@ func AgentCapabilities(cfg AgentConfig) []string {
 	if strings.HasPrefix(cfg.Model, "claude-code/") || cfg.Runtime == "claude-code" {
 		out = append(out, "Claude Code")
 	}
+	if strings.HasPrefix(cfg.Model, "antigravity/") || cfg.Runtime == "antigravity" {
+		out = append(out, "Antigravity")
+	}
 	has := map[string]bool{}
 	for _, tool := range EffectiveTools(cfg) {
 		has[tool] = true

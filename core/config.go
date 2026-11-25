@@ -183,12 +183,22 @@ type ProviderConfig struct {
 	// Label is the account's display name in the dashboard (REQ-CCT-012),
 	// at most 60 characters. "" shows the account's e-mail, else its name.
 	Label string `toml:"label"`
+
+	// Home is the account's own HOME, the agy account folder (REQ-AGY-001).
+	// "" means $LANA_HOME/antigravity/<name>. It applies to kind
+	// "antigravity" only.
+	Home string `toml:"home" json:"home"`
 }
 
 // ClaudeCodeKind is the provider kind of a Claude Code account
 // (REQ-CCT-010): [providers.<name>] kind = "claude-code". Its targets run in
 // the Claude Code runtime, never through the router.
 const ClaudeCodeKind = "claude-code"
+
+// AntigravityKind is the provider kind of an Antigravity account
+// (REQ-AGY-001): [providers.<name>] kind = "antigravity". Its targets run in
+// the Antigravity runtime, never through the router.
+const AntigravityKind = "antigravity"
 
 type AgentConfig struct {
 	Provider   string   `toml:"provider"`
