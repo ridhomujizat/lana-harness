@@ -37,6 +37,17 @@ export interface ProviderRow {
   allow_scheduled?: boolean;
   /* REQ-CCT-012: the display label of an added Claude Code account. */
   label?: string;
+  /* Spec 75 (REQ-PAF-005): the keys of an API provider in use order:
+     api_key_env first, then api_key_envs. Secret names only. */
+  keys?: ProviderKey[];
+}
+
+/* One key of an API provider (spec 75): its secret name, whether the
+   secret holds a value, and the end of its cooldown. */
+export interface ProviderKey {
+  name: string;
+  present: boolean;
+  cooling_until: string | null;
 }
 
 export interface ListProvidersResponse {
@@ -575,6 +586,12 @@ export interface ClaudeAccount {
   label: string;
   display_name: string;
   sign_in: ClaudeSignIn;
+  /* Spec 75 (REQ-PAF-006): pool order (lower first), whether a pooled
+     address may use the account, and the end of its cooldown. Optional for
+     older daemons; the client reads a missing pool as true. */
+  priority?: number;
+  pool?: boolean;
+  cooling_until?: string | null;
 }
 
 export interface ClaudeAgentStatus {
@@ -593,6 +610,8 @@ export interface ClaudeAgentStatus {
      none; the client then describes the built-in account from the top-level
      fields. */
   accounts: ClaudeAccount[];
+  /* Spec 75: more than one pooled personal account. */
+  pool_warning?: boolean;
 }
 
 function strings(value: unknown): string[] {
@@ -638,6 +657,9 @@ function normalizeAccount(value: Partial<ClaudeAccount> | null | undefined): Cla
     label,
     display_name: String(entry.display_name || "") || label || email || name,
     sign_in: normalizeSignIn(entry.sign_in),
+    priority: Number(entry.priority) || 0,
+    pool: entry.pool !== false,
+    cooling_until: entry.cooling_until ? String(entry.cooling_until) : null,
   };
 }
 
@@ -659,6 +681,7 @@ export async function getClaudeAgent(): Promise<ClaudeAgentStatus> {
     queued: Number(value.queued) || 0,
     max_concurrent: Number(value.max_concurrent) || 0,
     accounts: [],
+    pool_warning: value.pool_warning === true,
   };
   if (Array.isArray(value.accounts) && value.accounts.length > 0) {
     status.accounts = value.accounts.map((entry) => normalizeAccount(entry));
@@ -774,6 +797,333 @@ export function saveClaudeCodeModels(
     models,
     expected_version: expectedVersion,
   });
+}
+
+/* ------------------------------------------------------------------ */
+/* Antigravity (spec 74 API-AGY-020..025)                             */
+/* ------------------------------------------------------------------ */
+
+/* The built-in Antigravity account and address prefix (API-AGY-003). */
+export const ANTIGRAVITY_PROVIDER = "antigravity";
+
+/* The oldest agy the router runs (REQ-AGY-002). */
+export const ANTIGRAVITY_MIN_VERSION = "1.5.17";
+
+/* A sign-in of one account (API-AGY-022): starting = agy started, no link
+   yet; waiting_code = the Google link is out, lana waits for the code;
+   running = the code went to agy, which has not exited yet. url is set at
+   waiting_code only; error at failed only, without URLs. */
+export type AntigravitySignInState =
+  | "idle"
+  | "starting"
+  | "waiting_code"
+  | "running"
+  | "succeeded"
+  | "failed"
+  | "cancelled";
+
+export interface AntigravitySignIn {
+  state: AntigravitySignInState;
+  url: string;
+  error: string;
+  started_at: string | null;
+  finished_at: string | null;
+}
+
+/* One quota window of an Antigravity model group (REQ-AGY-009). remaining
+   is a fraction: 0.25 is a quarter left. */
+export interface AntigravityWindow {
+  group: string;
+  type: "5h" | "weekly" | string;
+  remaining: number | null;
+  resets_at: string;
+  source?: string;
+}
+
+export interface AntigravityUsage {
+  calls: number;
+  input_tokens: number;
+  output_tokens: number;
+}
+
+/* One Antigravity account (API-AGY-020, spec 75 additions). */
+export interface AntigravityAccount {
+  name: string;
+  builtin: boolean;
+  label: string;
+  display_name: string;
+  home: string;
+  binary: string;
+  disabled: boolean;
+  allow_scheduled: boolean;
+  signed_in: boolean;
+  error: string;
+  tier: string;
+  models_count: number;
+  running: number;
+  queued: number;
+  windows: AntigravityWindow[];
+  windows_updated_at: string | null;
+  windows_error: string;
+  usage_24h: AntigravityUsage;
+  agents: string[];
+  combos: string[];
+  sign_in: AntigravitySignIn;
+  priority: number;
+  pool: boolean;
+  cooling_until: string | null;
+}
+
+export interface AntigravityStatus {
+  installed: boolean;
+  binary: string;
+  version: string;
+  version_ok: boolean;
+  min_version: string;
+  /* In pool order (spec 75). */
+  accounts: AntigravityAccount[];
+  pool_warning: boolean;
+}
+
+const AGY_SIGN_IN_STATES: AntigravitySignInState[] = [
+  "idle",
+  "starting",
+  "waiting_code",
+  "running",
+  "succeeded",
+  "failed",
+  "cancelled",
+];
+
+export function normalizeAntigravitySignIn(
+  value: Partial<AntigravitySignIn> | null | undefined
+): AntigravitySignIn {
+  const entry = value || {};
+  const state = AGY_SIGN_IN_STATES.includes(entry.state as AntigravitySignInState)
+    ? (entry.state as AntigravitySignInState)
+    : "idle";
+  return {
+    state,
+    url: state === "waiting_code" ? String(entry.url || "") : "",
+    error: String(entry.error || ""),
+    started_at: entry.started_at ? String(entry.started_at) : null,
+    finished_at: entry.finished_at ? String(entry.finished_at) : null,
+  };
+}
+
+function normalizeAgyWindow(value: Partial<AntigravityWindow> | null | undefined): AntigravityWindow {
+  const entry = value || {};
+  const remaining = entry.remaining === null || entry.remaining === undefined ? null : Number(entry.remaining);
+  return {
+    group: String(entry.group || ""),
+    type: String(entry.type || ""),
+    remaining: remaining === null || !Number.isFinite(remaining) ? null : remaining,
+    resets_at: String(entry.resets_at || ""),
+    source: entry.source ? String(entry.source) : undefined,
+  };
+}
+
+function normalizeAgyAccount(value: Partial<AntigravityAccount> | null | undefined): AntigravityAccount {
+  const entry = value || {};
+  const name = String(entry.name || ANTIGRAVITY_PROVIDER);
+  const label = String(entry.label || "");
+  const usage = (entry.usage_24h || {}) as Partial<AntigravityUsage>;
+  return {
+    name,
+    builtin: entry.builtin === true,
+    label,
+    display_name: String(entry.display_name || "") || label || name,
+    home: String(entry.home || ""),
+    binary: String(entry.binary || ""),
+    disabled: entry.disabled === true,
+    allow_scheduled: entry.allow_scheduled === true,
+    signed_in: entry.signed_in === true,
+    error: String(entry.error || ""),
+    tier: String(entry.tier || ""),
+    models_count: Number(entry.models_count) || 0,
+    running: Number(entry.running) || 0,
+    queued: Number(entry.queued) || 0,
+    windows: Array.isArray(entry.windows) ? entry.windows.map((window) => normalizeAgyWindow(window)) : [],
+    windows_updated_at: entry.windows_updated_at ? String(entry.windows_updated_at) : null,
+    windows_error: String(entry.windows_error || ""),
+    usage_24h: {
+      calls: Number(usage.calls) || 0,
+      input_tokens: Number(usage.input_tokens) || 0,
+      output_tokens: Number(usage.output_tokens) || 0,
+    },
+    agents: strings(entry.agents),
+    combos: strings(entry.combos),
+    sign_in: normalizeAntigravitySignIn(entry.sign_in),
+    priority: Number(entry.priority) || 0,
+    pool: entry.pool !== false,
+    cooling_until: entry.cooling_until ? String(entry.cooling_until) : null,
+  };
+}
+
+export async function getAntigravity(): Promise<AntigravityStatus> {
+  const data = await request<Partial<AntigravityStatus> | null>("GET", "/v1/router/antigravity");
+  const value = data || {};
+  return {
+    installed: value.installed === true,
+    binary: String(value.binary || ""),
+    version: String(value.version || ""),
+    version_ok: value.version_ok === true,
+    min_version: String(value.min_version || "") || ANTIGRAVITY_MIN_VERSION,
+    accounts: Array.isArray(value.accounts) ? value.accounts.map((entry) => normalizeAgyAccount(entry)) : [],
+    pool_warning: value.pool_warning === true,
+  };
+}
+
+export interface AntigravityAccountCreated {
+  name: string;
+  home: string;
+  version: string;
+  restart_required: boolean;
+  sign_in: AntigravitySignIn;
+}
+
+const AGY_ACCOUNTS_PATH = "/v1/router/antigravity/accounts";
+
+function agyAccountPath(name: string, rest: string): string {
+  return AGY_ACCOUNTS_PATH + "/" + encodeURIComponent(name) + rest;
+}
+
+/* Adds an account (name default agy-2, agy-3, …) and starts its sign-in;
+   the daemon answers 202. */
+export async function createAntigravityAccount(
+  options: { name?: string; label?: string } = {}
+): Promise<AntigravityAccountCreated> {
+  const body: { name?: string; label?: string } = {};
+  if (options.name) {
+    body.name = options.name;
+  }
+  if (options.label) {
+    body.label = options.label;
+  }
+  const data = await request<Partial<AntigravityAccountCreated> | null>("POST", AGY_ACCOUNTS_PATH, body);
+  const value = data || {};
+  return {
+    name: String(value.name || ""),
+    home: String(value.home || ""),
+    version: String(value.version || ""),
+    restart_required: value.restart_required === true,
+    sign_in: normalizeAntigravitySignIn(value.sign_in),
+  };
+}
+
+/* Starts a sign-in; 409 sign_in_running while one runs, 409 builtin for
+   the built-in account. */
+export async function startAntigravitySignIn(name: string): Promise<AntigravitySignIn> {
+  return normalizeAntigravitySignIn(
+    await request<Partial<AntigravitySignIn> | null>("POST", agyAccountPath(name, "/sign-in"), {})
+  );
+}
+
+export async function getAntigravitySignIn(name: string): Promise<AntigravitySignIn> {
+  return normalizeAntigravitySignIn(
+    await request<Partial<AntigravitySignIn> | null>("GET", agyAccountPath(name, "/sign-in"))
+  );
+}
+
+export async function cancelAntigravitySignIn(name: string): Promise<AntigravitySignIn> {
+  return normalizeAntigravitySignIn(
+    await request<Partial<AntigravitySignIn> | null>("DELETE", agyAccountPath(name, "/sign-in"))
+  );
+}
+
+/* API-AGY-023: the code Google shows after the owner allows access. It goes
+   to agy once; neither the daemon nor the page keeps it. 409 not_waiting,
+   422 bad_code. */
+export async function sendAntigravitySignInCode(name: string, code: string): Promise<AntigravitySignIn> {
+  return normalizeAntigravitySignIn(
+    await request<Partial<AntigravitySignIn> | null>("POST", agyAccountPath(name, "/sign-in/code"), {
+      code: code.trim(),
+    })
+  );
+}
+
+/* Sets the display label of an added account; "" removes it. */
+export function setAntigravityAccountLabel(
+  name: string,
+  label: string,
+  expectedVersion?: string
+): Promise<ClaudeLabelResponse> {
+  const body: { label: string; expected_version?: string } = { label };
+  if (expectedVersion) {
+    body.expected_version = expectedVersion;
+  }
+  return request<ClaudeLabelResponse>("PUT", agyAccountPath(name, "/label"), body);
+}
+
+/* ------------------------------------------------------------------ */
+/* Account order and key pools (spec 75)                              */
+/* ------------------------------------------------------------------ */
+
+export type PoolRuntime = "claude-code" | "antigravity";
+
+export interface PoolOrderResponse {
+  version: string;
+  restart_required: boolean;
+  pool: string[];
+}
+
+/* Rewrites the pool order of a subscription runtime: order holds the pooled
+   accounts top to bottom, unpooled the rest. Every account appears once. */
+export async function savePoolOrder(
+  runtime: PoolRuntime,
+  order: string[],
+  unpooled: string[],
+  expectedVersion?: string
+): Promise<PoolOrderResponse> {
+  const body: { runtime: PoolRuntime; order: string[]; unpooled: string[]; expected_version?: string } = {
+    runtime,
+    order,
+    unpooled,
+  };
+  if (expectedVersion) {
+    body.expected_version = expectedVersion;
+  }
+  const data = await request<Partial<PoolOrderResponse> | null>("PUT", "/v1/router/pool-order", body);
+  const value = data || {};
+  return {
+    version: String(value.version || ""),
+    restart_required: value.restart_required === true,
+    pool: strings(value.pool),
+  };
+}
+
+export interface ProviderKeysResponse {
+  version: string;
+  keys: ProviderKey[];
+}
+
+/* Sets an API provider's keys in use order: the first becomes api_key_env,
+   the rest api_key_envs. */
+export async function saveProviderKeys(
+  name: string,
+  keys: string[],
+  expectedVersion?: string
+): Promise<ProviderKeysResponse> {
+  const body: { keys: string[]; expected_version?: string } = { keys };
+  if (expectedVersion) {
+    body.expected_version = expectedVersion;
+  }
+  const data = await request<Partial<ProviderKeysResponse> | null>(
+    "PUT",
+    "/v1/providers/" + encodeURIComponent(name) + "/keys",
+    body
+  );
+  const value = data || {};
+  return {
+    version: String(value.version || ""),
+    keys: Array.isArray(value.keys)
+      ? value.keys.map((key) => ({
+          name: String((key && key.name) || ""),
+          present: Boolean(key && key.present),
+          cooling_until: key && key.cooling_until ? String(key.cooling_until) : null,
+        }))
+      : [],
+  };
 }
 
 /* ------------------------------------------------------------------ */

@@ -801,3 +801,125 @@
   .rt-section-h .rt-refresh { margin-left: auto; }
   .rt-toolbar .rt-refresh { justify-content: flex-end; }
 }
+
+/* Spec 75 (REQ-PAF-006): the account order of a subscription pool and the
+   key order of an API provider. The drop line is a pseudo-element, so the
+   rows do not move under the pointer while dragging. */
+.rt-order { display: flex; flex-direction: column; gap: 8px; min-width: 0; }
+.rt-order-hint { margin: 0; }
+.rt-order-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; min-width: 0; }
+.rt-order-row {
+  position: relative;
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto auto;
+  align-items: center;
+  gap: 8px 12px;
+  padding: 8px 0;
+  border-top: 1px solid var(--divider);
+  min-width: 0;
+}
+.rt-order-list > .rt-order-row:first-child { border-top: 0; }
+.rt-order-row.is-dragging { opacity: 0.45; }
+.rt-order-row.is-unpooled .rt-order-id,
+.rt-order-row.is-unpooled .rt-order-bar { opacity: 0.6; }
+.rt-order-row.is-drop-before::before,
+.rt-order-row.is-drop-after::after,
+.rt-order-divider.is-drop-before::before,
+.rt-order-divider.is-drop-after::after {
+  content: "";
+  position: absolute;
+  left: 0;
+  right: 0;
+  height: 2px;
+  border-radius: 2px;
+  background: var(--accent);
+  pointer-events: none;
+}
+.rt-order-row.is-drop-before::before, .rt-order-divider.is-drop-before::before { top: -1px; }
+.rt-order-row.is-drop-after::after, .rt-order-divider.is-drop-after::after { bottom: -1px; }
+.rt-order-grip {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  min-width: 32px;
+  padding: 0;
+  border: 0;
+  border-radius: var(--r);
+  background: transparent;
+  color: var(--text-3, var(--text-2));
+  cursor: grab;
+  touch-action: none;
+}
+.rt-order-grip:hover:not(:disabled) { background: var(--sunken); color: var(--text); }
+.rt-order-grip:active:not(:disabled) { cursor: grabbing; }
+.rt-order-grip:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+.rt-order-grip:disabled { cursor: default; opacity: 0.5; }
+.rt-order-id { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.rt-order-name { display: flex; align-items: center; gap: 6px; min-width: 0; font-weight: 500; }
+.rt-order-sub {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 8px;
+  min-width: 0;
+  color: var(--text-2);
+  font-size: var(--fs-xs);
+}
+.rt-order-rest { display: inline-flex; align-items: center; gap: 4px; color: var(--amber, var(--text-2)); }
+.rt-order-bar { display: inline-flex; align-items: center; gap: 8px; width: 140px; min-width: 0; }
+.rt-order-bar .prog { flex: 1 1 auto; min-width: 0; }
+.rt-order-bar-t { color: var(--text-2); font-size: var(--fs-xs); white-space: nowrap; }
+.rt-order-acts { display: inline-flex; align-items: center; justify-content: flex-end; gap: 6px; min-width: 0; }
+.rt-order-pool { display: inline-flex; align-items: center; gap: 8px; cursor: pointer; white-space: normal; min-width: 0; }
+.rt-order-divider {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 0 6px;
+  color: var(--text-3, var(--text-2));
+  font-size: var(--fs-xs);
+  font-weight: 500;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+.rt-order-divider::after { content: ""; flex: 1 1 auto; height: 1px; background: var(--divider); }
+.rt-order-divider.is-drop-after::after { flex: none; }
+.rt-order-note { display: flex; align-items: center; gap: 6px; margin: 0; color: var(--green, var(--text-2)); font-size: var(--fs-sm); }
+.rt-order-note.is-error { color: var(--red, var(--text)); }
+.rt-order-panel .rt-conn-note, .rt-keys-panel .rt-conn-note { margin-top: 12px; }
+.rt-keys-add { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-top: 12px; }
+.rt-keys-add .input { width: 16rem; max-width: 100%; min-width: 0; }
+.rt-keys-add .hint { flex: 1 1 220px; min-width: 0; }
+
+/* Spec 74: the Antigravity page. */
+.rt-agy-install {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  margin: 0 0 16px;
+  padding: 12px 14px;
+  border: 1px solid var(--border);
+  border-left: 3px solid var(--amber, var(--accent));
+  border-radius: var(--r);
+  background: var(--sunken);
+}
+.rt-agy-install > .i { flex: none; margin-top: 2px; }
+.rt-agy-install p { margin: 4px 0 0; }
+.rt-acct > .rt-agy-builtin { margin: 0 0 0 44px; }
+.rt-agy-builtin code { font-size: var(--fs-xs); }
+.rt-agy-open { align-self: flex-start; white-space: normal; min-width: 0; }
+.rt-agy-code-form { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; min-width: 0; }
+.rt-agy-code-form .input { flex: 1 1 200px; min-width: 0; max-width: 420px; }
+.rt-agy-folder { display: flex; align-items: flex-start; gap: 10px; margin-top: 12px; cursor: pointer; }
+.rt-agy-folder b { display: block; font-weight: 500; }
+.rt-agy-folder .hint { display: block; overflow-wrap: anywhere; }
+
+@media (max-width: 640px) {
+  .rt-order-row { grid-template-columns: auto minmax(0, 1fr); }
+  .rt-order-bar { grid-column: 2; width: auto; }
+  .rt-order-acts { grid-column: 2; justify-content: flex-start; flex-wrap: wrap; }
+  .rt-acct > .rt-agy-builtin { margin-left: 0; }
+}

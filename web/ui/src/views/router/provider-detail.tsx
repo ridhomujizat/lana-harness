@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
+import type { FormEvent } from "react";
 import * as routerApi from "../../api/router";
 import type {
   LimitSnapshot,
@@ -7,25 +8,31 @@ import type {
   ProviderTestRequest,
   UsageProviderRow,
 } from "../../api/router";
-import { Badge, Button, EmptyState, ErrorState, IconButton, Panel, Toggle } from "../../ui/gr8r";
+import { Badge, Button, EmptyState, ErrorState, IconButton, Input, Panel, Toggle } from "../../ui/gr8r";
 import { Ic } from "../../ui/icons";
 import { Alert, SettingsRestartBanner, StatusLine, markSettingsSaved } from "../settings-pages";
 import { ClaudeCodeDetail } from "./claude-code-page";
+import { AntigravityDetail } from "./antigravity-page";
 import { ConnectionDialog } from "./connection-dialog";
+import { AccountOrderList } from "./account-order";
 import { LimitCard } from "./limits";
 import { ProviderModelsPanel } from "./models";
-import { CLAUDE_CODE_ID, cardIdFor, presetById } from "./presets";
+import { ANTIGRAVITY_ID, CLAUDE_CODE_ID, cardIdFor, presetById } from "./presets";
 import { ProviderLogo } from "./provider-logo";
-import { StatusPills, UsedBy, cardStatus, keyState } from "./providers";
+import { StatusPills, UsedBy, cardStatus, keyMissing, keyState } from "./providers";
 import { compact, count, failureOf, inUseText, isStale, ms, percent, statsCostText } from "./router-common";
 
 /* One provider's page (#/router/providers/<preset or name>): its connections
    — each one [providers.<name>] entry with its own key — then its models, a
-   24-hour usage strip, and its quota. Claude Code has its own page. */
+   24-hour usage strip, and its quota. Claude Code and Antigravity have their
+   own pages. */
 
 export function ProviderDetail({ id }: { id: string }) {
   if (id === CLAUDE_CODE_ID) {
     return <ClaudeCodeDetail />;
+  }
+  if (id === ANTIGRAVITY_ID) {
+    return <AntigravityDetail />;
   }
   return <ApiProviderDetail id={id} />;
 }
@@ -165,6 +172,148 @@ function useLimits(names: string[]): { limits: LimitSnapshot[] | null; error: st
     };
   }, [key]);
   return { limits, error };
+}
+
+/* ------------------------------------------------------------------ */
+/* Keys (spec 75 REQ-PAF-005/006)                                      */
+/* ------------------------------------------------------------------ */
+
+const SECRET_NAME = /^[A-Za-z_][A-Za-z0-9_]*$/;
+
+/* A connection's keys in use order. An older daemon sends no keys; the
+   connection then has its one api_key_env. */
+export function connectionKeys(row: ProviderRow): routerApi.ProviderKey[] {
+  if (Array.isArray(row.keys) && row.keys.length > 0) {
+    return row.keys;
+  }
+  if (!row.api_key_env) {
+    return [];
+  }
+  return [{ name: row.api_key_env, present: !keyMissing(row), cooling_until: null }];
+}
+
+/* The keys of one connection: drag to change which key is used first, add a
+   backup key by its secret name. Secret values never show here. */
+export function KeysPanel({
+  row,
+  title,
+  version,
+  onSaved,
+}: {
+  row: ProviderRow;
+  title: string;
+  version: string;
+  onSaved: () => void;
+}) {
+  const keys = connectionKeys(row);
+  const [draft, setDraft] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState("");
+
+  async function save(names: string[]) {
+    await routerApi.saveProviderKeys(row.name, names, version || undefined);
+    markSettingsSaved();
+    onSaved();
+  }
+
+  async function write(names: string[], done: () => void) {
+    setBusy(true);
+    setError("");
+    try {
+      await save(names);
+      done();
+    } catch (failure) {
+      setError(
+        isStale(failure)
+          ? "The config changed since this page loaded. Reload the page and try again."
+          : failureOf(failure).message
+      );
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  function add(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    const name = draft.trim();
+    if (!name) {
+      return;
+    }
+    if (!SECRET_NAME.test(name)) {
+      setError("A secret name has letters, digits, and _ only, for example " + (row.api_key_env || "OPENAI_API_KEY") + "_2.");
+      return;
+    }
+    if (keys.some((key) => key.name === name)) {
+      setError(name + " is already a key of " + row.name + ".");
+      return;
+    }
+    void write(
+      keys.map((key) => key.name).concat([name]),
+      () => setDraft("")
+    );
+  }
+
+  return (
+    <Panel title={title} className="rt-keys-panel">
+      <AccountOrderList
+        variant="key"
+        label={"Keys of " + row.name}
+        disabled={busy}
+        items={keys.map((key) => ({
+          id: key.name,
+          label: key.name,
+          mono: true,
+          coolingUntil: key.cooling_until,
+          badges: key.present ? (
+            <Badge tone="green" dot>
+              Present
+            </Badge>
+          ) : (
+            <Badge tone="amber" dot>
+              Missing
+            </Badge>
+          ),
+        }))}
+        onSave={(order) => save(order)}
+        actions={(item) =>
+          keys.length > 1 ? (
+            <IconButton
+              icon="x"
+              size="sm"
+              label={"Remove key " + item.id}
+              disabled={busy}
+              onClick={() => void write(keys.map((key) => key.name).filter((name) => name !== item.id), () => {})}
+            />
+          ) : null
+        }
+      />
+      <form className="rt-keys-add" onSubmit={add}>
+        <Input
+          className="mono"
+          aria-label={"Backup key secret name for " + row.name}
+          placeholder={(row.api_key_env || "MY_PROVIDER_API_KEY") + "_2"}
+          value={draft}
+          disabled={busy}
+          autoComplete="off"
+          spellCheck={false}
+          onChange={(event) => setDraft(event.target.value)}
+        />
+        <Button type="submit" variant="secondary" size="sm" icon="plus" loading={busy} disabled={busy || !draft.trim()}>
+          Add backup key
+        </Button>
+        <span className="hint">
+          The name of a secret in <a href="#/settings/secrets">Secrets</a>. The router moves to the next key when one is
+          out of credit or rate limited.
+        </span>
+      </form>
+      {error ? (
+        <p className="rt-limit-err" role="alert">
+          <Ic name="circle-alert" size={12} />
+          <span>{error}</span>
+        </p>
+      ) : null}
+    </Panel>
+  );
 }
 
 /* ------------------------------------------------------------------ */
@@ -518,6 +667,18 @@ function ApiProviderDetail({ id }: { id: string }) {
           </p>
         ) : null}
       </Panel>
+
+      {connections
+        .filter((row) => connectionKeys(row).length > 0)
+        .map((row) => (
+          <KeysPanel
+            key={"keys-" + row.name}
+            row={row}
+            title={connections.length > 1 ? "Keys · " + row.name : "Keys"}
+            version={version}
+            onSaved={reload}
+          />
+        ))}
 
       {connections
         .filter((row) => !row.disabled)

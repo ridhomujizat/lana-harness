@@ -13,6 +13,13 @@ const FILES = import.meta.glob("../../assets/providers/*.svg", {
   eager: true,
 }) as Record<string, string>;
 
+/* Spec 74: the Antigravity mark lives with the coding-agent logos. */
+const AGENT_FILES = import.meta.glob("../../assets/agents/antigravity-color.svg", {
+  query: "?raw",
+  import: "default",
+  eager: true,
+}) as Record<string, string>;
+
 /* Logo key → file name, without the folder and extension. */
 const LOGO_FILES: Record<string, string> = {
   openai: "openai",
@@ -46,6 +53,10 @@ for (const [key, file] of Object.entries(LOGO_FILES)) {
   if (raw) {
     LOGOS[key] = inlineSvg(raw);
   }
+}
+const ANTIGRAVITY_RAW = AGENT_FILES["../../assets/agents/antigravity-color.svg"];
+if (ANTIGRAVITY_RAW) {
+  LOGOS.antigravity = inlineSvg(ANTIGRAVITY_RAW);
 }
 
 export function hasLogo(logo: string | undefined | null): boolean {

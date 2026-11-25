@@ -17,7 +17,7 @@ import type { Agent } from "../api/agents";
 import { getModels } from "../api/models";
 import { COMBOS_GROUP, getRouter } from "../api/router";
 import { groupClaudeChoices, useClaudeAccounts } from "./router/claude-code";
-import { CLAUDE_CODE_GROUP } from "./router/presets";
+import { CLAUDE_CODE_GROUP, isAntigravityGroup } from "./router/presets";
 import { ProviderLogo } from "./router/provider-logo";
 import type { RouterChoice } from "../api/router";
 import type { CatalogEffort, CatalogModel } from "../api/models";
@@ -537,6 +537,11 @@ function RouterChoiceItems({
             {group === CLAUDE_CODE_GROUP || group.startsWith(CLAUDE_CODE_GROUP + " · ") ? (
               <span className="mh-logo">
                 <ProviderLogo logo="claude" name="Claude Code" size={14} />
+                {group}
+              </span>
+            ) : isAntigravityGroup(group) ? (
+              <span className="mh-logo">
+                <ProviderLogo logo="antigravity" name="Antigravity" size={14} />
                 {group}
               </span>
             ) : (

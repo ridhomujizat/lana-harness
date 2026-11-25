@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { CLAUDE_AGENT_PROVIDER, CLAUDE_CODE_PROVIDER } from "../../api/router";
 import type { LimitSnapshot } from "../../api/router";
 import { Button } from "../../ui/gr8r";
+import { isSubscriptionKind } from "./presets";
 import { agoText } from "./router-common";
 
 /* Spec 39 Revision 4: the plan windows of a Claude Code account move with
@@ -25,10 +26,12 @@ export function useTick(interval: number = TICK_MS): number {
   return tick;
 }
 
-/* Whether a snapshot belongs to a Claude Code account. */
+/* Whether a snapshot belongs to a subscription account: Claude Code, or
+   Antigravity (spec 74 API-AGY-027), whose windows a usage probe renews the
+   same way. */
 export function isClaudeLimit(limit: LimitSnapshot, names: string[] = []): boolean {
   return (
-    limit.kind === "claude-code" ||
+    isSubscriptionKind(limit.kind) ||
     limit.provider === CLAUDE_CODE_PROVIDER ||
     limit.provider === CLAUDE_AGENT_PROVIDER ||
     names.includes(limit.provider)
@@ -70,6 +73,8 @@ export function newestUpdatedAt(
   }
   return best;
 }
+
+export const isSubscriptionLimit = isClaudeLimit;
 
 /* The newest time of the Claude Code snapshots, or null. */
 export function claudeUpdatedAt(limits: LimitSnapshot[], names: string[] = []): string | null {

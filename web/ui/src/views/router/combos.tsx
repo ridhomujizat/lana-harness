@@ -20,6 +20,7 @@ import { Alert, StatusLine } from "../settings-pages";
 import { UsedBy } from "./providers";
 import { ProviderLogo, ProviderMark, providerIndex } from "./provider-logo";
 import { ACCOUNTS_TERMS_NOTE, claudeAccountNames, groupClaudeChoices, isClaudeChoice, useClaudeAccounts } from "./claude-code";
+import { isAntigravityGroup } from "./presets";
 import { failureOf, inUseText, isStale } from "./router-common";
 
 /* Router → Combos (REQ-RTR-004, REQ-RTR-014, API-RTR-007), laid out like
@@ -424,6 +425,8 @@ export function RouterCombos() {
           group: choice.group,
           icon: isClaudeChoice(choice, claudeNames) ? (
             <ProviderLogo logo="claude" name="Claude Code" size={16} />
+          ) : isAntigravityGroup(choice.group) ? (
+            <ProviderLogo logo="antigravity" name="Antigravity" size={16} />
           ) : (
             <ProviderMark provider={index[choice.group]} name={choice.group} size={16} />
           ),

@@ -200,6 +200,38 @@ export function isClaudeCode(name: string): boolean {
   );
 }
 
+/* The Antigravity subscription card (spec 74): the built-in account
+   antigravity and every [providers.<name>] kind = "antigravity" account. Its
+   picker groups are "Antigravity" or "Antigravity · <display name>". */
+export const ANTIGRAVITY_ID = "antigravity";
+export const ANTIGRAVITY_KIND = "antigravity";
+export const ANTIGRAVITY_GROUP = "Antigravity";
+
+const antigravityAccounts = new Set<string>([ANTIGRAVITY_ID]);
+
+export function rememberAntigravityAccounts(names: string[]): void {
+  for (const name of names) {
+    if (name) {
+      antigravityAccounts.add(name);
+    }
+  }
+}
+
+/* Whether a picker group is an Antigravity one. */
+export function isAntigravityGroup(group: string): boolean {
+  return group === ANTIGRAVITY_GROUP || group.startsWith(ANTIGRAVITY_GROUP + " · ");
+}
+
+/* Antigravity's names: an account name or a model-picker group. */
+export function isAntigravity(name: string): boolean {
+  return antigravityAccounts.has(name) || isAntigravityGroup(name);
+}
+
+/* The subscription runtimes' kinds (spec 39, spec 74). */
+export function isSubscriptionKind(kind: string | undefined): boolean {
+  return kind === CLAUDE_CODE_KIND || kind === ANTIGRAVITY_KIND;
+}
+
 export function presetById(id: string): ProviderPreset | undefined {
   return PROVIDER_PRESETS.find((preset) => preset.id === id);
 }
@@ -242,6 +274,9 @@ export function logoFor(provider: ProviderShape | undefined | null, name?: strin
   if (isClaudeCode(key) || (provider && provider.kind === CLAUDE_CODE_KIND)) {
     return "claude";
   }
+  if (isAntigravity(key) || (provider && provider.kind === ANTIGRAVITY_KIND)) {
+    return "antigravity";
+  }
   if (!provider) {
     return "";
   }
@@ -255,6 +290,9 @@ export function familyLabel(provider: ProviderShape | undefined | null, name?: s
   if (isClaudeCode(key) || (provider && provider.kind === CLAUDE_CODE_KIND)) {
     return "Claude Code";
   }
+  if (isAntigravity(key) || (provider && provider.kind === ANTIGRAVITY_KIND)) {
+    return "Antigravity";
+  }
   const preset = provider ? presetFor(provider) : undefined;
   return preset ? preset.label : key;
 }
@@ -263,6 +301,9 @@ export function familyLabel(provider: ProviderShape | undefined | null, name?: s
 export function cardIdFor(provider: ProviderShape): string {
   if (provider.kind === CLAUDE_CODE_KIND) {
     return CLAUDE_CODE_ID;
+  }
+  if (provider.kind === ANTIGRAVITY_KIND) {
+    return ANTIGRAVITY_ID;
   }
   const preset = presetFor(provider);
   return preset ? preset.id : provider.name;

@@ -10,6 +10,7 @@ import {
   groupClaudeChoices,
   isClaudeChoice,
 } from "./router/claude-code";
+import { isAntigravityGroup } from "./router/presets";
 
 /* The router model options of spec 37 (REQ-RTR-018) shared by the agent
    forms, and the Claude Code note of spec 39 (REQ-CCT-009). There is no
@@ -28,7 +29,8 @@ export const CLAUDE_EFFORTS: SelectOption[] = [
 
 /* Router choices as Select options: combos first, then the models of each
    provider under its name (AC-RTR-024), and Claude Code models under one
-   group per account with the Claude logo (REQ-CCT-009). With the provider
+   group per account with the Claude logo (REQ-CCT-009), and Antigravity
+   models under their groups with the Antigravity logo (API-AGY-033). With the provider
    list, each model carries its provider's logo. */
 export function choiceOptions(
   choices: RouterChoice[],
@@ -54,6 +56,8 @@ export function choiceOptions(
       group: choice.group === COMBOS_GROUP ? "Combos" : choice.group,
       icon: claude ? (
         <ProviderLogo logo="claude" name="Claude Code" size={16} />
+      ) : isAntigravityGroup(choice.group) ? (
+        <ProviderLogo logo="antigravity" name="Antigravity" size={16} />
       ) : index && choice.group !== COMBOS_GROUP ? (
         <ProviderMark provider={index[choice.group]} name={choice.group} size={16} />
       ) : undefined,

@@ -10,9 +10,9 @@ import {
 } from "../../api/router";
 import type { ClaudeAgentStatus, LimitSnapshot, RouterProvider } from "../../api/router";
 import { EmptyState } from "../../ui/gr8r";
-import { ClaudeAccountCard, LimitCard } from "./limits";
+import { AntigravityLimitCard, ClaudeAccountCard, LimitCard } from "./limits";
 import { RefreshControl, claudeLimitsStale, claudeUpdatedAt, newestUpdatedAt, useTick } from "./limits-refresh";
-import { rememberClaudeAccounts } from "./presets";
+import { ANTIGRAVITY_KIND, rememberClaudeAccounts } from "./presets";
 import { providerIndex } from "./provider-logo";
 import { failureOf } from "./router-common";
 
@@ -112,11 +112,17 @@ export function RouterQuota() {
         (limit) =>
           limit.provider !== CLAUDE_AGENT_PROVIDER &&
           limit.kind !== "claude-code" &&
+          limit.kind !== ANTIGRAVITY_KIND &&
           !claudeNames.includes(limit.provider)
       ),
     [limits, claudeNames]
   );
-  const showClaude = accounts.length > 0;
+  /* Spec 74 (API-AGY-033): one card per Antigravity account. */
+  const antigravityLimits = useMemo(
+    () => (limits || []).filter((limit) => limit.kind === ANTIGRAVITY_KIND),
+    [limits]
+  );
+  const showClaude = accounts.length > 0 || antigravityLimits.length > 0;
   /* The Claude Code plans first: they are what goes stale between turns. */
   const updatedAt = useMemo(
     () => claudeUpdatedAt(limits || [], claudeNames) || newestUpdatedAt(limits || []),
@@ -142,6 +148,9 @@ export function RouterQuota() {
         <div className="rt-limit-grid">
           {accounts.map((account) => (
             <ClaudeAccountCard key={account.name} account={account} limit={limitOf(account.name)} />
+          ))}
+          {antigravityLimits.map((limit) => (
+            <AntigravityLimitCard key={limit.provider} limit={limit} />
           ))}
           {providerLimits.map((limit) => (
             <LimitCard key={limit.provider} limit={limit} provider={index[limit.provider]} />
