@@ -3,10 +3,10 @@ import { act, fireEvent, render, screen, waitFor } from "@testing-library/react"
 import { ApiError } from "../api/client";
 import { listSessionJobs, stopSessionJob } from "../api/jobs";
 import type { BackgroundJob } from "../api/jobs";
-import { JobsStrip } from "./session";
+import { JobsPill } from "./jobs-pill";
 
-/* REQ-JOB-020: the strips talks to the jobs API only, so the module is mocked
-   and the component is rendered on its own. */
+/* REQ-JBN-021, REQ-JBN-022: the pill talks to the jobs API only, so the
+   module is mocked and the component is rendered on its own. */
 vi.mock("../api/jobs", () => ({
   listSessionJobs: vi.fn(),
   stopSessionJob: vi.fn(),
@@ -31,15 +31,39 @@ afterEach(() => {
   vi.clearAllMocks();
 });
 
-describe("jobs strip", () => {
+describe("jobs pill", () => {
   it("renders nothing with zero jobs", async () => {
     vi.mocked(listSessionJobs).mockResolvedValue([]);
 
-    const { container } = render(<JobsStrip sessionId="s1" />);
+    const { container } = render(<JobsPill sessionId="s1" />);
     await waitFor(() => {
       expect(vi.mocked(listSessionJobs)).toHaveBeenCalledWith("s1");
     });
-    expect(container.querySelector(".jobs-strip")).toBeNull();
+    expect(container.querySelector(".jobs-pill")).toBeNull();
+  });
+
+  it("hides the pill when only ended jobs remain", async () => {
+    vi.mocked(listSessionJobs).mockResolvedValue([
+      makeJob({ status: "exited", exit_code: 0, ended_at: Date.now() }),
+    ]);
+
+    const { container } = render(<JobsPill sessionId="s1" />);
+    await waitFor(() => {
+      expect(vi.mocked(listSessionJobs)).toHaveBeenCalled();
+    });
+    expect(container.querySelector(".jobs-pill")).toBeNull();
+  });
+
+  it("shows a pulsing pill with the running count", async () => {
+    vi.mocked(listSessionJobs).mockResolvedValue([
+      makeJob({ id: "bash-1" }),
+      makeJob({ id: "bash-2" }),
+    ]);
+
+    const { container } = render(<JobsPill sessionId="s1" />);
+    expect(await screen.findByText("2 background tasks")).toBeTruthy();
+    expect(container.querySelector(".jobs-pill-dot")).toBeTruthy();
+    expect(screen.getByRole("button", { name: "2 background tasks" })).toBeTruthy();
   });
 
   it("lists the running job first, then ended jobs newest first", async () => {
@@ -50,11 +74,11 @@ describe("jobs strip", () => {
       makeJob({ id: "new", command: "cmd-new", status: "exited", exit_code: 1, started_at: now - 300000 }),
     ]);
 
-    const { container } = render(<JobsStrip sessionId="s1" />);
-    await screen.findByText("Background jobs");
+    const { container } = render(<JobsPill sessionId="s1" />);
+    fireEvent.click(await screen.findByRole("button", { name: "1 background task" }));
 
     const commands = Array.from(
-      container.querySelectorAll(".job-row .job-command")
+      container.querySelectorAll(".jobs-panel .job-row .job-command")
     ).map((node) => node.textContent);
     expect(commands).toEqual(["cmd-run", "cmd-new", "cmd-old"]);
     expect(screen.getByText("exited with code 1")).toBeTruthy();
@@ -66,7 +90,8 @@ describe("jobs strip", () => {
       makeJob({ tail: "hello\nworld" }),
     ]);
 
-    render(<JobsStrip sessionId="s1" />);
+    render(<JobsPill sessionId="s1" />);
+    fireEvent.click(await screen.findByRole("button", { name: "1 background task" }));
     const toggle = await screen.findByRole("button", { name: "Logs" });
     expect(toggle.getAttribute("aria-expanded")).toBe("false");
 
@@ -82,13 +107,17 @@ describe("jobs strip", () => {
       new ApiError(500, "internal_error", "boom")
     );
 
-    render(<JobsStrip sessionId="s1" />);
+    render(<JobsPill sessionId="s1" />);
     const alert = await screen.findByRole("alert");
     expect(alert.textContent).toBe("boom");
   });
 
   it("stops a running job and disables the button while pending", async () => {
-    vi.mocked(listSessionJobs).mockResolvedValue([makeJob()]);
+    const now = Date.now();
+    vi.mocked(listSessionJobs).mockResolvedValue([
+      makeJob({ id: "bash-1", started_at: now }),
+      makeJob({ id: "bash-2", started_at: now - 1000 }),
+    ]);
     let resolveStop: (job: BackgroundJob) => void = () => undefined;
     vi.mocked(stopSessionJob).mockImplementation(
       () =>
@@ -97,8 +126,14 @@ describe("jobs strip", () => {
         })
     );
 
-    render(<JobsStrip sessionId="s1" />);
-    fireEvent.click(await screen.findByRole("button", { name: "Stop" }));
+    render(<JobsPill sessionId="s1" />);
+    fireEvent.click(await screen.findByRole("button", { name: "2 background tasks" }));
+    const stops = await screen.findAllByRole("button", { name: "Stop" });
+    const firstStop = stops[0];
+    expect(firstStop).toBeTruthy();
+    if (firstStop) {
+      fireEvent.click(firstStop);
+    }
 
     expect(vi.mocked(stopSessionJob)).toHaveBeenCalledWith("s1", "bash-1");
     const pending = screen.getByRole("button", { name: "Stopping…" });
@@ -106,13 +141,15 @@ describe("jobs strip", () => {
 
     await act(async () => {
       resolveStop(
-        makeJob({ status: "killed", ended_at: Date.now(), started_at: Date.now() })
+        makeJob({ id: "bash-1", status: "killed", ended_at: Date.now() })
       );
     });
     await waitFor(() => {
-      expect(screen.queryByRole("button", { name: "Stop" })).toBeNull();
+      expect(screen.queryByRole("button", { name: "Stopping…" })).toBeNull();
     });
-    expect(screen.getByRole("button", { name: "Dismiss" })).toBeTruthy();
+    /* The other job still runs, so the pill stays and one Stop remains. */
+    expect(screen.getAllByRole("button", { name: "Stop" })).toHaveLength(1);
+    expect(screen.getByText("killed")).toBeTruthy();
   });
 
   it("shows a stop error in the row", async () => {
@@ -121,7 +158,8 @@ describe("jobs strip", () => {
       new ApiError(500, "internal_error", "boom")
     );
 
-    render(<JobsStrip sessionId="s1" />);
+    render(<JobsPill sessionId="s1" />);
+    fireEvent.click(await screen.findByRole("button", { name: "1 background task" }));
     fireEvent.click(await screen.findByRole("button", { name: "Stop" }));
 
     const alert = await screen.findByRole("alert");
@@ -129,29 +167,23 @@ describe("jobs strip", () => {
     expect(screen.getByRole("button", { name: "Stop" })).toBeTruthy();
   });
 
-  it("polls every 3s while a job runs and stops once none run", async () => {
+  it("does not poll while no job is running", async () => {
     vi.useFakeTimers();
-    const ended = makeJob({
-      status: "exited",
-      exit_code: 0,
-      started_at: Date.now() - 60000,
-      ended_at: Date.now(),
-    });
-    vi.mocked(listSessionJobs).mockResolvedValue([ended]);
+    vi.mocked(listSessionJobs).mockResolvedValue([
+      makeJob({ status: "exited", exit_code: 0, ended_at: Date.now() }),
+    ]);
 
-    const { unmount } = render(<JobsStrip sessionId="s1" />);
+    render(<JobsPill sessionId="s1" />);
     await act(async () => {});
     expect(vi.mocked(listSessionJobs)).toHaveBeenCalledTimes(1);
 
-    // No running job: the interval is never scheduled.
     await act(async () => {
       await vi.advanceTimersByTimeAsync(3000);
     });
     expect(vi.mocked(listSessionJobs)).toHaveBeenCalledTimes(1);
-    unmount();
   });
 
-  it("keeps polling while a job is running and stops after it ends", async () => {
+  it("polls every 3s while a job is running and stops after it ends", async () => {
     vi.useFakeTimers();
     vi.mocked(listSessionJobs)
       .mockResolvedValueOnce([makeJob()])
@@ -159,7 +191,7 @@ describe("jobs strip", () => {
         makeJob({ status: "exited", exit_code: 0, ended_at: Date.now() }),
       ]);
 
-    const { unmount } = render(<JobsStrip sessionId="s1" />);
+    render(<JobsPill sessionId="s1" />);
     await act(async () => {});
     expect(vi.mocked(listSessionJobs)).toHaveBeenCalledTimes(1);
 
@@ -168,11 +200,25 @@ describe("jobs strip", () => {
     });
     expect(vi.mocked(listSessionJobs)).toHaveBeenCalledTimes(2);
 
-    // The job ended, so the interval is cleared.
+    /* The job ended, so the interval is cleared. */
     await act(async () => {
       await vi.advanceTimersByTimeAsync(3000);
     });
     expect(vi.mocked(listSessionJobs)).toHaveBeenCalledTimes(2);
-    unmount();
+  });
+
+  /* REQ-JBN-022: the session stream bumps refreshKey and the list re-reads. */
+  it("re-reads the list when refreshKey changes", async () => {
+    vi.useFakeTimers();
+    vi.mocked(listSessionJobs).mockResolvedValue([makeJob()]);
+
+    const { rerender } = render(<JobsPill sessionId="s1" refreshKey={0} />);
+    await act(async () => {});
+    expect(vi.mocked(listSessionJobs)).toHaveBeenCalledTimes(1);
+
+    await act(async () => {
+      rerender(<JobsPill sessionId="s1" refreshKey={1} />);
+    });
+    expect(vi.mocked(listSessionJobs)).toHaveBeenCalledTimes(2);
   });
 });

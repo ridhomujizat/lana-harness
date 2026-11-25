@@ -158,6 +158,21 @@ type UserMessage struct {
 	// tool-call-text note), not a message from the owner. Display surfaces hide
 	// it and it is not an owner message (REQ-MEM-021).
 	Runtime bool `json:"runtime,omitempty"`
+	// Job is set on a background-job notice: a runtime note telling the model a
+	// job ended (REQ-JBN-004).
+	Job *JobNotice `json:"job,omitempty"`
+}
+
+// JobNotice is the job a background-job notice reports: the id, the command, the
+// final status, the exit code when it exited, and the log tail (REQ-JBN-004).
+type JobNotice struct {
+	ID       string `json:"id"`
+	Command  string `json:"command"`
+	Status   string `json:"status"`
+	ExitCode int    `json:"exit_code"`
+	Tail     string `json:"tail"`
+	// StoppedBy is "owner" when the owner stopped the job from the web.
+	StoppedBy string `json:"stopped_by,omitempty"`
 }
 
 type AssistantMessage struct {

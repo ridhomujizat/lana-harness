@@ -55,14 +55,22 @@ type Job struct {
 	EndedAt   time.Time
 	Status    Status
 	ExitCode  int
+	// StoppedByOwner marks a kill from the owner's web Stop button: the
+	// job's notice says the owner stopped it, not an unknown signal
+	// (REQ-JBN-002).
+	StoppedByOwner bool
 
 	// readOff is the job_output cursor; announced marks an ended job already
-	// reported in a turn <context> block.
+	// reported in a turn <context> block or sent as a notice.
 	readOff   int64
 	announced bool
 	// killed records that the registry sent the kill signal, so the wait
 	// goroutine records StatusKilled instead of StatusExited.
 	killed bool
+	// silent records that this job's end must not send a notice: it was ended
+	// by the agent's own job_kill, which already returned the status
+	// (REQ-JBN-001).
+	silent bool
 }
 
 // Registry tracks background jobs by id.
@@ -73,9 +81,18 @@ type Registry struct {
 	// the bin dirs of programs installed on the Tools page. Nil keeps PATH.
 	// Set it before the first Start.
 	ExtraPath func() []string
+	// OnEnd is called once when a job ends and a notice must be sent: an exit
+	// or a kill that is not the agent's own job_kill and not part of a
+	// shutdown (REQ-JBN-001). It runs outside the registry lock, so it may read
+	// the log tail and talk to the agent registry. Set it before the first
+	// Start.
+	OnEnd func(Job)
 
-	mu   sync.Mutex
-	jobs map[string]*Job
+	mu sync.Mutex
+	// closing marks that Shutdown started, so a reaped job sends no notice
+	// (REQ-JOB-018).
+	closing bool
+	jobs    map[string]*Job
 	// done holds the wait channel per running job, closed when the process
 	// exits. It is read and closed under mu.
 	done map[string]chan struct{}
@@ -180,8 +197,9 @@ func (r *Registry) reap(id string, cmd *exec.Cmd, logFile *os.File) {
 	err := cmd.Wait()
 	_ = logFile.Close()
 	r.mu.Lock()
-	defer r.mu.Unlock()
 	job := r.jobs[id]
+	var snapshot Job
+	notify := false
 	if job != nil {
 		job.EndedAt = time.Now()
 		if job.killed {
@@ -190,11 +208,26 @@ func (r *Registry) reap(id string, cmd *exec.Cmd, logFile *os.File) {
 			job.Status = StatusExited
 			job.ExitCode = exitCode(err)
 		}
+		// A notice goes out for an exit or a kill that is not the agent's own
+		// job_kill and not a shutdown (REQ-JBN-001). Marking the job announced
+		// keeps the next turn's <context> from reporting it again
+		// (REQ-JOB-017, REQ-JBN-002).
+		notify = r.OnEnd != nil && !r.closing && !job.silent
+		if notify {
+			job.announced = true
+		}
+		snapshot = *job
 	}
 	if done := r.done[id]; done != nil {
 		close(done)
 	}
 	delete(r.done, id)
+	r.mu.Unlock()
+	// The hook reads the log tail and talks to the agent registry, so it runs
+	// outside the lock. done is already closed and the job deleted exactly once.
+	if notify {
+		r.OnEnd(snapshot)
+	}
 }
 
 // Get returns a snapshot of one job of the session.
@@ -285,8 +318,20 @@ func (r *Registry) Wait(ctx context.Context, sessionID, id string, d time.Durati
 }
 
 // Kill sends SIGTERM to the job's process group, then SIGKILL after 5 s if it
-// is still running, and returns the final job (REQ-JOB-014).
+// is still running, and returns the final job (REQ-JOB-014). It is the web
+// Stop path, so the job's end sends a notice (REQ-JBN-001).
 func (r *Registry) Kill(sessionID, id string) (Job, error) {
+	return r.kill(sessionID, id, false)
+}
+
+// KillSilent is Kill for the agent's own job_kill: the job's end sends no
+// notice, because the call already returned the status (REQ-JBN-001).
+func (r *Registry) KillSilent(sessionID, id string) (Job, error) {
+	return r.kill(sessionID, id, true)
+}
+
+// kill stops one job and records whether its end is silent.
+func (r *Registry) kill(sessionID, id string, silent bool) (Job, error) {
 	r.mu.Lock()
 	job, ok := r.jobs[id]
 	if !ok || job.SessionID != sessionID {
@@ -299,6 +344,8 @@ func (r *Registry) Kill(sessionID, id string) (Job, error) {
 		return snapshot, nil
 	}
 	job.killed = true
+	job.silent = silent
+	job.StoppedByOwner = !silent
 	pid := job.PID
 	done := r.done[id]
 	r.mu.Unlock()
@@ -378,6 +425,8 @@ func (r *Registry) Shutdown() {
 		done chan struct{}
 	}
 	r.mu.Lock()
+	// A shutdown never sends a job notice (REQ-JOB-018, REQ-JBN-001).
+	r.closing = true
 	targets := make([]target, 0, len(r.jobs))
 	for id, job := range r.jobs {
 		if job.Status != StatusRunning {

@@ -1,4 +1,4 @@
-import type { SessionEvent } from "../api/sessions";
+import type { JobNoticePayload, SessionEvent } from "../api/sessions";
 import { isAttachmentBlock } from "./attachment-blocks";
 
 export interface HistoryItem {
@@ -216,6 +216,58 @@ export function userMessageText(payload: Record<string, unknown>): string {
   return contentText(content.slice(index).filter((block) => !isAttachmentBlock(block)));
 }
 
+/* REQ-JBN-004: reads the job field of a user/message payload. A payload with
+   no job object returns null. */
+export function jobNoticeOf(
+  payload: Record<string, unknown>
+): JobNoticePayload | null {
+  const raw = payload.job;
+  if (!raw || typeof raw !== "object") {
+    return null;
+  }
+  const value = raw as Record<string, unknown>;
+  return {
+    id: stringOf(value.id),
+    command: stringOf(value.command),
+    status: stringOf(value.status),
+    exit_code: Number(value.exit_code) || 0,
+    tail: stringOf(value.tail),
+  };
+}
+
+/* REQ-JBN-020: the text of a job notice line. */
+export function jobNoticeLabel(job: JobNoticePayload): string {
+  if (job.status === "killed") {
+    return "Background task stopped";
+  }
+  if (job.exit_code === 0) {
+    return "Background task finished";
+  }
+  return "Background task failed · exit " + job.exit_code;
+}
+
+/* The icon name and tone of a job notice line. */
+export function jobNoticeIcon(job: JobNoticePayload): {
+  name: string;
+  tone: string;
+} {
+  if (job.status === "killed") {
+    return { name: "square", tone: "muted" };
+  }
+  if (job.exit_code === 0) {
+    return { name: "circle-check", tone: "ok" };
+  }
+  return { name: "circle-x", tone: "err" };
+}
+
+/* REQ-JBN-023: a bash tool call whose input asks to run in the background. */
+export function backgroundTool(name: unknown, input: unknown): boolean {
+  if (String(name || "").toLowerCase() !== "bash") {
+    return false;
+  }
+  return asObject(input).run_in_background === true;
+}
+
 /* REQ-MEM-030: one line per captured operation. add and replace name the saved
    content; remove names the entry that was dropped. */
 export function memoryOpLine(op: unknown): string {
@@ -406,6 +458,18 @@ export function buildHistory(
         });
         break;
       case "user/message": {
+        // REQ-JBN-020: a job notice is one system line, not an owner message.
+        const job = jobNoticeOf(payload);
+        if (job) {
+          items.push({
+            key,
+            type: "job",
+            label: jobNoticeLabel(job),
+            text: job.command,
+            status: job.status,
+          });
+          break;
+        }
         // REQ-MEM-021: a runtime note is lana's own text, not an owner message.
         if (payload.runtime === true) {
           break;
