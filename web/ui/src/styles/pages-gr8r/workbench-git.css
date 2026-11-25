@@ -314,6 +314,22 @@
   width: 330px;
 }
 
+/* A narrow panel: under the picker the menu would run past the panel's
+   left edge and be cut off, so it hangs from the panel's right edge instead,
+   below the header, and never wider than the panel. */
+@container wbg-panel (max-width: 560px) {
+  .wbg-panel:not(.wbg-sheet) .wbg-picker-wrap {
+    position: static;
+  }
+
+  .wbg-panel:not(.wbg-sheet) .wbg-picker-menu {
+    top: 44px;
+    right: 8px;
+    width: min(330px, calc(100% - 16px));
+    min-width: 0;
+  }
+}
+
 .wbg-menu-item {
   display: flex;
   align-items: center;
