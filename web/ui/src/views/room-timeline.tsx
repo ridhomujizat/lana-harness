@@ -1773,7 +1773,8 @@ export function RoomView({ room, initialDraft, variant = "page" }: RoomViewProps
         {/* Composer redesign (owner 2026-11-25): one framed shell holds the
             background row on top, the input field with send inside it, and
             the toolbar under the field. */}
-        <div className="cx-shell">
+        {/* The Background tab docks on the shell's top edge: one stepped
+            outline (owner 2026-11-25). */}
         {!team ? (
           <ComposerTray
             sessionId={currentWebSessionId || ""}
@@ -1782,6 +1783,7 @@ export function RoomView({ room, initialDraft, variant = "page" }: RoomViewProps
             onOpenChange={setTasksOpen}
           />
         ) : null}
+        <div className="cx-shell">
         <div className="cbox cx-field">
           {replyTarget ? (
             <ReplyChip target={replyTarget} onCancel={() => setReplyTarget(null)} />

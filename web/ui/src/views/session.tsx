@@ -736,7 +736,7 @@ interface ComposerProps {
   onModel: (value: string) => void;
   onEffort: (value: string) => void;
   onPolicy: (value: string, confirmTrust: boolean) => Promise<boolean>;
-  /* The background row at the top of the composer shell. */
+  /* The Background tab docked on top of the composer shell. */
   tray?: ReactNode;
 }
 
@@ -994,8 +994,8 @@ function Composer({
           Answer the question above
         </p>
       ) : null}
-      <div className="cx-shell">
       {tray}
+      <div className="cx-shell">
       <div className="cbox cx-field">
         {replyTarget ? (
           <ReplyChip target={replyTarget} onCancel={onCancelReply} />
