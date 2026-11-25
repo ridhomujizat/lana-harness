@@ -494,7 +494,7 @@ describe("Room composer (REQ-ROOM-003)", () => {
     fireEvent.change(input, { target: { value: "/ne" } });
     fireEvent.keyDown(input, { key: "Enter" });
     expect(vi.mocked(sendToRoom)).not.toHaveBeenCalled();
-    expect(await screen.findByText(/Your next message starts a fresh conversation/)).toBeTruthy();
+    expect(await screen.findByText(/won.t see the messages above/)).toBeTruthy();
     expect(input.value).toBe("");
     fireEvent.change(input, { target: { value: "halo" } });
     fireEvent.click(screen.getByRole("button", { name: "Send message" }));

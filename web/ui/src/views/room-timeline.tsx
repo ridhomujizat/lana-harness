@@ -1467,14 +1467,6 @@ export function RoomView({ room, initialDraft, variant = "page" }: RoomViewProps
     (at, node) => (node.kind === "turn" && node.turn.running ? Number(node.turn.startedAt) || at : at),
     0
   );
-  const trayWorking =
-    turnRunning && !team
-      ? {
-          who: liveSpeaker ? agentLabel(liveSpeaker, byName) : displayLabel(room),
-          doing: activity,
-          since: liveSince || liveStartedAt,
-        }
-      : null;
 
   /* Perf: an older segment's rows skip rendering and layout while off screen
      (`is-old`), and only a row that arrived after the initial load animates in
@@ -1782,7 +1774,6 @@ export function RoomView({ room, initialDraft, variant = "page" }: RoomViewProps
           <ComposerTray
             sessionId={currentWebSessionId || ""}
             refreshKey={jobRefresh}
-            working={trayWorking}
             open={tasksOpen}
             onOpenChange={setTasksOpen}
           />
@@ -1832,7 +1823,11 @@ export function RoomView({ room, initialDraft, variant = "page" }: RoomViewProps
             onKeyDown={composerKeyDown}
             onPaste={(event) => pasteImageFiles(event, attachmentDraft.addFiles)}
           ></textarea>
-          {variant !== "dock" && !draft ? (
+          {variant !== "dock" &&
+          !draft &&
+          !newTopic &&
+          !replyTarget &&
+          attachmentDraft.items.length === 0 ? (
             <span className="cx-keys" aria-hidden="true">
               <kbd>/</kbd> commands <kbd>@</kbd> agents
             </span>

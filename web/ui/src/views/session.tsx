@@ -1312,23 +1312,6 @@ export function SessionPage({ id, view }: SessionPageProps) {
   useSessionPresence(id);
 
   const readOnly = holder === "other";
-  /* The composer tray's clock: the live turn's start, or the last turn/start
-     event when the page opened mid-turn. */
-  const runStartedAt = useMemo(() => {
-    if (!turnRunning) {
-      return 0;
-    }
-    if (liveStartedAt) {
-      return liveStartedAt;
-    }
-    for (let index = events.length - 1; index >= 0; index -= 1) {
-      const event = events[index];
-      if (event && event.kind === "turn/start") {
-        return event.created_at < 1e12 ? event.created_at * 1000 : event.created_at;
-      }
-    }
-    return 0;
-  }, [turnRunning, liveStartedAt, events]);
   const busySession = readOnly || turnRunning;
 
   /* Keep the switch in sync with the URL. A caller that passes `view` owns the
@@ -2849,11 +2832,6 @@ export function SessionPage({ id, view }: SessionPageProps) {
           <ComposerTray
             sessionId={id}
             refreshKey={jobRefresh}
-            working={
-              turnRunning && !readOnly
-                ? { who: agentLabel || agent || "Agent", doing: "", since: runStartedAt }
-                : null
-            }
           />
           <Composer
             agent={agent}

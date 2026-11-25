@@ -150,21 +150,17 @@ export function SlashMenu({ state }: { state: SlashMenuState }) {
   );
 }
 
-/* The banner above the composer while the next message starts a new
-   session. */
+/* A compact one-line chip above the input while the next message starts a new
+   session (composer redesign: no big card inside the composer). */
 export function NewSessionBanner({ name, onCancel }: { name: string; onCancel: () => void }) {
   return (
     <div className="new-session-banner" role="status">
-      <span className="new-session-icon">
-        <Ic name="square-pen" size={16} />
+      <Ic name="square-pen" size={13} className="new-session-icon" />
+      <span className="new-session-title">New session</span>
+      <span className="new-session-sub">
+        {name + " won't see the messages above"}
       </span>
-      <span className="new-session-text">
-        <span className="new-session-title">New session</span>
-        <span className="new-session-sub">
-          {"Your next message starts a fresh conversation. " + name + " will not see the messages above."}
-        </span>
-      </span>
-      <button type="button" className="ibtn ibtn-xs" aria-label="Cancel new session" onClick={onCancel}>
+      <button type="button" className="new-session-x" aria-label="Cancel new session" onClick={onCancel}>
         <Ic name="x" size={12} />
       </button>
     </div>
