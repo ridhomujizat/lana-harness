@@ -106,8 +106,10 @@ func missingSecrets(config core.Config, secrets core.Secrets) []missingSecret {
 	used := usedProviders(config)
 	var out []missingSecret
 	for _, name := range sortedKeys(config.Providers) {
-		// A Claude Code account's key is checked by the runtime on its turn.
-		if !used[name] || config.Providers[name].Disabled || config.Providers[name].Kind == core.ClaudeCodeKind {
+		// A Claude Code or Antigravity account's key is checked by its
+		// runtime on its turn.
+		kind := config.Providers[name].Kind
+		if !used[name] || config.Providers[name].Disabled || kind == core.ClaudeCodeKind || kind == core.AntigravityKind {
 			continue
 		}
 		env := EffectiveKeyEnv(config.Providers[name], name)
@@ -132,7 +134,7 @@ func usedProviders(config core.Config) map[string]bool {
 	used := map[string]bool{}
 	markAddress := func(value string) {
 		if target, ok := ParseAddress(value); ok {
-			if llmcall.IsClaudeCodeProvider(config.Providers, target.Provider) {
+			if _, external := llmcall.ExternalRuntimeIn(config.Providers, target.Provider); external {
 				return
 			}
 			used[target.Provider] = true
@@ -154,8 +156,10 @@ func usedProviders(config core.Config) map[string]bool {
 			}
 			return
 		}
-		if target, ok := ParseAddress(agent.Model); ok && !llmcall.IsClaudeCodeProvider(config.Providers, target.Provider) {
-			used[target.Provider] = true
+		if target, ok := ParseAddress(agent.Model); ok {
+			if _, external := llmcall.ExternalRuntimeIn(config.Providers, target.Provider); !external {
+				used[target.Provider] = true
+			}
 		}
 	}
 	for _, agent := range config.Agents {

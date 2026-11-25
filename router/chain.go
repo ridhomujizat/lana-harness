@@ -117,6 +117,12 @@ func (r *Router) attempt(ctx context.Context, snap *snapshot, requested string, 
 		// agent dispatches it before the router, so this is never reached.
 		return nil, &core.ProviderError{Class: core.ErrorClassNotFound, Message: "claude-code targets run in the Claude Code runtime, not through the router"}
 	}
+	if snap.isAntigravity(target.Provider) {
+		// ADR 0022, AC-AGY-016: an Antigravity target runs in the Antigravity
+		// runtime; the agent dispatches it before the router, so this is never
+		// reached. This keeps it out of StreamChain, cooldown, and the proxy.
+		return nil, &core.ProviderError{Class: core.ErrorClassNotFound, Message: "antigravity targets run in the Antigravity runtime, not through the router"}
+	}
 	entry, ok := snap.providers[target.Provider]
 	if !ok {
 		return nil, &core.ProviderError{Class: core.ErrorClassNotFound, Message: fmt.Sprintf("provider %q is not configured", target.Provider)}

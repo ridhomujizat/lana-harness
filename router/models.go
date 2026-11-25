@@ -85,6 +85,9 @@ func (r *Router) Models(ctx context.Context, provider string, refresh bool) ([]M
 	if r.snap.Load().isClaude(provider) {
 		return r.claudeCodeModels(provider), nil
 	}
+	if r.snap.Load().isAntigravity(provider) {
+		return r.antigravityModels(provider), nil
+	}
 	entry, ok := r.snap.Load().providers[provider]
 	if !ok {
 		return nil, fmt.Errorf("%w: %q", ErrUnknownAddress, provider)
@@ -314,9 +317,9 @@ func (r *Router) refreshModelsAsync(entry *providerEntry) {
 
 // WarmModels fetches the model lists of the configured providers in the
 // background, so the catalog fallback (CachedModel) can resolve model facts
-// without ever blocking (REQ-MDL-010). Claude Code accounts are skipped:
-// they are not in providers and their model list comes from the runtime. It
-// returns at once; a nil ctx means the background context.
+// without ever blocking (REQ-MDL-010). Claude Code and Antigravity accounts
+// are skipped: they are not in providers and their model lists come from the
+// runtime. It returns at once; a nil ctx means the background context.
 func (r *Router) WarmModels(ctx context.Context) {
 	if ctx == nil {
 		ctx = context.Background()
