@@ -456,7 +456,7 @@ func TestScheduledRunAntigravity(t *testing.T) {
 // The Antigravity prompt head names lana's tools as the lana MCP server's
 // tools, not with Claude's prefix.
 func TestAntigravityToolNote(t *testing.T) {
-	if got := externalToolNote("antigravity", []string{"memory_write", "agent_list"}); !strings.Contains(got, "the lana MCP server's tools: agent_list, memory_write") ||
+	if got := externalToolNote("antigravity", []string{"memory_write", "agent_list"}); !strings.Contains(got, "MCP tools named mcp_lana_<tool>: agent_list, memory_write") ||
 		strings.Contains(got, "mcp__lana__") {
 		t.Fatalf("note = %q", got)
 	}
@@ -497,5 +497,18 @@ func TestTranscriptTail(t *testing.T) {
 	}
 	if transcriptTail(events[5:], "t3", 100) != "" {
 		t.Fatal("the current turn is in the transcript")
+	}
+}
+
+func TestMCPToolNameAgyPrefix(t *testing.T) {
+	for in, want := range map[string]string{"mcp__lana__memory_write": "memory_write", "mcp_lana_memory_write": "memory_write"} {
+		if got, ok := mcpToolName(in); !ok || got != want {
+			t.Fatalf("mcpToolName(%q) = %q, %v", in, got, ok)
+		}
+	}
+	for _, in := range []string{"run_command", "mcp_lana_", "mcp__lana__"} {
+		if _, ok := mcpToolName(in); ok {
+			t.Fatalf("mcpToolName(%q) matched", in)
+		}
 	}
 }

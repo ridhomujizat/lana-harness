@@ -321,7 +321,7 @@ func antigravityToolNote(tools []string) string {
 	}
 	names := append([]string(nil), tools...)
 	sort.Strings(names)
-	return "## lana tools\nlana's own tools are available as the lana MCP server's tools: " +
+	return "## lana tools\nlana's own tools are available as MCP tools named mcp_lana_<tool>: " +
 		strings.Join(names, ", ") + ". The tool notes above use the plain names. Use your own tools for files, shell commands, and search."
 }
 
@@ -350,12 +350,14 @@ func claudeMCPTools(offered []string) []string {
 	return out
 }
 
-// mcpToolName returns the lana tool name of a Claude tool call to the lana MCP
-// server ("mcp__lana__memory_write" -> "memory_write").
+// mcpToolName returns the lana tool name of a runtime tool call to the lana
+// MCP server: Claude Code names it "mcp__lana__memory_write", agy 1.5.17
+// "mcp_lana_memory_write" (recorded live 2026-11-26) -> "memory_write".
 func mcpToolName(name string) (string, bool) {
-	const prefix = "mcp__lana__"
-	if strings.HasPrefix(name, prefix) && len(name) > len(prefix) {
-		return name[len(prefix):], true
+	for _, prefix := range []string{"mcp__lana__", "mcp_lana_"} {
+		if strings.HasPrefix(name, prefix) && len(name) > len(prefix) {
+			return name[len(prefix):], true
+		}
 	}
 	return "", false
 }
