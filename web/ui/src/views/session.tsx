@@ -10,6 +10,7 @@ import {
 import type {
   FormEvent,
   KeyboardEvent as ReactKeyboardEvent,
+  ReactNode,
 } from "react";
 import { listAgents } from "../api/agents";
 import type { Agent } from "../api/agents";
@@ -83,7 +84,7 @@ import { SecretRequestCard, useSecretRequest } from "./secret-request";
 import { buildTurns, ReplyChip, TurnBlock, UserBubble } from "./turn";
 import type { ReplyTarget, UserAttachment, UserAttachmentRef } from "./turn";
 import { JobNoticeLine } from "./job-notice";
-import { JobsPill } from "./jobs-pill";
+import { ComposerTray } from "./composer-tray";
 import { TrajectoryView } from "./trajectory";
 import {
   NAMING_SESSION,
@@ -735,6 +736,8 @@ interface ComposerProps {
   onModel: (value: string) => void;
   onEffort: (value: string) => void;
   onPolicy: (value: string, confirmTrust: boolean) => Promise<boolean>;
+  /* The Background tab docked on top of the composer shell. */
+  tray?: ReactNode;
 }
 
 function Composer({
@@ -766,6 +769,7 @@ function Composer({
   onModel,
   onEffort,
   onPolicy,
+  tray,
 }: ComposerProps) {
   const [menu, setMenu] = useState("");
   const [trustOpen, setTrustOpen] = useState(false);
@@ -990,7 +994,9 @@ function Composer({
           Answer the question above
         </p>
       ) : null}
-      <div className="cbox">
+      {tray}
+      <div className="cx-shell">
+      <div className="cbox cx-field">
         {replyTarget ? (
           <ReplyChip target={replyTarget} onCancel={onCancelReply} />
         ) : null}
@@ -1000,6 +1006,7 @@ function Composer({
             {uploading ? "Uploading…" : attachmentNotice}
           </p>
         ) : null}
+        <div className="cx-field-row">
         <textarea
           ref={inputRef}
           className="composer-input"
@@ -1017,7 +1024,40 @@ function Composer({
           onKeyDown={composerKeyDown}
           onPaste={(event) => pasteImageFiles(event, onFiles)}
         ></textarea>
-        <div className="composer-bar">
+        <span className="cx-send">
+          {turnRunning && !readOnly ? (
+            <button
+              type="button"
+              className="cx-send-btn is-stop"
+              aria-label="Stop the running turn"
+              title="Stop the running turn"
+              disabled={cancelling}
+              onClick={onStop}
+            >
+              <i />
+            </button>
+          ) : (
+            <button
+              type="button"
+              className="cx-send-btn"
+              aria-label="Send message"
+              title="Send message"
+              disabled={
+                readOnly ||
+                questionOpen ||
+                sending ||
+                uploading ||
+                (!draft.trim() && attachments.length === 0)
+              }
+              onClick={onSend}
+            >
+              <Ic name="arrow-up" size={16} />
+            </button>
+          )}
+        </span>
+        </div>
+      </div>
+        <div className="composer-bar cx-bar">
           <span className="composer-control" ref={plusRef}>
             <IconButton
               icon="plus"
@@ -1171,36 +1211,15 @@ function Composer({
           </span>
 
           <span className="sp"></span>
-
-          {turnRunning && !readOnly ? (
-            <Button
-              size="sm"
-              variant="danger-ghost"
-              icon="square"
-              aria-label="Stop the running turn"
-              title="Stop the running turn"
-              disabled={cancelling}
-              onClick={onStop}
-            />
-          ) : (
-            <Button
-              size="sm"
-              variant="primary"
-              icon="arrow-up"
-              aria-label="Send message"
-              title="Send message"
-              disabled={
-                readOnly ||
-                questionOpen ||
-                sending ||
-                uploading ||
-                (!draft.trim() && attachments.length === 0)
-              }
-              onClick={onSend}
-            />
-          )}
         </div>
       </div>
+      {!readOnly ? (
+        <p className="cx-hint">
+          {turnRunning
+            ? "Stop ends the turn · Enter queues your message"
+            : "Enter to send · Shift+Enter for a new line"}
+        </p>
+      ) : null}
       {trustOpen ? (
         <TrustDialog
           busy={trustBusy}
@@ -2721,6 +2740,7 @@ export function SessionPage({ id, view }: SessionPageProps) {
                     continue={item.continue === true}
                     attachments={storedAttachments(id, item.attachments)}
                     replyTo={item.replyTo || null}
+                    at={item.at || 0}
                   />
                 )
               ) : (
@@ -2819,8 +2839,9 @@ export function SessionPage({ id, view }: SessionPageProps) {
               />
             ) : null}
           </div>
-          <JobsPill sessionId={id} refreshKey={jobRefresh} />
+          <div className={"cx" + (turnRunning ? " is-live" : "")}>
           <Composer
+            tray={<ComposerTray sessionId={id} refreshKey={jobRefresh} />}
             agent={agent}
             agentLabel={agentLabel}
             team={team}
@@ -2850,6 +2871,7 @@ export function SessionPage({ id, view }: SessionPageProps) {
             onEffort={changeEffort}
             onPolicy={changePolicy}
           />
+          </div>
         </div>
       </div>
     </main>

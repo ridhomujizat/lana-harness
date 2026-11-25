@@ -24,7 +24,10 @@ describe("job notice line", () => {
 
   it("names the exit code when the job failed", () => {
     render(<JobNoticeLine job={makeJob({ exit_code: 1 })} />);
-    expect(screen.getByText("Background task failed · exit 1")).toBeTruthy();
+    expect(screen.getByText("Background task failed")).toBeTruthy();
+    const code = screen.getByText("exit 1");
+    expect(code.tagName).toBe("CODE");
+    expect(code.className).toBe("job-notice-code");
   });
 
   it("reads stopped when the job was killed", () => {

@@ -80,6 +80,8 @@ export interface TurnUserText {
   attachments?: UserAttachmentRef[];
   /* API reply: set when the owner message replies to an automation message. */
   replyTo?: ReplyTarget;
+  /* When the owner sent it (ms), for the bubble's time line. */
+  at?: number;
 }
 
 /* ReplyTarget is a reply the owner is writing or that an owner message already
@@ -233,6 +235,7 @@ export type ThreadItem =
          line, not an owner bubble. seq places it in time in the room timeline. */
       job?: JobNoticePayload;
       seq?: number;
+      at?: number;
     }
   | { kind: "turn"; key: string; turn: ChatTurn };
 
@@ -1336,6 +1339,9 @@ export interface UserBubbleProps {
   /* API reply: the automation message this owner message replies to, shown as a
      muted quote line above the text. */
   replyTo?: ReplyTarget | null;
+  /* When the owner sent it (ms): shows a Copy + time line under the bubble,
+     like the foot of an agent turn. */
+  at?: number;
 }
 
 /* The quote line of an owner reply: "↪ workflow Daily brief: first line". */
@@ -1385,7 +1391,16 @@ export function UserBubble({
   continue: isContinue = false,
   attachments = [],
   replyTo = null,
+  at = 0,
 }: UserBubbleProps) {
+  const [copied, setCopied] = useState(false);
+  useEffect(() => {
+    if (!copied) {
+      return undefined;
+    }
+    const timer = setTimeout(() => setCopied(false), 1500);
+    return () => clearTimeout(timer);
+  }, [copied]);
   if (isContinue) {
     /* API-TFB-004: a continue request is a chip, not owner text. */
     return (
@@ -1412,6 +1427,24 @@ export function UserBubble({
               </span>
             ) : null}
             {text ? <FoldText text={text} /> : null}
+          </div>
+        ) : null}
+        {text && at ? (
+          <div className="chat-user-foot">
+            <Button
+              size="sm"
+              variant="ghost"
+              icon={copied ? "check" : "copy"}
+              className="turn-copy"
+              aria-label={copied ? "Copied" : "Copy message"}
+              onClick={() => {
+                navigator.clipboard.writeText(text).then(
+                  () => setCopied(true),
+                  () => setCopied(false)
+                );
+              }}
+            />
+            <span className="turn-foot-meta">{formatClock(at)}</span>
           </div>
         ) : null}
       </div>
@@ -1603,6 +1636,7 @@ export function buildTurns(
           continue: payload.continue === true,
           ...(attachments.length > 0 ? { attachments } : {}),
           ...(replyTo ? { replyTo } : {}),
+          ...(createdAt ? { at: createdAt } : {}),
         });
         turn.lastAt = Math.max(turn.lastAt, createdAt);
         break;
@@ -1880,6 +1914,7 @@ export function buildTurns(
           ? { attachments: message.attachments }
           : {}),
         ...(message.replyTo ? { replyTo: message.replyTo } : {}),
+        ...(message.at ? { at: message.at } : {}),
       });
     }
     items.push({ kind: "turn", key: turn.key, turn });

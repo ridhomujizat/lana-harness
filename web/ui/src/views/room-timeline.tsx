@@ -22,7 +22,7 @@ import { RoomSettings } from "./room-settings";
 import type { RoomSettingsTab } from "./room-settings";
 import type { RoomRow, Segment, SendRoomRequest } from "../api/rooms";
 import { listEvents } from "../api/sessions";
-import { compactSession } from "../api/turns";
+import { cancelTurn, compactSession } from "../api/turns";
 import { NewSessionBanner, SlashMenu, useSlashMenu } from "./slash-menu";
 import { ContextMeter } from "./context-meter";
 import type { SlashCommand } from "./slash-menu";
@@ -35,7 +35,7 @@ import { pinToBottom, useStickToBottom } from "./scroll-pin";
 import { Badge, Button, Skeleton } from "../ui/gr8r";
 import { AgentAvatar } from "./agent-avatar";
 import { JobNoticeLine } from "./job-notice";
-import { JobsPill } from "./jobs-pill";
+import { ComposerTray } from "./composer-tray";
 import { ApprovalCard } from "./approval";
 import type { ApprovalItem } from "./approval";
 import {
@@ -442,8 +442,11 @@ export function RoomView({ room, initialDraft, variant = "page" }: RoomViewProps
   const [stoppingId, setStoppingId] = useState("");
   const [sending, setSending] = useState(false);
   const [uploading, setUploading] = useState(false);
-  /* REQ-JBN-022: bumped on a tool/result or job notice so JobsPill re-reads. */
+  /* REQ-JBN-022: bumped on a tool/result or job notice so the tray re-reads. */
   const [jobRefresh, setJobRefresh] = useState(0);
+  /* The composer tray's background task panel; /tasks opens it. */
+  const [tasksOpen, setTasksOpen] = useState(false);
+  const [cancelling, setCancelling] = useState(false);
 
   const scrollRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
@@ -507,6 +510,7 @@ export function RoomView({ room, initialDraft, variant = "page" }: RoomViewProps
       title: "New session",
       description: "Start a fresh conversation; the messages above stay but are not sent again.",
       icon: "square-pen",
+      group: "Session",
       run: () => setNewTopic(true),
     },
     {
@@ -514,6 +518,7 @@ export function RoomView({ room, initialDraft, variant = "page" }: RoomViewProps
       title: "Compact",
       description: "Summarize this session so far to save tokens, then keep going.",
       icon: "minimize-2",
+      group: "Session",
       run: () => void compactNow(),
     },
   ];
@@ -523,7 +528,18 @@ export function RoomView({ room, initialDraft, variant = "page" }: RoomViewProps
       title: "Discuss",
       description: "Ask the lead to open a discussion on your next message.",
       icon: "messages-square",
+      group: "Work",
       run: () => setDiscuss(true),
+    });
+  } else {
+    /* Composer redesign: /tasks opens the background task panel. */
+    slashCommands.push({
+      name: "tasks",
+      title: "Background tasks",
+      description: "Show this session's background tasks, their logs, and Stop.",
+      icon: "square-terminal",
+      group: "Work",
+      run: () => setTasksOpen(true),
     });
   }
   const slash = useSlashMenu(draft, setDraft, slashCommands);
@@ -1272,7 +1288,7 @@ export function RoomView({ room, initialDraft, variant = "page" }: RoomViewProps
     ? room.mode === "lead"
       ? "Message the team…   " + (room.lead ? agentLabel(room.lead, byName) : "The lead") + " answers, or type @ to ask one agent"
       : "Message the team…   everyone can answer, or @ someone"
-    : "Message " + displayLabel(room) + "…   Type @ to bring in another agent";
+    : "Message " + displayLabel(room) + "…   / commands · @ agents";
   const attachDisabled = !currentWebSessionId || sending || uploading;
   const activity = liveTool ? activityPhrase(liveTool) : "thinking";
 
@@ -1417,9 +1433,31 @@ export function RoomView({ room, initialDraft, variant = "page" }: RoomViewProps
       setReplyTarget(null);
       return;
     }
+    /* Composer redesign: esc stops the running turn, like the Stop button. */
+    if (event.key === "Escape" && canStop) {
+      event.preventDefault();
+      void stopTurn();
+      return;
+    }
     if (event.key === "Enter" && !event.shiftKey && !event.nativeEvent.isComposing) {
       event.preventDefault();
       void sendMessage();
+    }
+  }
+
+  /* A one-agent room can stop its running turn from the composer. */
+  const canStop = !team && turnRunning && Boolean(currentWebSessionId);
+  async function stopTurn() {
+    if (!currentWebSessionId || cancelling) {
+      return;
+    }
+    setCancelling(true);
+    try {
+      await cancelTurn(currentWebSessionId);
+    } catch (failure: unknown) {
+      setActionError(errorMessage(failure));
+    } finally {
+      setCancelling(false);
     }
   }
 
@@ -1497,6 +1535,7 @@ export function RoomView({ room, initialDraft, variant = "page" }: RoomViewProps
               continue={node.item.continue === true}
               attachments={storedAttachments(node.sessionId, node.item.attachments)}
               replyTo={node.item.replyTo || null}
+              at={node.at}
             />
           </div>
         );
@@ -1677,11 +1716,6 @@ export function RoomView({ room, initialDraft, variant = "page" }: RoomViewProps
       </div>
 
       <div className="room-composer">
-        {/* REQ-JBN-021: the same background pill sits above the agent room's
-            composer (a team room has no single session, so it is left out). */}
-        {!team && currentWebSessionId ? (
-          <JobsPill sessionId={currentWebSessionId} refreshKey={jobRefresh} />
-        ) : null}
         {commandReply ? (
           <div className="alert info" role="status">
             <Ic name="workflow" size={15} />
@@ -1733,7 +1767,25 @@ export function RoomView({ room, initialDraft, variant = "page" }: RoomViewProps
           ) : null}
         </div>
 
-        <div className="cbox">
+        {/* Composer redesign (FigCraft "Composer redesign"): the tray tab and the
+            input card each sit in a thick padded frame, the tab docked on the
+            card. */}
+        <div className={"cx" + (turnRunning ? " is-live" : "") + (variant === "dock" ? " is-dock" : "")}>
+        {/* Composer redesign (owner 2026-11-25): one framed shell holds the
+            background row on top, the input field with send inside it, and
+            the toolbar under the field. */}
+        {/* The Background tab docks on the shell's top edge: one stepped
+            outline (owner 2026-11-25). */}
+        {!team ? (
+          <ComposerTray
+            sessionId={currentWebSessionId || ""}
+            refreshKey={jobRefresh}
+            open={tasksOpen}
+            onOpenChange={setTasksOpen}
+          />
+        ) : null}
+        <div className="cx-shell">
+        <div className="cbox cx-field">
           {replyTarget ? (
             <ReplyChip target={replyTarget} onCancel={() => setReplyTarget(null)} />
           ) : null}
@@ -1762,21 +1814,48 @@ export function RoomView({ room, initialDraft, variant = "page" }: RoomViewProps
               onPick={mentions.insert}
             />
           ) : null}
-          <textarea
-            ref={inputRef}
-            rows={variant === "dock" ? 1 : 2}
-            aria-label={"Message " + (team ? "the team" : displayLabel(room))}
-            placeholder={placeholder}
-            value={draft}
-            disabled={sending}
-            onChange={(event) => {
-              setDraft(event.target.value);
-              mentions.reset();
-              slash.reset();
-            }}
-            onKeyDown={composerKeyDown}
-            onPaste={(event) => pasteImageFiles(event, attachmentDraft.addFiles)}
-          ></textarea>
+          <div className="cx-field-row">
+            <textarea
+              ref={inputRef}
+              rows={variant === "dock" ? 1 : 2}
+              aria-label={"Message " + (team ? "the team" : displayLabel(room))}
+              placeholder={placeholder}
+              value={draft}
+              disabled={sending}
+              onChange={(event) => {
+                setDraft(event.target.value);
+                mentions.reset();
+                slash.reset();
+              }}
+              onKeyDown={composerKeyDown}
+              onPaste={(event) => pasteImageFiles(event, attachmentDraft.addFiles)}
+            ></textarea>
+            <span className="cx-send">
+              {canStop && !draft.trim() && attachmentDraft.items.length === 0 ? (
+                <button
+                  type="button"
+                  className="cx-send-btn is-stop"
+                  aria-label="Stop the running turn"
+                  title="Stop · Esc"
+                  disabled={cancelling}
+                  onClick={() => void stopTurn()}
+                >
+                  <i />
+                </button>
+              ) : (
+                <button
+                  type="button"
+                  className="cx-send-btn"
+                  aria-label="Send message"
+                  title="Send message"
+                  disabled={sending || (!draft.trim() && attachmentDraft.items.length === 0)}
+                  onClick={() => void sendMessage()}
+                >
+                  <Ic name="arrow-up" size={16} />
+                </button>
+              )}
+            </span>
+          </div>
           {team && mentionNames.length > 0 ? (
             <MentionChips
               names={mentionNames}
@@ -1784,7 +1863,8 @@ export function RoomView({ room, initialDraft, variant = "page" }: RoomViewProps
               onPick={mentions.insert}
             />
           ) : null}
-          <div className="room-composer-bar">
+        </div>
+          <div className="room-composer-bar cx-bar">
             <span
               className="room-attach"
               title={
@@ -1818,16 +1898,15 @@ export function RoomView({ room, initialDraft, variant = "page" }: RoomViewProps
               refreshKey={(turnRunning ? "run-" : "idle-") + (liveTurnId || "")}
               busy={turnRunning || sending}
             />
-            <Button
-              size="sm"
-              variant="primary"
-              icon="arrow-up"
-              aria-label="Send message"
-              title="Send message"
-              disabled={sending || (!draft.trim() && attachmentDraft.items.length === 0)}
-              onClick={() => void sendMessage()}
-            />
           </div>
+        </div>
+        {variant !== "dock" ? (
+          <p className="cx-hint">
+            {canStop
+              ? "esc stops the turn · Enter queues your message"
+              : "Enter to send · Shift+Enter for a new line"}
+          </p>
+        ) : null}
         </div>
       </div>
     </div>
