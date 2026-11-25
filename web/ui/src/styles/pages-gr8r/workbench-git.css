@@ -1944,7 +1944,15 @@ tr.is-target > .wbg-ln {
 }
 
 .wb-page:not(.wb-phone) > .wb-main {
+  flex-basis: 0;
   min-width: 380px;
+}
+
+/* A width saved on a wider window never pushes the panel past the page
+   edge (and its header buttons out of sight): side by side, the terminals
+   give way down to their 380 px first, then the panel narrows. */
+.wb-page:not(.wb-phone) > .wbg-panel:not(.is-max) {
+  flex-shrink: 1;
 }
 
 @container wb-page (max-width: 1180px) {
