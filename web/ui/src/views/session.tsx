@@ -10,6 +10,7 @@ import {
 import type {
   FormEvent,
   KeyboardEvent as ReactKeyboardEvent,
+  ReactNode,
 } from "react";
 import { listAgents } from "../api/agents";
 import type { Agent } from "../api/agents";
@@ -735,6 +736,8 @@ interface ComposerProps {
   onModel: (value: string) => void;
   onEffort: (value: string) => void;
   onPolicy: (value: string, confirmTrust: boolean) => Promise<boolean>;
+  /* The background row at the top of the composer shell. */
+  tray?: ReactNode;
 }
 
 function Composer({
@@ -766,6 +769,7 @@ function Composer({
   onModel,
   onEffort,
   onPolicy,
+  tray,
 }: ComposerProps) {
   const [menu, setMenu] = useState("");
   const [trustOpen, setTrustOpen] = useState(false);
@@ -990,8 +994,9 @@ function Composer({
           Answer the question above
         </p>
       ) : null}
-      <div className="cx-bezel">
-      <div className="cbox">
+      <div className="cx-shell">
+      {tray}
+      <div className="cbox cx-field">
         {replyTarget ? (
           <ReplyChip target={replyTarget} onCancel={onCancelReply} />
         ) : null}
@@ -1001,6 +1006,7 @@ function Composer({
             {uploading ? "Uploading…" : attachmentNotice}
           </p>
         ) : null}
+        <div className="cx-field-row">
         <textarea
           ref={inputRef}
           className="composer-input"
@@ -1018,7 +1024,38 @@ function Composer({
           onKeyDown={composerKeyDown}
           onPaste={(event) => pasteImageFiles(event, onFiles)}
         ></textarea>
-        <div className="composer-bar">
+        <span className="cx-send">
+          {turnRunning && !readOnly ? (
+            <Button
+              size="sm"
+              variant="danger-ghost"
+              icon="square"
+              aria-label="Stop the running turn"
+              title="Stop the running turn"
+              disabled={cancelling}
+              onClick={onStop}
+            />
+          ) : (
+            <Button
+              size="sm"
+              variant="primary"
+              icon="arrow-up"
+              aria-label="Send message"
+              title="Send message"
+              disabled={
+                readOnly ||
+                questionOpen ||
+                sending ||
+                uploading ||
+                (!draft.trim() && attachments.length === 0)
+              }
+              onClick={onSend}
+            />
+          )}
+        </span>
+        </div>
+      </div>
+        <div className="composer-bar cx-bar">
           <span className="composer-control" ref={plusRef}>
             <IconButton
               icon="plus"
@@ -1172,36 +1209,7 @@ function Composer({
           </span>
 
           <span className="sp"></span>
-
-          {turnRunning && !readOnly ? (
-            <Button
-              size="sm"
-              variant="danger-ghost"
-              icon="square"
-              aria-label="Stop the running turn"
-              title="Stop the running turn"
-              disabled={cancelling}
-              onClick={onStop}
-            />
-          ) : (
-            <Button
-              size="sm"
-              variant="primary"
-              icon="arrow-up"
-              aria-label="Send message"
-              title="Send message"
-              disabled={
-                readOnly ||
-                questionOpen ||
-                sending ||
-                uploading ||
-                (!draft.trim() && attachments.length === 0)
-              }
-              onClick={onSend}
-            />
-          )}
         </div>
-      </div>
       </div>
       {!readOnly ? (
         <p className="cx-hint">
@@ -2829,11 +2837,8 @@ export function SessionPage({ id, view }: SessionPageProps) {
             ) : null}
           </div>
           <div className={"cx" + (turnRunning ? " is-live" : "")}>
-          <ComposerTray
-            sessionId={id}
-            refreshKey={jobRefresh}
-          />
           <Composer
+            tray={<ComposerTray sessionId={id} refreshKey={jobRefresh} />}
             agent={agent}
             agentLabel={agentLabel}
             team={team}

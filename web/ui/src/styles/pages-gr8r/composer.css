@@ -4,8 +4,12 @@
    a stroke. A smaller framed tab — the tray — docks on top of it: it says what
    the agent is doing and carries the background task chip, and it opens into
    the task panel in the same frame. Corners are small (card 4, frame 7) and
-   the shadow is barely there. Focus leaves the frames as they are (owner
-   2026-11-25); while a turn runs, both frames turn Lana violet. */
+   the shadow is barely there. Focus leaves the frame as it is (owner
+   2026-11-25); while a turn runs, the shell turns Lana violet.
+
+   Layout (owner 2026-11-25, after Claude Code's chat composer): one shell
+   with the background row on top, the field with send inside it, and the
+   toolbar under the field. */
 
 .cx {
   --cx-pad: 3px;
@@ -21,51 +25,74 @@
   min-width: 0;
 }
 
-/* ---- frames ---------------------------------------------------- */
+/* ---- shell and field ------------------------------------------- */
 
-.cx-bezel {
-  padding: var(--cx-pad);
-  border-radius: calc(var(--cx-r) + var(--cx-pad));
+/* One framed shell (padding, no stroke) holds the background row on top,
+   the input field with send inside it, and the toolbar under the field. */
+.cx-shell {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 6px;
+  border-radius: calc(var(--cx-r) + 6px);
   background: var(--cx-frame);
   box-shadow: 0 4px 12px -8px rgba(0, 0, 0, 0.12);
   transition: background var(--dur, 160ms) var(--ease, ease);
 }
 
-.cx-tab {
-  margin: 0 14px;
-  padding: var(--cx-pad) var(--cx-pad) 0;
-  border-radius: calc(var(--cx-r) + var(--cx-pad)) calc(var(--cx-r) + var(--cx-pad)) 0 0;
-  background: var(--cx-frame);
-  transition: background var(--dur, 160ms) var(--ease, ease);
-}
-
-.cx-tab-in {
-  border-radius: calc(var(--cx-r) - 1px) calc(var(--cx-r) - 1px) 0 0;
-  background: var(--cx-card);
-}
-
-.cx.is-live .cx-bezel,
-.cx.is-live .cx-tab {
+.cx.is-live .cx-shell {
   background: var(--cx-live);
 }
 
-/* The card: the old .cbox / composer box loses its own stroke, ring and big
-   radius inside the frame. */
-.cx-bezel > .cbox,
-.cx .cx-bezel > .cbox:focus-within {
+/* The background row and task panel sit flat on the shell. */
+.cx-shell .cx-tab {
+  margin: 0;
+  padding: 0;
+  border-radius: 0;
+  background: none;
+}
+
+.cx-shell .cx-tab-in {
+  border-radius: 0;
+  background: none;
+}
+
+/* The field: the old .cbox loses its own stroke, ring and big radius. */
+.cx-shell > .cx-field,
+.cx .cx-shell > .cx-field:focus-within {
   position: relative;
-  gap: 10px;
-  padding: 12px 12px 8px 14px;
+  gap: 8px;
+  padding: 10px 8px 8px 14px;
   border: 0;
   border-radius: var(--cx-r);
   background: var(--cx-card);
   box-shadow: none;
 }
 
-.cx-bezel > .cbox textarea {
-  padding-right: 0;
+.cx-field-row {
+  display: flex;
+  align-items: flex-end;
+  gap: 8px;
+  min-width: 0;
+}
+
+.cx-field-row textarea {
+  flex: 1 1 auto;
+  min-width: 0;
+  padding-top: 2px;
   font-size: 14.5px;
   line-height: 1.55;
+}
+
+.cx-send {
+  display: inline-flex;
+  flex: none;
+}
+
+.cx-bar {
+  gap: 4px;
+  min-height: 0;
+  padding: 0 2px;
 }
 
 /* ---- tray ------------------------------------------------------ */
@@ -74,8 +101,8 @@
   display: flex;
   align-items: center;
   gap: 10px;
-  min-height: 34px;
-  padding: 5px 6px 5px 10px;
+  min-height: 30px;
+  padding: 0 2px 0 6px;
 }
 
 .cx-working {
@@ -177,7 +204,7 @@
   flex-direction: column;
   gap: 2px;
   max-height: min(420px, 50vh);
-  padding: 8px 8px 6px;
+  padding: 4px 2px 2px;
   overflow-y: auto;
 }
 
@@ -392,19 +419,6 @@
 
 /* ---- inside the card ------------------------------------------- */
 
-.cx-keys {
-  position: absolute;
-  top: 13px;
-  right: 12px;
-  display: inline-flex;
-  align-items: center;
-  gap: 5px;
-  color: var(--text-4);
-  font-size: 11.5px;
-  pointer-events: none;
-}
-
-.cx-keys kbd,
 .cx-stop kbd {
   padding: 0 5px;
   border: 1px solid var(--border-strong);
@@ -414,11 +428,6 @@
   font-family: var(--font-mono, ui-monospace, monospace);
   font-size: 11px;
   line-height: 16px;
-}
-
-.cx-keys kbd + kbd,
-.cx-keys kbd:not(:first-child) {
-  margin-left: 6px;
 }
 
 /* Toolbar controls: boxy, quiet. */
@@ -446,26 +455,23 @@
 }
 
 .cx-stop {
-  display: inline-flex;
+  display: inline-grid;
   flex: none;
-  align-items: center;
-  gap: 6px;
+  place-items: center;
+  width: 30px;
   height: 30px;
   min-height: 0;
-  padding: 0 7px 0 10px;
+  padding: 0;
   border: 1px solid var(--border-strong);
   border-radius: 4px;
   background: var(--surface-3);
   color: var(--text);
-  font: inherit;
-  font-size: 12.5px;
-  font-weight: 500;
   cursor: pointer;
 }
 
 .cx-stop .cx-stop-sq {
-  width: 9px;
-  height: 9px;
+  width: 10px;
+  height: 10px;
   background: var(--text);
 }
 
@@ -481,8 +487,8 @@
 }
 
 /* The floating agent dock keeps its compact composer: no keys, no hint. */
-.cx.is-dock .cx-tab {
-  margin: 0 10px;
+.cx.is-dock .cx-shell {
+  padding: 4px;
 }
 
 /* ---- slash menu and mentions: the same boxy raised surface ------ */
@@ -703,19 +709,8 @@
 /* ---- phones ---------------------------------------------------- */
 
 @media (max-width: 760px) {
-  .cx-keys,
-  .cx-hint,
-  .cx-stop kbd,
-  .cx-stop-text {
+  .cx-hint {
     display: none;
-  }
-  .cx-stop {
-    width: 30px;
-    padding: 0;
-    justify-content: center;
-  }
-  .cx-tab {
-    margin: 0 10px;
   }
   .cx-working-doing {
     display: none;

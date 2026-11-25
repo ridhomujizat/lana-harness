@@ -1288,7 +1288,7 @@ export function RoomView({ room, initialDraft, variant = "page" }: RoomViewProps
     ? room.mode === "lead"
       ? "Message the team…   " + (room.lead ? agentLabel(room.lead, byName) : "The lead") + " answers, or type @ to ask one agent"
       : "Message the team…   everyone can answer, or @ someone"
-    : "Message " + displayLabel(room) + "…";
+    : "Message " + displayLabel(room) + "…   / commands · @ agents";
   const attachDisabled = !currentWebSessionId || sending || uploading;
   const activity = liveTool ? activityPhrase(liveTool) : "thinking";
 
@@ -1770,6 +1770,10 @@ export function RoomView({ room, initialDraft, variant = "page" }: RoomViewProps
             input card each sit in a thick padded frame, the tab docked on the
             card. */}
         <div className={"cx" + (turnRunning ? " is-live" : "") + (variant === "dock" ? " is-dock" : "")}>
+        {/* Composer redesign (owner 2026-11-25): one framed shell holds the
+            background row on top, the input field with send inside it, and
+            the toolbar under the field. */}
+        <div className="cx-shell">
         {!team ? (
           <ComposerTray
             sessionId={currentWebSessionId || ""}
@@ -1778,8 +1782,7 @@ export function RoomView({ room, initialDraft, variant = "page" }: RoomViewProps
             onOpenChange={setTasksOpen}
           />
         ) : null}
-        <div className="cx-bezel">
-        <div className="cbox">
+        <div className="cbox cx-field">
           {replyTarget ? (
             <ReplyChip target={replyTarget} onCancel={() => setReplyTarget(null)} />
           ) : null}
@@ -1808,30 +1811,47 @@ export function RoomView({ room, initialDraft, variant = "page" }: RoomViewProps
               onPick={mentions.insert}
             />
           ) : null}
-          <textarea
-            ref={inputRef}
-            rows={variant === "dock" ? 1 : 2}
-            aria-label={"Message " + (team ? "the team" : displayLabel(room))}
-            placeholder={placeholder}
-            value={draft}
-            disabled={sending}
-            onChange={(event) => {
-              setDraft(event.target.value);
-              mentions.reset();
-              slash.reset();
-            }}
-            onKeyDown={composerKeyDown}
-            onPaste={(event) => pasteImageFiles(event, attachmentDraft.addFiles)}
-          ></textarea>
-          {variant !== "dock" &&
-          !draft &&
-          !newTopic &&
-          !replyTarget &&
-          attachmentDraft.items.length === 0 ? (
-            <span className="cx-keys" aria-hidden="true">
-              <kbd>/</kbd> commands <kbd>@</kbd> agents
+          <div className="cx-field-row">
+            <textarea
+              ref={inputRef}
+              rows={variant === "dock" ? 1 : 2}
+              aria-label={"Message " + (team ? "the team" : displayLabel(room))}
+              placeholder={placeholder}
+              value={draft}
+              disabled={sending}
+              onChange={(event) => {
+                setDraft(event.target.value);
+                mentions.reset();
+                slash.reset();
+              }}
+              onKeyDown={composerKeyDown}
+              onPaste={(event) => pasteImageFiles(event, attachmentDraft.addFiles)}
+            ></textarea>
+            <span className="cx-send">
+              {canStop && !draft.trim() && attachmentDraft.items.length === 0 ? (
+                <button
+                  type="button"
+                  className="cx-stop"
+                  aria-label="Stop the running turn"
+                  title="Stop the running turn (esc)"
+                  disabled={cancelling}
+                  onClick={() => void stopTurn()}
+                >
+                  <span className="cx-stop-sq" aria-hidden="true" />
+                </button>
+              ) : (
+                <Button
+                  size="sm"
+                  variant="primary"
+                  icon="arrow-up"
+                  aria-label="Send message"
+                  title="Send message"
+                  disabled={sending || (!draft.trim() && attachmentDraft.items.length === 0)}
+                  onClick={() => void sendMessage()}
+                />
+              )}
             </span>
-          ) : null}
+          </div>
           {team && mentionNames.length > 0 ? (
             <MentionChips
               names={mentionNames}
@@ -1839,7 +1859,8 @@ export function RoomView({ room, initialDraft, variant = "page" }: RoomViewProps
               onPick={mentions.insert}
             />
           ) : null}
-          <div className="room-composer-bar">
+        </div>
+          <div className="room-composer-bar cx-bar">
             <span
               className="room-attach"
               title={
@@ -1873,32 +1894,7 @@ export function RoomView({ room, initialDraft, variant = "page" }: RoomViewProps
               refreshKey={(turnRunning ? "run-" : "idle-") + (liveTurnId || "")}
               busy={turnRunning || sending}
             />
-            {canStop && !draft.trim() && attachmentDraft.items.length === 0 ? (
-              <button
-                type="button"
-                className="cx-stop"
-                aria-label="Stop the running turn"
-                title="Stop the running turn (esc)"
-                disabled={cancelling}
-                onClick={() => void stopTurn()}
-              >
-                <span className="cx-stop-sq" aria-hidden="true" />
-                <span className="cx-stop-text">Stop</span>
-                <kbd>esc</kbd>
-              </button>
-            ) : (
-              <Button
-                size="sm"
-                variant="primary"
-                icon="arrow-up"
-                aria-label="Send message"
-                title="Send message"
-                disabled={sending || (!draft.trim() && attachmentDraft.items.length === 0)}
-                onClick={() => void sendMessage()}
-              />
-            )}
           </div>
-        </div>
         </div>
         {variant !== "dock" ? (
           <p className="cx-hint">
