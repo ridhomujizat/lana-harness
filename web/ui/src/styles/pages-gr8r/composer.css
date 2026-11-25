@@ -4,8 +4,8 @@
    a stroke. A smaller framed tab — the tray — docks on top of it: it says what
    the agent is doing and carries the background task chip, and it opens into
    the task panel in the same frame. Corners are small (card 4, frame 7) and
-   the shadow is barely there. While the composer has focus or a turn runs,
-   both frames turn Lana violet. */
+   the shadow is barely there. Focus leaves the frames as they are (owner
+   2026-11-25); while a turn runs, both frames turn Lana violet. */
 
 .cx {
   --cx-pad: 3px;
@@ -44,8 +44,6 @@
   background: var(--cx-card);
 }
 
-.cx:focus-within .cx-bezel,
-.cx:focus-within .cx-tab,
 .cx.is-live .cx-bezel,
 .cx.is-live .cx-tab {
   background: var(--cx-live);
