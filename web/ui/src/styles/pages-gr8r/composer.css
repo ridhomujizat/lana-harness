@@ -22,10 +22,16 @@
   position: relative;
   display: flex;
   flex-direction: column;
-  padding: 6px;
+  padding: 3px;
   border: 1px solid var(--cx-line);
   border-radius: 4px;
   background: var(--cx-card);
+}
+
+/* Under the Background tab the gap between the tab's box and the field
+   equals the 3 px frame on every other side (the shared line counts 1). */
+.cx-tray + .cx-shell {
+  padding-top: 2px;
 }
 
 .cx-shell > .cx-field,
@@ -123,7 +129,7 @@
   align-items: center;
   gap: 4px;
   min-height: 0;
-  padding: 6px 2px 0;
+  padding: 3px 2px 0;
 }
 
 .cx .cx-bar .btn,
@@ -164,7 +170,7 @@
   position: relative;
   z-index: 1;
   margin: 0 14px -1px;
-  padding: 6px 6px 5px;
+  padding: 3px 3px 0;
   border: 1px solid var(--cx-line);
   border-bottom: 0;
   border-radius: 4px 4px 0 0;
@@ -446,7 +452,7 @@
 }
 
 .cx.is-dock .cx-shell {
-  padding: 4px;
+  padding: 3px;
 }
 
 .cx.is-dock .cx-tray {
