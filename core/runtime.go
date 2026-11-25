@@ -46,6 +46,11 @@ type RuntimeDeps struct {
 // (ADR 0020, API-CCT-001). It is also the runtime name.
 const ClaudeCodeProvider = "claude-code"
 
+// AntigravityProvider is the built-in provider name of Antigravity router
+// targets: "antigravity/<model>" runs the turn in the Antigravity runtime over
+// `agy acp` (ADR 0022, API-AGY-010). It is also the runtime name.
+const AntigravityProvider = "antigravity"
+
 // RuntimeModel is one model an external runtime offers, as its binary
 // reports it (for Claude Code, an entry of the initialize response's models).
 type RuntimeModel struct {
@@ -134,6 +139,10 @@ type RuntimeConfig struct {
 	// ConfigDir is set as CLAUDE_CONFIG_DIR of the process. Empty keeps the
 	// daemon's environment as it is (the built-in account).
 	ConfigDir string
+	// Home is the HOME of the child process. An Antigravity account runs agy
+	// with its own HOME so its Google login stays apart (ADR 0022); empty
+	// keeps the daemon's HOME (the built-in account).
+	Home string
 }
 
 // RuntimeAccount names one Claude Code account for a status probe
@@ -271,8 +280,8 @@ const (
 //   - text_delta, thinking_delta, assistant_message: Text.
 //   - tool_call: ID, Name, Input, Risk. The runtime executes the tool itself.
 //   - tool_result: ID, Output, IsError.
-//   - session_meta: ClaudeSessionID, Model, Tools, Version. Sent once per
-//     runtime process, on its first init.
+//   - session_meta: ClaudeSessionID, Model, Tier, Tools, Version. Sent once
+//     per runtime process, on its first init.
 //   - usage: Usage, CostUSD, Model, DurationMS. Sent once per turn, before end.
 //   - limits: Windows.
 //   - end: StopReason, IsError, ErrorText. Always the last event.
@@ -287,10 +296,17 @@ type RuntimeEvent struct {
 	Risk   Risk
 	Output string
 
+	// ClaudeSessionID is the runtime's own session ID for the session_meta
+	// event: the Claude Code session ID, or the ACP session ID of the
+	// Antigravity runtime (ADR 0022). The name and JSON key are kept for the
+	// stored logs.
 	ClaudeSessionID string
 	Model           string
-	Tools           []string
-	Version         string
+	// Tier is the plan tier the runtime reported, when it does: the name from
+	// the Antigravity session/new result's _meta.antigravity.tier.name.
+	Tier    string
+	Tools   []string
+	Version string
 
 	Usage      Usage
 	CostUSD    float64
