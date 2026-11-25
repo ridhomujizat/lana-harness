@@ -21,6 +21,9 @@ import { CLAUDE_CODE_GROUP, isAntigravityGroup } from "./router/presets";
 import { ProviderLogo } from "./router/provider-logo";
 import type { RouterChoice } from "../api/router";
 import type { CatalogEffort, CatalogModel } from "../api/models";
+import { choiceLevels, cleanEfforts, effortName, keptEffort } from "./effort";
+import type { EffortLevels } from "./effort";
+import { NOT_OFFERED, defaultEffortLabel } from "./effort-control";
 import { answerApproval } from "../api/approvals";
 import { useSessionPresence } from "../lib/session-presence";
 import type {
@@ -257,11 +260,6 @@ function shortModel(value: string): string {
   return parts.length > 1 ? parts.slice(1).join(":") : text;
 }
 
-/* The chip and menu label of one reasoning effort: "low" -> "Low". */
-function effortName(value: string): string {
-  const text = String(value || "");
-  return text ? text.charAt(0).toUpperCase() + text.slice(1) : "";
-}
 
 function turnCountText(count: unknown): string {
   const value = Number(count) || 0;
@@ -579,16 +577,28 @@ function RouterChoiceItems({
 }
 
 /* The Thinking menu of REQ-MDL-001: "Model default" clears the session effort,
-   the four efforts set it with their description from /v1/models. */
+   each level the model supports (spec 76, REQ-MES-002) sets it, with its
+   description from /v1/models when the catalog has one. A saved level the
+   model does not offer stays checked with the level it uses (REQ-MES-003). */
 function ThinkingMenuContent({
   current,
-  efforts,
+  levels,
+  descriptions,
   onPick,
 }: {
   current: string;
-  efforts: CatalogEffort[];
+  levels: EffortLevels;
+  descriptions: CatalogEffort[];
   onPick: (value: string) => void;
 }) {
+  const efforts = levels.efforts.map((value) => {
+    const known = descriptions.find((effort) => effort.value === value);
+    return { value, description: known ? known.description : "" };
+  });
+  const stale = current !== "" && !levels.efforts.includes(current);
+  if (stale) {
+    efforts.push({ value: current, description: "Not offered by this model." });
+  }
   return (
     <>
       <p className="mh">Thinking</p>
@@ -601,7 +611,11 @@ function ThinkingMenuContent({
       >
         <span className="mi-text">
           <span className="mi-name">Model default</span>
-          <span className="mi-meta">Use the model's own effort.</span>
+          <span className="mi-meta">
+            {levels.default_effort
+              ? "Use the model's own effort: " + effortName(levels.default_effort) + "."
+              : "Use the model's own effort."}
+          </span>
         </span>
         {current === "" ? (
           <span className="ck">
@@ -738,7 +752,9 @@ interface ComposerProps {
   onStop: () => void;
   onCancelReply: () => void;
   onAgent: (name: string) => void;
-  onModel: (value: string) => void;
+  /* resetEffort: the new model does not list the session effort, so the
+     model change clears it (spec 76, REQ-MES-006). */
+  onModel: (value: string, resetEffort?: boolean) => void;
   onEffort: (value: string) => void;
   onPolicy: (value: string, confirmTrust: boolean) => Promise<boolean>;
   /* The Background tab docked on top of the composer shell. */
@@ -909,10 +925,38 @@ function Composer({
       : shortModel(modelValue);
   const currentEntry =
     catalog.find((entry) => entry.id === catalogId) || null;
-  const thinksModel = Boolean(!teamSession && currentEntry && currentEntry.thinking);
+  /* Spec 76 (REQ-MES-002): the levels come from the model's router choice; a
+     model the router does not list falls back to the catalog's Thinking
+     levels. */
+  const levelChoice = menuChoices.find((choice) => choice.value === modelValue) || null;
+  const claudeChoice = Boolean(
+    levelChoice &&
+      (levelChoice.group === CLAUDE_CODE_GROUP ||
+        levelChoice.group.startsWith(CLAUDE_CODE_GROUP + " · "))
+  );
+  const effortLevels: EffortLevels | null =
+    levelChoice && (Array.isArray(levelChoice.efforts) || claudeChoice)
+      ? choiceLevels(levelChoice, claudeChoice)
+      : currentEntry && currentEntry.thinking
+        ? {
+            efforts: cleanEfforts(efforts.map((effort) => effort.value)),
+            default_effort: currentEntry.default_effort || "",
+          }
+        : null;
+  const thinksModel = Boolean(
+    !teamSession && effortLevels && effortLevels.efforts.length > 0
+  );
   const effortLabel = reasoningEffort
-    ? "Thinking: " + effortName(reasoningEffort)
+    ? "Thinking: " +
+      effortName(reasoningEffort) +
+      (effortLevels && !effortLevels.efforts.includes(reasoningEffort)
+        ? " " + NOT_OFFERED
+        : "")
     : "Thinking: Model default";
+  const effortTitle =
+    !reasoningEffort && effortLevels
+      ? "Thinking: " + defaultEffortLabel(effortLevels.default_effort)
+      : effortLabel;
 
   /* The Gr8r buttons do not forward refs, so the trigger refs point at their
      wrapper spans; focus the button inside. */
@@ -945,7 +989,21 @@ function Composer({
   function pickModel(value: string) {
     setMenu("");
     focusIn(modelRef);
-    onModel(value);
+    /* Spec 76 (REQ-MES-006): keep the session effort when the new model lists
+       it, else go back to the model's default. A model whose levels are not
+       known keeps it. */
+    const next = menuChoices.find((choice) => choice.value === value) || null;
+    const nextClaude = Boolean(
+      next &&
+        (next.group === CLAUDE_CODE_GROUP || next.group.startsWith(CLAUDE_CODE_GROUP + " · "))
+    );
+    const reset = Boolean(
+      reasoningEffort &&
+        next &&
+        (Array.isArray(next.efforts) || nextClaude) &&
+        keptEffort(reasoningEffort, choiceLevels(next, nextClaude)) === ""
+    );
+    onModel(value, reset);
   }
 
   function pickEffort(value: string) {
@@ -1171,7 +1229,7 @@ function Composer({
                   aria-label={effortLabel}
                   aria-haspopup="menu"
                   aria-expanded={menu === "thinking"}
-                  title={effortLabel}
+                  title={effortTitle}
                   disabled={busySession}
                   onClick={() => setMenu(menu === "thinking" ? "" : "thinking")}
                 >
@@ -1182,11 +1240,14 @@ function Composer({
                   open={menu === "thinking"}
                   onClose={() => closeMenu("thinking")}
                 >
-                  <ThinkingMenuContent
-                    current={reasoningEffort}
-                    efforts={efforts}
-                    onPick={pickEffort}
-                  />
+                  {effortLevels ? (
+                    <ThinkingMenuContent
+                      current={reasoningEffort}
+                      levels={effortLevels}
+                      descriptions={efforts}
+                      onPick={pickEffort}
+                    />
+                  ) : null}
                 </Menu>
               </span>
             ) : null}
@@ -2396,7 +2457,7 @@ export function SessionPage({ id, view }: SessionPageProps) {
   );
 
   const changeModel = useCallback(
-    (value: string) => {
+    (value: string, resetEffort?: boolean) => {
       /* A team session never changes one model: each agent uses its own. */
       const currentAgent = agents.find(
         (entry) => entry.name === (detail && detail.agent)
@@ -2404,7 +2465,11 @@ export function SessionPage({ id, view }: SessionPageProps) {
       if ((detail && detail.team) || isTeam(currentAgent || null)) {
         return Promise.resolve(false);
       }
-      return patch({ model: value }, "Model changed to " + value + ".");
+      return patch(
+        resetEffort ? { model: value, reasoning_effort: "" } : { model: value },
+        "Model changed to " + value + "." +
+          (resetEffort ? " Thinking reset to the model default." : "")
+      );
     },
     [agents, detail, patch]
   );

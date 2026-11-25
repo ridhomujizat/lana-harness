@@ -16,7 +16,9 @@ import {
   splitModel,
   providerLabel,
 } from "./agent-common";
-import { CLAUDE_EFFORTS, ClaudeCodeNote, choiceOptions } from "./agent-runtime";
+import { ClaudeCodeNote, choiceOptions } from "./agent-runtime";
+import { EffortControl } from "./effort-control";
+import { choiceLevels, effortChoice, keptEffort } from "./effort";
 import {
   ClaudeCodeBadge,
   claudeAccountNames,
@@ -178,6 +180,12 @@ export function CreateAgentDialog({
     [choices, router, accounts]
   );
   const claudeAccount = claudeTargetAccount(model, choices, router ? router.combos : null, names);
+  /* Spec 76 (REQ-MES-006): the levels of the picked model; none for "Same
+     as the default agent" or a model the router does not list. */
+  const levels = choiceLevels(
+    effortChoice(model, choices, router ? router.combos : null),
+    claudeAccount !== ""
+  );
   const modelOptions = useMemo(() => {
     const options = choiceOptions(choices, router ? router.providers : undefined, accounts);
     const known = !model || options.some((option) => option.value === model);
@@ -221,7 +229,7 @@ export function CreateAgentDialog({
       if (model) {
         body.model = model;
       }
-      if (claudeAccount && effort) {
+      if (levels && effort) {
         body.reasoning_effort = effort;
       }
       const created = await createAgent(body);
@@ -336,27 +344,38 @@ export function CreateAgentDialog({
             options={modelOptions}
             disabled={busy}
             onChange={(value) => {
+              /* Spec 76 (REQ-MES-006): keep the level when the new model
+                 lists it, else go back to the model's default. */
               setModel(value);
-              setEffort("");
+              setEffort(
+                keptEffort(
+                  effort,
+                  choiceLevels(
+                    effortChoice(value, choices, router ? router.combos : null),
+                    claudeTargetAccount(value, choices, router ? router.combos : null, names) !== ""
+                  )
+                )
+              );
             }}
           />
           {claudeAccount ? <ClaudeCodeNote account={claudeAccount} /> : null}
         </div>
 
-        {claudeAccount ? (
+        {levels ? (
           <div className="field">
-            <label className="field-label" htmlFor="create-agent-effort">
-              Reasoning effort
-            </label>
-            <Select
+            <span className="field-label">Reasoning effort</span>
+            <EffortControl
               id="create-agent-effort"
-              aria-label="Reasoning effort"
+              levels={levels}
               value={effort}
-              options={CLAUDE_EFFORTS}
               disabled={busy}
               onChange={setEffort}
             />
-            <span className="hint">Passed to Claude Code as --effort.</span>
+            <span className="hint">
+              {claudeAccount
+                ? "Passed to Claude Code as --effort."
+                : "How much the model deliberates."}
+            </span>
           </div>
         ) : null}
 

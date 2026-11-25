@@ -17,16 +17,6 @@ import { isAntigravityGroup } from "./router/presets";
    engine choice: every agent is a lana agent, and a Claude Code model runs
    its turns in Claude Code. */
 
-/* The reasoning effort values Claude Code accepts as --effort. */
-export const CLAUDE_EFFORTS: SelectOption[] = [
-  { value: "", label: "Default" },
-  { value: "low", label: "Low" },
-  { value: "medium", label: "Medium" },
-  { value: "high", label: "High" },
-  { value: "xhigh", label: "Extra high" },
-  { value: "max", label: "Max" },
-];
-
 /* Router choices as Select options: combos first, then the models of each
    provider under its name (AC-RTR-024), and Claude Code models under one
    group per account with the Claude logo (REQ-CCT-009), and Antigravity

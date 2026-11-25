@@ -110,7 +110,8 @@ const CATALOG: ModelsResponse = {
 
 function stubFetch(
   events: SessionEvent[],
-  overrides: Partial<SessionDetail> = {}
+  overrides: Partial<SessionDetail> = {},
+  router: unknown = null
 ) {
   const base: SessionDetail = { ...detail, ...overrides };
   const fetchMock = vi.fn(
@@ -123,6 +124,9 @@ function stubFetch(
       }
       if (url.includes("/events")) {
         return json({ events, last_seq: events.length });
+      }
+      if (router && url.endsWith("/v1/router")) {
+        return json(router);
       }
       if (url.includes("/models")) {
         return json(CATALOG);
@@ -470,7 +474,7 @@ describe("composer thinking chip", () => {
       name: "Thinking: Model default",
     });
     fireEvent.click(chip);
-    fireEvent.click(screen.getByRole("menuitemradio", { name: /High/ }));
+    fireEvent.click(screen.getByRole("menuitemradio", { name: /^High/ }));
 
     await waitFor(() => {
       expect(patchBody(fetchMock)).toMatchObject({ reasoning_effort: "high" });
@@ -580,5 +584,74 @@ describe("session reply to a workflow message", () => {
       )
     ).toBeTruthy();
     expect(screen.getByText("Replying to workflow Daily brief")).toBeTruthy();
+  });
+});
+
+/* Spec 76 (REQ-MES-002, REQ-MES-006): the levels come from the router choice;
+   a model switch keeps the level the new model lists, else resets it. */
+describe("composer effort from the router choice", () => {
+  const router = {
+    version: "v1",
+    providers: [],
+    combos: [],
+    cooling: [],
+    proxy: { enabled: false, base_url: "" },
+    choices: [
+      {
+        value: "antigravity/gemini-4-neon",
+        label: "Gemini 4 Neon",
+        group: "Antigravity",
+        efforts: ["low", "medium", "high", "xhigh"],
+        default_effort: "high",
+      },
+      {
+        value: "antigravity/gpt-oss-120b",
+        label: "GPT-OSS 120B",
+        group: "Antigravity",
+        efforts: ["medium"],
+        default_effort: "medium",
+      },
+    ],
+  };
+
+  it("lists the model's levels and resets a level the new model lacks", async () => {
+    const fetchMock = stubFetch(
+      [],
+      { model: "antigravity/gemini-4-neon", reasoning_effort: "xhigh" },
+      router
+    );
+
+    render(<SessionPage id="s1" />);
+    const chip = await screen.findByRole("button", { name: "Thinking: Extra high" });
+    fireEvent.click(chip);
+    expect(
+      screen.getAllByRole("menuitemradio").map((node) => node.querySelector(".mi-name")?.textContent)
+    ).toEqual(["Model default", "Low", "Medium", "High", "Extra high"]);
+    fireEvent.click(chip);
+
+    fireEvent.click(await screen.findByRole("button", { name: /^Model:/ }));
+    fireEvent.click(screen.getByRole("menuitemradio", { name: /GPT-OSS 120B/ }));
+    await waitFor(() => {
+      expect(patchBody(fetchMock)).toEqual({
+        model: "antigravity/gpt-oss-120b",
+        reasoning_effort: "",
+      });
+    });
+  });
+
+  it("keeps a level the new model lists", async () => {
+    const fetchMock = stubFetch(
+      [],
+      { model: "antigravity/gemini-4-neon", reasoning_effort: "medium" },
+      router
+    );
+
+    render(<SessionPage id="s1" />);
+    await screen.findByRole("button", { name: "Thinking: Medium" });
+    fireEvent.click(await screen.findByRole("button", { name: /^Model:/ }));
+    fireEvent.click(screen.getByRole("menuitemradio", { name: /GPT-OSS 120B/ }));
+    await waitFor(() => {
+      expect(patchBody(fetchMock)).toEqual({ model: "antigravity/gpt-oss-120b" });
+    });
   });
 });

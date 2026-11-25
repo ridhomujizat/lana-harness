@@ -177,6 +177,11 @@ export interface RouterChoice {
   value: string;
   label: string;
   group: string;
+  /* Spec 76 (REQ-MES-002): the model's own effort levels, in the order to
+     show them (any strings, such as minimal, low, xhigh, max), and its
+     default level ("" when unknown). No efforts: no effort control. */
+  efforts?: string[];
+  default_effort?: string;
 }
 
 export interface RouterOverview {
@@ -270,6 +275,9 @@ export interface RouterModel {
   price: ModelPrice | null;
   source: string;
   used_by?: { agents?: string[]; combos?: string[] };
+  /* Spec 76 (REQ-MES-002): as on RouterChoice. */
+  efforts?: string[];
+  default_effort?: string;
 }
 
 export interface ProviderModels {
