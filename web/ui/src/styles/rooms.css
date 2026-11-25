@@ -443,8 +443,52 @@
   display: flex;
   align-items: center;
   gap: 6px;
+  justify-content: flex-start;
+  width: 100%;
+  min-width: 0;
+  height: auto;
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  background: none;
   color: var(--text-tertiary);
+  font: inherit;
   font-size: 12px;
+  font-weight: 400;
+  line-height: 1.45;
+  text-align: left;
+  white-space: normal;
+  user-select: text;
+  cursor: pointer;
+}
+
+.room-learned:active:not(:disabled) {
+  transform: none;
+}
+
+.room-learned:hover .room-learned-text {
+  color: var(--text-2, var(--text-secondary));
+}
+
+.room-learned-text {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.room-learned.is-open {
+  align-items: flex-start;
+}
+
+.room-learned.is-open .room-learned-text {
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
+
+.room-learned-label {
+  font-weight: 500;
 }
 
 .room-book-icon {
