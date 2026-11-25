@@ -88,6 +88,16 @@ export interface ReplyRef {
   text: string;
 }
 
+/* REQ-JBN-004: the payload of a job notice, a runtime user/message that tells
+   the owner a background job ended. status is "exited" or "killed". */
+export interface JobNoticePayload {
+  id: string;
+  command: string;
+  status: string;
+  exit_code: number;
+  tail: string;
+}
+
 /* The user/message payload fields the web surfaces read. reply_to is set when
    the owner sent the message as a reply to an automation message. */
 export interface UserMessagePayload extends EventPayload {
@@ -95,6 +105,8 @@ export interface UserMessagePayload extends EventPayload {
   continue?: boolean;
   context_blocks?: number;
   runtime?: boolean;
+  /* REQ-JBN-004: set on an ended-job notice (runtime: true with a job). */
+  job?: JobNoticePayload;
   reply_to?: ReplyRef;
 }
 

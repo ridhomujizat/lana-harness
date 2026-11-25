@@ -69,6 +69,7 @@ describe("buildTurns", () => {
       key: "user-1",
       text: "hello",
       continue: false,
+      at: 1,
     });
     const turnItem = items[1];
     expect(turnItem?.kind).toBe("turn");

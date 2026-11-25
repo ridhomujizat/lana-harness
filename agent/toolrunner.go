@@ -332,8 +332,10 @@ func (a jobAdapter) Wait(ctx context.Context, sessionID, id string, d time.Durat
 	return toJobView(a.reg.Wait(ctx, sessionID, id, d))
 }
 
+// Kill is the agent's own job_kill. It is silent: the tool result already
+// returns the status, so the job's end sends no notice (REQ-JBN-001).
 func (a jobAdapter) Kill(sessionID, id string) (core.JobView, error) {
-	job, err := a.reg.Kill(sessionID, id)
+	job, err := a.reg.KillSilent(sessionID, id)
 	if err != nil {
 		return core.JobView{}, err
 	}

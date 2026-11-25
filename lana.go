@@ -431,6 +431,30 @@ func New(ctx context.Context, opts Options, options ...Option) (*Runtime, error)
 	// ONE background-job registry per runtime, next to the spill store. Jobs
 	// live and die with the process (REQ-JOB-018).
 	jobsRegistry := jobs.New(opts.Home)
+	// REQ-JBN-001, REQ-JBN-002: a job that ends (exit, or a kill that is not
+	// the agent's own job_kill, and not a shutdown) sends one notice to the
+	// session that owns it. The tail is read without moving the job_output
+	// cursor, and reap marks the job announced so the next turn's <context>
+	// skips it. The hook runs on the reaper goroutine, outside the registry
+	// lock.
+	jobsRegistry.OnEnd = func(job jobs.Job) {
+		tail, err := jobsRegistry.Tail(job.SessionID, job.ID, 2000)
+		if err != nil {
+			slog.Warn("job notice tail read failed", "session_id", job.SessionID, "job_id", job.ID, "error", err)
+		}
+		status := "killed"
+		if job.Status == jobs.StatusExited {
+			status = "exited"
+		}
+		notice := core.JobNotice{ID: job.ID, Command: job.Command, Status: status, ExitCode: job.ExitCode, Tail: tail}
+		if job.StoppedByOwner {
+			notice.StoppedBy = "owner"
+		}
+		runtimeLabel := jobAgeLabel(job.EndedAt.Sub(job.StartedAt))
+		if err := registry.SendJobNotice(job.SessionID, notice, agent.JobNoticeText(notice, runtimeLabel)); err != nil {
+			slog.Warn("job notice send failed", "session_id", job.SessionID, "job_id", job.ID, "error", err)
+		}
+	}
 	registry.SetJobs(agent.NewJobService(jobsRegistry))
 	questionService := question.New(coreCtx.Sessions, coreCtx.Hooks)
 	coreCtx.Questions = questionService
@@ -2758,4 +2782,22 @@ func validQuestionOutcome(outcome core.QuestionOutcome) bool {
 
 func questionNoResponder() core.QuestionOutcome {
 	return core.QuestionOutcome{Status: core.QuestionStatusUnavailable, Reason: core.QuestionReasonNoResponder}
+}
+
+// jobAgeLabel renders a job's run time as "12s", "4m", "3h", or "2d", the same
+// label the turn <context> block uses (REQ-JBN-002).
+func jobAgeLabel(d time.Duration) string {
+	if d < 0 {
+		d = 0
+	}
+	switch {
+	case d < time.Minute:
+		return fmt.Sprintf("%ds", int(d.Seconds()))
+	case d < time.Hour:
+		return fmt.Sprintf("%dm", int(d.Minutes()))
+	case d < 24*time.Hour:
+		return fmt.Sprintf("%dh", int(d.Hours()))
+	default:
+		return fmt.Sprintf("%dd", int(d.Hours()/24))
+	}
 }

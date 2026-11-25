@@ -7,6 +7,21 @@ but their config keys, events, and tools may still change between betas.
 
 ## [Unreleased]
 
+## [0.6.0-beta.11] - 2026-11-25
+
+### Added
+
+- Background jobs: when a background job ends (it exits, crashes, or is stopped from the web), the agent is told with a `<task-notification>` and wakes up to report it; if it is busy, it reads the notice at its next step. A job the agent stops itself, or that dies with a daemon restart, sends no notice.
+- Chat: an ended background job shows as a compact line in the transcript (finished, failed with its exit code, or stopped) with its log tail one click away.
+- Chat: a Background tab docked on top of the composer lists the session's background jobs with their age and pid, Logs, Stop, and Stop all; `/tasks` opens it.
+- Chat: Stop (and Esc) ends the running turn from the Chats composer; the owner's messages get Copy and their time under the bubble.
+
+### Changed
+
+- Chat: the composer is redrawn after the Workbench Claude chat composer: one framed card with the input field, send inside the field, and the toolbar under it; the `/` and `@` hints move into the placeholder, and the slash menu groups its commands.
+- Chat: the new-session notice is a one-line chip instead of a card.
+- Corners are squarer across the chat: the composer, owner bubbles, and the floating agent pill and panel.
+
 ## [0.6.0-beta.10] - 2026-11-24
 
 ### Added

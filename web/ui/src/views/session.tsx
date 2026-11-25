@@ -10,6 +10,7 @@ import {
 import type {
   FormEvent,
   KeyboardEvent as ReactKeyboardEvent,
+  ReactNode,
 } from "react";
 import { listAgents } from "../api/agents";
 import type { Agent } from "../api/agents";
@@ -41,8 +42,6 @@ import {
   openStream,
 } from "../api/client";
 import type { SSEStream, StreamFrame, StreamState } from "../api/client";
-import { listSessionJobs, stopSessionJob } from "../api/jobs";
-import type { BackgroundJob } from "../api/jobs";
 import { answerQuestion, skipAllQuestions } from "../api/questions";
 import type { QuestionAnswerRequest, QuestionEvent } from "../api/questions";
 import {
@@ -64,7 +63,7 @@ import {
   forkSession as forkSessionRequest,
   sendMessage as sendMessageRequest,
 } from "../api/turns";
-import { holderText, stopReasonWords } from "../lib/format";
+import { holderText, jobNoticeOf, stopReasonWords } from "../lib/format";
 import { ErrorNotice, Loading, useAnnounce } from "../ui/ui";
 import { Ic } from "../ui/icons";
 import { pinToBottom, useStickToBottom } from "./scroll-pin";
@@ -84,6 +83,8 @@ import type { OpenQuestion } from "./question";
 import { SecretRequestCard, useSecretRequest } from "./secret-request";
 import { buildTurns, ReplyChip, TurnBlock, UserBubble } from "./turn";
 import type { ReplyTarget, UserAttachment, UserAttachmentRef } from "./turn";
+import { JobNoticeLine } from "./job-notice";
+import { ComposerTray } from "./composer-tray";
 import { TrajectoryView } from "./trajectory";
 import {
   NAMING_SESSION,
@@ -735,6 +736,8 @@ interface ComposerProps {
   onModel: (value: string) => void;
   onEffort: (value: string) => void;
   onPolicy: (value: string, confirmTrust: boolean) => Promise<boolean>;
+  /* The Background tab docked on top of the composer shell. */
+  tray?: ReactNode;
 }
 
 function Composer({
@@ -766,6 +769,7 @@ function Composer({
   onModel,
   onEffort,
   onPolicy,
+  tray,
 }: ComposerProps) {
   const [menu, setMenu] = useState("");
   const [trustOpen, setTrustOpen] = useState(false);
@@ -990,7 +994,9 @@ function Composer({
           Answer the question above
         </p>
       ) : null}
-      <div className="cbox">
+      {tray}
+      <div className="cx-shell">
+      <div className="cbox cx-field">
         {replyTarget ? (
           <ReplyChip target={replyTarget} onCancel={onCancelReply} />
         ) : null}
@@ -1000,6 +1006,7 @@ function Composer({
             {uploading ? "Uploading…" : attachmentNotice}
           </p>
         ) : null}
+        <div className="cx-field-row">
         <textarea
           ref={inputRef}
           className="composer-input"
@@ -1017,7 +1024,40 @@ function Composer({
           onKeyDown={composerKeyDown}
           onPaste={(event) => pasteImageFiles(event, onFiles)}
         ></textarea>
-        <div className="composer-bar">
+        <span className="cx-send">
+          {turnRunning && !readOnly ? (
+            <button
+              type="button"
+              className="cx-send-btn is-stop"
+              aria-label="Stop the running turn"
+              title="Stop the running turn"
+              disabled={cancelling}
+              onClick={onStop}
+            >
+              <i />
+            </button>
+          ) : (
+            <button
+              type="button"
+              className="cx-send-btn"
+              aria-label="Send message"
+              title="Send message"
+              disabled={
+                readOnly ||
+                questionOpen ||
+                sending ||
+                uploading ||
+                (!draft.trim() && attachments.length === 0)
+              }
+              onClick={onSend}
+            >
+              <Ic name="arrow-up" size={16} />
+            </button>
+          )}
+        </span>
+        </div>
+      </div>
+        <div className="composer-bar cx-bar">
           <span className="composer-control" ref={plusRef}>
             <IconButton
               icon="plus"
@@ -1171,36 +1211,15 @@ function Composer({
           </span>
 
           <span className="sp"></span>
-
-          {turnRunning && !readOnly ? (
-            <Button
-              size="sm"
-              variant="danger-ghost"
-              icon="square"
-              aria-label="Stop the running turn"
-              title="Stop the running turn"
-              disabled={cancelling}
-              onClick={onStop}
-            />
-          ) : (
-            <Button
-              size="sm"
-              variant="primary"
-              icon="arrow-up"
-              aria-label="Send message"
-              title="Send message"
-              disabled={
-                readOnly ||
-                questionOpen ||
-                sending ||
-                uploading ||
-                (!draft.trim() && attachments.length === 0)
-              }
-              onClick={onSend}
-            />
-          )}
         </div>
       </div>
+      {!readOnly ? (
+        <p className="cx-hint">
+          {turnRunning
+            ? "Stop ends the turn · Enter queues your message"
+            : "Enter to send · Shift+Enter for a new line"}
+        </p>
+      ) : null}
       {trustOpen ? (
         <TrustDialog
           busy={trustBusy}
@@ -1209,230 +1228,6 @@ function Composer({
         />
       ) : null}
     </div>
-  );
-}
-
-/* REQ-JOB-020: the "Background jobs" strip above the composer. It polls every
-   3 s while at least one job runs, and Dismiss hides an ended job locally. */
-const JOB_POLL_MS = 3000;
-
-function jobStatusText(job: BackgroundJob): string {
-  if (job.status === "running") {
-    return "running";
-  }
-  if (job.status === "killed") {
-    return "killed";
-  }
-  return "exited with code " + job.exit_code;
-}
-
-/* The badge tone; a nonzero exit reads as a warning. */
-function jobTone(job: BackgroundJob): string {
-  if (job.status === "running") {
-    return "running";
-  }
-  if (job.status === "killed") {
-    return "killed";
-  }
-  return job.exit_code === 0 ? "exited" : "warning";
-}
-
-function jobAgeText(startedAt: number): string {
-  const minutes = Math.floor(Math.max(0, Date.now() - startedAt) / 60000);
-  if (minutes < 1) {
-    return "started just now";
-  }
-  if (minutes < 60) {
-    return "started " + minutes + "m ago";
-  }
-  const hours = Math.floor(minutes / 60);
-  if (hours < 24) {
-    return "started " + hours + "h ago";
-  }
-  return "started " + Math.floor(hours / 24) + "d ago";
-}
-
-export function JobsStrip({ sessionId }: { sessionId: string }) {
-  const [jobs, setJobs] = useState<BackgroundJob[]>([]);
-  const [dismissed, setDismissed] = useState<string[]>([]);
-  const [openLogs, setOpenLogs] = useState<string[]>([]);
-  const [stopping, setStopping] = useState<string[]>([]);
-  const [stopErrors, setStopErrors] = useState<Record<string, string>>({});
-  const [loadError, setLoadError] = useState("");
-
-  useEffect(() => {
-    let alive = true;
-    setJobs([]);
-    setDismissed([]);
-    setOpenLogs([]);
-    setStopping([]);
-    setStopErrors({});
-    setLoadError("");
-    listSessionJobs(sessionId)
-      .then((list) => {
-        if (alive) {
-          setJobs(Array.isArray(list) ? list : []);
-        }
-      })
-      .catch((failure: unknown) => {
-        if (alive) {
-          setLoadError(errorMessage(failure));
-        }
-      });
-    return () => {
-      alive = false;
-    };
-  }, [sessionId]);
-
-  const hasRunning = jobs.some((job) => job.status === "running");
-
-  useEffect(() => {
-    if (!hasRunning) {
-      return undefined;
-    }
-    let alive = true;
-    const timer = window.setInterval(() => {
-      listSessionJobs(sessionId)
-        .then((list) => {
-          if (alive) {
-            setJobs(Array.isArray(list) ? list : []);
-          }
-        })
-        .catch(() => {
-          /* A polling error stays silent; the next tick retries. */
-        });
-    }, JOB_POLL_MS);
-    return () => {
-      alive = false;
-      window.clearInterval(timer);
-    };
-  }, [hasRunning, sessionId]);
-
-  /* Running jobs first, then ended, each newest first. */
-  const visible = useMemo(() => {
-    const shown = jobs.filter((job) => !dismissed.includes(job.id));
-    return shown.slice().sort((left, right) => {
-      const leftRank = left.status === "running" ? 0 : 1;
-      const rightRank = right.status === "running" ? 0 : 1;
-      if (leftRank !== rightRank) {
-        return leftRank - rightRank;
-      }
-      return right.started_at - left.started_at;
-    });
-  }, [jobs, dismissed]);
-
-  function toggleLogs(jobId: string) {
-    setOpenLogs((current) =>
-      current.includes(jobId)
-        ? current.filter((id) => id !== jobId)
-        : current.concat([jobId])
-    );
-  }
-
-  function dismiss(jobId: string) {
-    setDismissed((current) => current.concat([jobId]));
-  }
-
-  async function stop(jobId: string) {
-    setStopping((current) =>
-      current.includes(jobId) ? current : current.concat([jobId])
-    );
-    setStopErrors((current) => {
-      const next = { ...current };
-      delete next[jobId];
-      return next;
-    });
-    try {
-      const stopped = await stopSessionJob(sessionId, jobId);
-      setJobs((current) =>
-        current.map((job) => (job.id === jobId ? stopped : job))
-      );
-    } catch (failure) {
-      setStopErrors((current) => ({
-        ...current,
-        [jobId]: errorMessage(failure),
-      }));
-    } finally {
-      setStopping((current) => current.filter((id) => id !== jobId));
-    }
-  }
-
-  if (visible.length === 0) {
-    // REQ-JOB-020: nothing to show. A fetch error still surfaces a small
-    // notice so a broken endpoint is not silent.
-    if (!loadError) {
-      return null;
-    }
-    return (
-      <section className="jobs-strip" aria-label="Background jobs">
-        <p className="jobs-strip-error" role="alert">
-          {loadError}
-        </p>
-      </section>
-    );
-  }
-
-  return (
-    <section className="jobs-strip" aria-label="Background jobs">
-      <h2 className="jobs-strip-heading">Background jobs</h2>
-      {visible.map((job) => {
-        const logsId = "job-logs-" + job.id;
-        const open = openLogs.includes(job.id);
-        const busy = stopping.includes(job.id);
-        return (
-          <div className="job-row" key={job.id}>
-            <div className="job-main">
-              <span className="job-command" title={job.command}>
-                {job.command}
-              </span>
-              <span className={"job-badge job-badge-" + jobTone(job)}>
-                {jobStatusText(job)}
-              </span>
-              <span className="job-age">{jobAgeText(job.started_at)}</span>
-            </div>
-            <div className="job-actions">
-              <button
-                type="button"
-                className="job-action"
-                aria-expanded={open}
-                aria-controls={logsId}
-                onClick={() => toggleLogs(job.id)}
-              >
-                Logs
-              </button>
-              {job.status === "running" ? (
-                <button
-                  type="button"
-                  className="job-action job-stop"
-                  disabled={busy}
-                  onClick={() => stop(job.id)}
-                >
-                  {busy ? "Stopping…" : "Stop"}
-                </button>
-              ) : (
-                <button
-                  type="button"
-                  className="job-action"
-                  onClick={() => dismiss(job.id)}
-                >
-                  Dismiss
-                </button>
-              )}
-            </div>
-            {open ? (
-              <pre className="job-logs" id={logsId}>
-                {job.tail || "No output yet."}
-              </pre>
-            ) : null}
-            {stopErrors[job.id] ? (
-              <p className="job-error" role="alert">
-                {stopErrors[job.id]}
-              </p>
-            ) : null}
-          </div>
-        );
-      })}
-    </section>
   );
 }
 
@@ -1482,6 +1277,8 @@ export function SessionPage({ id, view }: SessionPageProps) {
   const [pendingFiles, setPendingFiles] = useState<DraftAttachment[]>([]);
   const [uploading, setUploading] = useState(false);
   const [queued, setQueued] = useState(false);
+  /* REQ-JBN-022: bumped on a tool/result or job notice so JobsPill re-reads. */
+  const [jobRefresh, setJobRefresh] = useState(0);
   const [notice, setNotice] = useState<{ text: string; tone: string } | null>(
     null
   );
@@ -1916,6 +1713,7 @@ export function SessionPage({ id, view }: SessionPageProps) {
     setLiveThinking(false);
     setLiveThought("");
     setQueued(false);
+    setJobRefresh(0);
     setPendingText("");
     setNotice(null);
     setActionError("");
@@ -2054,6 +1852,14 @@ export function SessionPage({ id, view }: SessionPageProps) {
           pendingFilesRef.current = [];
           setPendingFiles([]);
           setQueued(false);
+        }
+        /* REQ-JBN-022: a tool result or a job notice means the background pill
+           should re-read the job list, so a job started mid-visit appears. */
+        if (
+          event.kind === "tool/result" ||
+          (event.kind === "user/message" && jobNoticeOf(payload) !== null)
+        ) {
+          setJobRefresh((value) => value + 1);
         }
         if (event.kind === "assistant/message" || event.kind === "tool/call") {
           setStreamText("");
@@ -2925,13 +2731,18 @@ export function SessionPage({ id, view }: SessionPageProps) {
           <div className="chat-thread">
             {thread.map((item) =>
               item.kind === "user" ? (
-                <UserBubble
-                  key={item.key}
-                  text={item.text}
-                  continue={item.continue === true}
-                  attachments={storedAttachments(id, item.attachments)}
-                  replyTo={item.replyTo || null}
-                />
+                item.job ? (
+                  <JobNoticeLine key={item.key} job={item.job} />
+                ) : (
+                  <UserBubble
+                    key={item.key}
+                    text={item.text}
+                    continue={item.continue === true}
+                    attachments={storedAttachments(id, item.attachments)}
+                    replyTo={item.replyTo || null}
+                    at={item.at || 0}
+                  />
+                )
               ) : (
                 <TurnBlock
                   key={item.key}
@@ -3028,8 +2839,9 @@ export function SessionPage({ id, view }: SessionPageProps) {
               />
             ) : null}
           </div>
-          <JobsStrip sessionId={id} />
+          <div className={"cx" + (turnRunning ? " is-live" : "")}>
           <Composer
+            tray={<ComposerTray sessionId={id} refreshKey={jobRefresh} />}
             agent={agent}
             agentLabel={agentLabel}
             team={team}
@@ -3059,6 +2871,7 @@ export function SessionPage({ id, view }: SessionPageProps) {
             onEffort={changeEffort}
             onPolicy={changePolicy}
           />
+          </div>
         </div>
       </div>
     </main>

@@ -763,42 +763,59 @@
 .new-session-banner {
   display: flex;
   align-items: center;
-  gap: 10px;
-  margin: 0 0 var(--s-2);
-  padding: 8px 10px;
+  align-self: flex-start;
+  gap: 7px;
+  max-width: 100%;
+  min-width: 0;
+  height: 26px;
+  padding: 0 4px 0 8px;
   border: 1px solid var(--accent-line);
-  border-radius: var(--r-md, 8px);
+  border-radius: 4px;
   background: var(--accent-soft);
+  font-size: 12px;
 }
 
-.new-session-icon {
-  display: inline-grid;
+.new-session-banner .new-session-icon {
   flex: none;
-  place-items: center;
-  width: 28px;
-  height: 28px;
-  border-radius: 50%;
-  background: var(--surface);
   color: var(--accent);
 }
 
-.new-session-text {
-  display: flex;
-  flex: 1 1 auto;
-  flex-direction: column;
-  gap: 1px;
-  min-width: 0;
-}
-
-.new-session-title {
+.new-session-banner .new-session-title {
+  flex: none;
+  margin: 0;
   color: var(--text);
-  font-size: var(--fs-sm);
+  font-size: 12px;
   font-weight: 600;
+  line-height: 1;
 }
 
-.new-session-sub {
-  color: var(--text-2);
-  font-size: var(--fs-xs);
+.new-session-banner .new-session-sub {
+  min-width: 0;
+  font-size: 12px;
+  overflow: hidden;
+  color: var(--text-3);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.new-session-x {
+  display: inline-grid;
+  flex: none;
+  place-items: center;
+  width: 20px;
+  height: 20px;
+  min-height: 0;
+  padding: 0;
+  border: 0;
+  border-radius: 3px;
+  background: none;
+  color: var(--text-3);
+  cursor: pointer;
+}
+
+.new-session-x:hover {
+  background: var(--surface-3);
+  color: var(--text);
 }
 
 /* ---------------------------------------------------------------- */

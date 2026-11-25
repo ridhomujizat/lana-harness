@@ -428,7 +428,7 @@ describe("Live turn (AC-ROOM-006)", () => {
       handlers?.onFrame?.({ kind: "tool_call", name: "bash", call_id: "c1", turn_id: "t1" });
     });
 
-    expect(await screen.findByText(/running bash/)).toBeTruthy();
+    expect((await screen.findAllByText(/running bash/)).length).toBeGreaterThan(0);
     /* An agent room shows the agent's avatar before the typing dots, in the
        running turn's foot (or the live row until that turn appears). */
     const row = document.querySelector(".turn-foot-live, .room-live.room-live-agent");
@@ -494,7 +494,7 @@ describe("Room composer (REQ-ROOM-003)", () => {
     fireEvent.change(input, { target: { value: "/ne" } });
     fireEvent.keyDown(input, { key: "Enter" });
     expect(vi.mocked(sendToRoom)).not.toHaveBeenCalled();
-    expect(await screen.findByText(/Your next message starts a fresh conversation/)).toBeTruthy();
+    expect(await screen.findByText(/won.t see the messages above/)).toBeTruthy();
     expect(input.value).toBe("");
     fireEvent.change(input, { target: { value: "halo" } });
     fireEvent.click(screen.getByRole("button", { name: "Send message" }));
