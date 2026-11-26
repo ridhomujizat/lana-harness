@@ -519,6 +519,16 @@ export interface PlanWindow {
   source?: string;
 }
 
+/* A provider's subscription plan, such as Command Code's (spec 79). */
+export interface LimitPlan {
+  /* The plan's display name ("Pro"), else its raw id. */
+  name: string;
+  /* "active", "trialing", "past_due", … */
+  status?: string;
+  /* The end of the current billing period. */
+  renews_at?: string;
+}
+
 export interface LimitSnapshot {
   provider: string;
   kind?: string;
@@ -528,6 +538,7 @@ export interface LimitSnapshot {
   credit?: CreditLimit | null;
   balance?: BalanceLimit | null;
   windows?: PlanWindow[] | null;
+  plan?: LimitPlan | null;
 }
 
 /* Router records and limits of Claude Code turns before spec 39 used the

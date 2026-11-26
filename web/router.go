@@ -174,6 +174,16 @@ type RouterLimit struct {
 	Credit    *RouterCredit      `json:"credit"`
 	Balance   *RouterBalance     `json:"balance"`
 	Windows   []RouterPlanWindow `json:"windows"`
+	// Plan is the provider's subscription plan (spec 79); omitted when not
+	// reported.
+	Plan *RouterPlan `json:"plan,omitempty"`
+}
+
+// RouterPlan is a provider's subscription plan, such as Command Code's.
+type RouterPlan struct {
+	Name     string     `json:"name"`
+	Status   string     `json:"status,omitempty"`
+	RenewsAt *time.Time `json:"renews_at,omitempty"`
 }
 
 // RouterRateLimits are the rate limits a provider reports in its headers.

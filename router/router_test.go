@@ -804,6 +804,37 @@ func TestDisabledProviderMovesOn(t *testing.T) {
 // Spec 39 Revision 4: MergeWindows replaces windows of the same type in
 // place, appends new ones, keeps the others and a stored label; KeepTime
 // leaves UpdatedAt as it was.
+// Spec 79 (REQ-CCU-004): a plan update replaces the stored plan, an update
+// without one keeps it, and the plan survives a JSON round trip (the store).
+func TestLimitPlanMergeAndJSON(t *testing.T) {
+	r, err := New(Config{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	renews := time.Date(2026, 12, 1, 0, 0, 0, 0, time.UTC)
+	r.UpdateLimits(LimitUpdate{Provider: "cc", Plan: &Plan{Name: "Pro", Status: "active", RenewsAt: &renews}})
+	r.UpdateLimits(LimitUpdate{Provider: "cc", Balance: &Balance{Currency: "USD", Total: 1}})
+	snap := r.Limits(context.Background(), false)[0]
+	if snap.Plan == nil || snap.Plan.Name != "Pro" || snap.Plan.RenewsAt == nil || !snap.Plan.RenewsAt.Equal(renews) {
+		t.Fatalf("plan kept = %+v", snap.Plan)
+	}
+	data, err := json.Marshal(snap)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var back LimitSnapshot
+	if err := json.Unmarshal(data, &back); err != nil {
+		t.Fatal(err)
+	}
+	if back.Plan == nil || back.Plan.Name != "Pro" || back.Plan.Status != "active" || !back.Plan.RenewsAt.Equal(renews) {
+		t.Fatalf("plan round trip = %+v (%s)", back.Plan, data)
+	}
+	r.UpdateLimits(LimitUpdate{Provider: "cc", Plan: &Plan{Name: "Max"}})
+	if snap := r.Limits(context.Background(), false)[0]; snap.Plan.Name != "Max" || snap.Plan.RenewsAt != nil {
+		t.Fatalf("plan replaced = %+v", snap.Plan)
+	}
+}
+
 func TestLimitWindowsMergeAndKeepTime(t *testing.T) {
 	r, err := New(Config{})
 	if err != nil {

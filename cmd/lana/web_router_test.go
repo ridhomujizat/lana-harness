@@ -22,6 +22,7 @@ import (
 	"github.com/ridhomujizat/lana-harness/internal/models"
 	"github.com/ridhomujizat/lana-harness/providers/anthropic"
 	"github.com/ridhomujizat/lana-harness/providers/mock"
+	"github.com/ridhomujizat/lana-harness/router"
 	"github.com/ridhomujizat/lana-harness/web"
 )
 
@@ -577,5 +578,18 @@ func TestCreateClaudeAgentThroughDaemon(t *testing.T) {
 	}
 	if got := cfg.Settings.Agents["claude"]; got.Runtime != "" || got.Model != "claude-code/opus" || got.Provider != "" {
 		t.Fatalf("settings claude = %+v", got)
+	}
+}
+
+// Spec 79 (REQ-CCU-004): the plan of a limit snapshot reaches the web shape.
+func TestWebRouterLimitPlan(t *testing.T) {
+	renews := time.Date(2026, 12, 1, 0, 0, 0, 0, time.UTC)
+	got := webRouterLimit(router.LimitSnapshot{Provider: "cmc", Kind: "commandcode",
+		Plan: &router.Plan{Name: "Pro", Status: "active", RenewsAt: &renews}})
+	if got.Plan == nil || got.Plan.Name != "Pro" || got.Plan.Status != "active" || got.Plan.RenewsAt == nil || !got.Plan.RenewsAt.Equal(renews) {
+		t.Fatalf("plan = %+v", got.Plan)
+	}
+	if none := webRouterLimit(router.LimitSnapshot{Provider: "x"}); none.Plan != nil {
+		t.Fatalf("plan without a report = %+v", none.Plan)
 	}
 }
