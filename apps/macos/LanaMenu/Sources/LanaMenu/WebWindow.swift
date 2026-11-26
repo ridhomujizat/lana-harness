@@ -379,6 +379,9 @@ final class WebWindowController: NSObject {
             // The lights and the loading background follow the dashboard
             // theme, which may differ from the system one.
             window?.appearance = NSAppearance(named: dark ? .darkAqua : .aqua)
+        case .themeSystem:
+            // Drop the pinned appearance so the window and web view follow macOS.
+            window?.appearance = nil
         }
     }
 

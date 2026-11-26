@@ -33,6 +33,8 @@ public enum ShellMessage: Equatable {
     case doubleClick
     /// theme is the dashboard theme the page shows ("dark" or "light").
     case theme(dark: Bool)
+    /// themeSystem means the page follows the OS theme.
+    case themeSystem
 
     public static func parse(_ body: Any) -> ShellMessage? {
         guard let text = body as? String else {
@@ -43,6 +45,7 @@ public enum ShellMessage: Equatable {
         case "dblclick": return .doubleClick
         case "theme:dark": return .theme(dark: true)
         case "theme:light": return .theme(dark: false)
+        case "theme:system": return .themeSystem
         default: return nil
         }
     }
@@ -97,7 +100,11 @@ public func shellBootstrapScript(variant: AppVariant, lightsWidth: Int) -> Strin
       var sent = "";
       var report = function () {
         var t = d.getAttribute("data-theme");
-        if ((t === "dark" || t === "light") && t !== sent) { sent = t; post("theme:" + t); }
+        if (t !== "dark" && t !== "light") { return; }
+        var choice = null;
+        try { choice = localStorage.getItem("lana.theme"); } catch (e) {}
+        var m = (choice === "light" || choice === "dark") ? "theme:" + t : "theme:system";
+        if (m !== sent) { sent = m; post(m); }
       };
       new MutationObserver(report).observe(d, { attributes: true, attributeFilter: ["data-theme"] });
       report();
