@@ -162,7 +162,11 @@ func (s *Server) handleAgentOverview(w http.ResponseWriter, r *http.Request) {
 // (REQ-ROOM-010, REQ-ROOM-011).
 func (s *Server) buildOverview(ctx context.Context, backend Backend, room Agent, now time.Time) (overviewResponse, error) {
 	nowMS := now.UnixMilli()
-	row, err := s.roomRow(ctx, room, s.roomAgentMeta(ctx), s.roomWaiting(ctx), nowMS)
+	state, err := s.roomState(ctx, backend, room.Name)
+	if err != nil {
+		return overviewResponse{}, err
+	}
+	row, err := s.roomRow(ctx, room, s.roomAgentMeta(ctx), s.roomWaiting(ctx), state, nowMS)
 	if err != nil {
 		return overviewResponse{}, err
 	}

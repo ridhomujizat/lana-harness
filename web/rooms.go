@@ -88,6 +88,10 @@ type roomJSON struct {
 	Unread       int64            `json:"unread"`
 	Turns7d      int64            `json:"turns_7d"`
 	LastActiveAt int64            `json:"last_active_at"`
+	// ArchivedAt and ClearedAt are the room's stored state, 0 when unset
+	// (REQ-ARC-004).
+	ArchivedAt int64 `json:"archived_at"`
+	ClearedAt  int64 `json:"cleared_at"`
 }
 
 type roomsResponse struct {
@@ -121,6 +125,18 @@ type roomReadResponse struct {
 	ReadAt int64 `json:"read_at"`
 }
 
+// roomArchiveResponse is the answer of POST /v1/rooms/{name}/archive
+// (REQ-ARC-002).
+type roomArchiveResponse struct {
+	ArchivedAt int64 `json:"archived_at"`
+}
+
+// roomClearResponse is the answer of POST /v1/rooms/{name}/clear (REQ-ARC-003).
+type roomClearResponse struct {
+	ClearedAt int64 `json:"cleared_at"`
+	Previous  int64 `json:"previous"`
+}
+
 // openRequest is one open approval or question as the room presence needs it
 // (REQ-ROOM-006). SessionID is the session that opened the request; Agent is
 // the child-session tag when the request belongs to a descendant (empty
@@ -141,6 +157,8 @@ func (s *Server) registerRoomRoutes() {
 	s.Handle("GET /v1/rooms/{name}/segments", http.HandlerFunc(s.handleRoomSegments))
 	s.Handle("POST /v1/rooms/{name}/messages", http.HandlerFunc(s.handleRoomSend))
 	s.Handle("POST /v1/rooms/{name}/read", http.HandlerFunc(s.handleRoomRead))
+	s.Handle("POST /v1/rooms/{name}/archive", http.HandlerFunc(s.handleRoomArchive))
+	s.Handle("POST /v1/rooms/{name}/clear", http.HandlerFunc(s.handleRoomClear))
 }
 
 // handleListRooms serves API-ROOM-001 (REQ-ROOM-001, REQ-ROOM-005,
@@ -175,11 +193,17 @@ func (s *Server) handleRoomSegments(w http.ResponseWriter, r *http.Request) {
 		writeAPIError(w, http.StatusBadRequest, "invalid_query", err.Error())
 		return
 	}
+	state, err := s.roomState(r.Context(), backend, name)
+	if err != nil {
+		s.writeBackendError(w, "room segments", err)
+		return
+	}
 	sessions, err := backend.ListAgentSessions(r.Context(), core.SessionFilter{
 		Agent:           name,
 		TopLevelOnly:    true,
 		ExcludeChannels: []string{channelWorkflow},
 		Before:          before,
+		UpdatedAfter:    state.ClearedAt,
 		Limit:           limit + 1,
 	})
 	if err != nil {
@@ -259,12 +283,18 @@ func (s *Server) handleRoomSend(w http.ResponseWriter, r *http.Request) {
 		note = strings.TrimSpace(note + "\n" + core.DiscussRequestNote)
 	}
 
+	state, err := s.roomState(r.Context(), backend, name)
+	if err != nil {
+		s.writeBackendError(w, "room send", err)
+		return
+	}
+
 	// One create per room: the mutex guards "find or create the current web
 	// session" (design §Concurrency).
 	unlock := s.lockRoom(name)
 	defer unlock()
 
-	sessionID, created, err := s.roomWebSession(r.Context(), backend, room, body.NewTopic)
+	sessionID, created, err := s.roomWebSession(r.Context(), backend, room, body.NewTopic, state.ClearedAt)
 	if err != nil {
 		s.writeBackendError(w, "room send", err)
 		return
@@ -300,6 +330,107 @@ func (s *Server) handleRoomRead(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, roomReadResponse{ReadAt: readAt})
 }
 
+// mainAgentName is the chat that can never be archived (REQ-ARC-002).
+const mainAgentName = "lana"
+
+// handleRoomArchive serves POST /v1/rooms/{name}/archive (REQ-ARC-002).
+func (s *Server) handleRoomArchive(w http.ResponseWriter, r *http.Request) {
+	backend := s.backendOrError(w)
+	if backend == nil {
+		return
+	}
+	name := r.PathValue("name")
+	if !roomExists(backend, name) {
+		writeAPIError(w, http.StatusNotFound, "room_not_found", "room not found")
+		return
+	}
+	var body struct {
+		Archived any `json:"archived"`
+	}
+	if !decodeJSONObject(w, r, roomSendBody, &body) {
+		return
+	}
+	archived, ok := body.Archived.(bool)
+	if !ok {
+		writeAPIError(w, http.StatusBadRequest, "invalid_body", "archived must be a boolean")
+		return
+	}
+	if archived && name == mainAgentName {
+		writeAPIError(w, http.StatusConflict, "room_not_archivable", "the main agent cannot be archived")
+		return
+	}
+	at := int64(0)
+	if archived {
+		at = time.Now().UnixMilli()
+	}
+	if err := backend.SetRoomArchived(r.Context(), name, at); err != nil {
+		s.writeBackendError(w, "room archive", err)
+		return
+	}
+	writeJSON(w, http.StatusOK, roomArchiveResponse{ArchivedAt: at})
+}
+
+// handleRoomClear serves POST /v1/rooms/{name}/clear (REQ-ARC-003). An empty
+// body clears the room now; {"restore": n} undoes a clear.
+func (s *Server) handleRoomClear(w http.ResponseWriter, r *http.Request) {
+	backend := s.backendOrError(w)
+	if backend == nil {
+		return
+	}
+	name := r.PathValue("name")
+	if !roomExists(backend, name) {
+		writeAPIError(w, http.StatusNotFound, "room_not_found", "room not found")
+		return
+	}
+	var body struct {
+		Restore *int64 `json:"restore"`
+	}
+	if !decodeJSONObject(w, r, roomSendBody, &body) {
+		return
+	}
+	if body.Restore != nil {
+		state, err := s.roomState(r.Context(), backend, name)
+		if err != nil {
+			s.writeBackendError(w, "room clear", err)
+			return
+		}
+		restore := *body.Restore
+		if restore < 0 || restore > state.ClearedAt {
+			writeAPIError(w, http.StatusBadRequest, "invalid_restore", "restore must be between 0 and the current cleared_at")
+			return
+		}
+		previous, err := backend.SetRoomCleared(r.Context(), name, restore)
+		if err != nil {
+			s.writeBackendError(w, "room clear", err)
+			return
+		}
+		writeJSON(w, http.StatusOK, roomClearResponse{ClearedAt: restore, Previous: previous})
+		return
+	}
+	now := time.Now().UnixMilli()
+	previous, err := backend.SetRoomCleared(r.Context(), name, now)
+	if err != nil {
+		s.writeBackendError(w, "room clear", err)
+		return
+	}
+	// A clear also moves read_at forward to now (REQ-ARC-003).
+	if _, err := backend.SetRoomRead(r.Context(), name, now); err != nil {
+		s.writeBackendError(w, "room clear", err)
+		return
+	}
+	writeJSON(w, http.StatusOK, roomClearResponse{ClearedAt: now, Previous: previous})
+}
+
+// roomState reads one room's read, archive, and clear state (REQ-ARC-004). A
+// room with no stored row reads as the zero state.
+func (s *Server) roomState(ctx context.Context, backend Backend, name string) (core.RoomState, error) {
+	states, err := backend.RoomStates(ctx)
+	if err != nil {
+		return core.RoomState{}, err
+	}
+	return states[name], nil
+}
+
 // computeRooms builds one row per configured agent and team. The hub and the
 // list handler share it so the two cannot drift (API-ROOM-001).
 func (s *Server) computeRooms(ctx context.Context) ([]roomJSON, error) {
@@ -310,9 +441,14 @@ func (s *Server) computeRooms(ctx context.Context) ([]roomJSON, error) {
 	agents := s.backend.Agents()
 	meta := s.roomAgentMeta(ctx)
 	waiting := s.roomWaiting(ctx)
+	// One state read for the whole list; the stream shares it (REQ-ARC-004).
+	states, err := s.backend.RoomStates(ctx)
+	if err != nil {
+		return nil, err
+	}
 	rows := make([]roomJSON, 0, len(agents))
 	for _, agent := range agents {
-		row, err := s.roomRow(ctx, agent, meta, waiting, now)
+		row, err := s.roomRow(ctx, agent, meta, waiting, states[agent.Name], now)
 		if err != nil {
 			return nil, err
 		}
@@ -360,13 +496,15 @@ func (s *Server) roomAgentMeta(ctx context.Context) map[string]agentMeta {
 }
 
 // roomRow builds one API-ROOM-001 row.
-func (s *Server) roomRow(ctx context.Context, agent Agent, meta map[string]agentMeta, waiting map[string]presenceJSON, now int64) (roomJSON, error) {
+func (s *Server) roomRow(ctx context.Context, agent Agent, meta map[string]agentMeta, waiting map[string]presenceJSON, state core.RoomState, now int64) (roomJSON, error) {
 	row := roomJSON{
-		Name:    agent.Name,
-		Kind:    "agent",
-		Can:     nonNilStrings(agent.Can),
-		Members: []string{},
-		Color:   core.ResolveAgentColor(agent.Name, ""),
+		Name:       agent.Name,
+		Kind:       "agent",
+		Can:        nonNilStrings(agent.Can),
+		Members:    []string{},
+		Color:      core.ResolveAgentColor(agent.Name, ""),
+		ArchivedAt: state.ArchivedAt,
+		ClearedAt:  state.ClearedAt,
 	}
 	if agent.Kind == "team" {
 		// A team row shows the description as its title and the brand color
@@ -399,19 +537,24 @@ func (s *Server) roomRow(ctx context.Context, agent Agent, meta map[string]agent
 	}
 	if newest != nil {
 		row.LastActiveAt = newest.UpdatedAt
-		row.LastMessage = s.roomLastMessage(*newest, events)
+		// A message at or before the clear is no longer a preview
+		// (REQ-ARC-004). An uncleared room keeps every message.
+		if last := s.roomLastMessage(*newest, events); last != nil && (state.ClearedAt == 0 || last.At > state.ClearedAt) {
+			row.LastMessage = last
+		}
 	}
 
-	readAt, err := s.backend.RoomReadAt(ctx, agent.Name)
-	if err != nil {
-		return roomJSON{}, err
+	// Unread counts events after the later of the read mark and the clear
+	// (REQ-ARC-004). A room never read and never cleared counts only the last
+	// day, so old history does not show as hundreds of new messages.
+	base := state.ReadAt
+	if state.ClearedAt > base {
+		base = state.ClearedAt
 	}
-	if readAt == 0 {
-		// A room the owner never opened counts only the last day as unread,
-		// so old history does not show as hundreds of new messages.
-		readAt = now - (24 * time.Hour).Milliseconds()
+	if base == 0 {
+		base = now - (24 * time.Hour).Milliseconds()
 	}
-	unread, err := s.backend.CountAgentEvents(ctx, agent.Name, []string{core.KindAssistantMessage, core.KindQuestionAsked}, readAt, true)
+	unread, err := s.backend.CountAgentEvents(ctx, agent.Name, []string{core.KindAssistantMessage, core.KindQuestionAsked}, base, true)
 	if err != nil {
 		return roomJSON{}, err
 	}
@@ -733,8 +876,10 @@ func (s *Server) roomRunningLabel(ctx context.Context, info core.SessionInfo) (s
 }
 
 // roomWebSession finds the current web session of a room or creates one. The
-// second result is true when this call created the session (API-ROOM-003).
-func (s *Server) roomWebSession(ctx context.Context, backend Backend, room Agent, newTopic bool) (string, bool, error) {
+// second result is true when this call created the session (API-ROOM-003). A
+// session created at or before clearedAt is not reused, so the agent answers
+// the next message with an empty context (REQ-ARC-006).
+func (s *Server) roomWebSession(ctx context.Context, backend Backend, room Agent, newTopic bool, clearedAt int64) (string, bool, error) {
 	if !newTopic {
 		sessions, err := backend.ListAgentSessions(ctx, core.SessionFilter{
 			Agent:        room.Name,
@@ -746,7 +891,7 @@ func (s *Server) roomWebSession(ctx context.Context, backend Backend, room Agent
 		if err != nil {
 			return "", false, err
 		}
-		if len(sessions) > 0 {
+		if len(sessions) > 0 && (clearedAt == 0 || sessions[0].CreatedAt > clearedAt) {
 			return sessions[0].ID, false, nil
 		}
 	}

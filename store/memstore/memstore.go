@@ -435,6 +435,9 @@ func (s *Store) List(ctx context.Context, filter core.SessionFilter) ([]core.Ses
 		if filter.Before > 0 && info.UpdatedAt >= filter.Before {
 			continue
 		}
+		if filter.UpdatedAfter > 0 && info.UpdatedAt <= filter.UpdatedAfter {
+			continue
+		}
 		out = append(out, info)
 	}
 	s.mu.Unlock()
