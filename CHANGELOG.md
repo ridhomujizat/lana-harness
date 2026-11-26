@@ -7,6 +7,30 @@ but their config keys, events, and tools may still change between betas.
 
 ## [Unreleased]
 
+## [0.6.0-beta.12] - 2026-11-26
+
+### Added
+
+- Antigravity: Google's Antigravity CLI (`agy`) runs agent turns like Claude Code, with several signed-in Google accounts, sign-in with a code from the Router, usage windows per model group, and lana's tools over MCP.
+- Router: accounts of one provider form a failover pool. When an account hits its limit or cools down, the next account in the order answers; API keys of a provider pool the same way.
+- Router: the OpenAI-compatible endpoint (`/router/v1/chat/completions`, `/router/v1/models`) serves Claude Code and Antigravity accounts as `<account>/<model>`, text only. Each call runs the official CLI headless; lana never reads their logins.
+- Avatars, chat titles, and knowledge passes can run on Claude Code or Antigravity when that is the agent's model, and a workflow guardian's background turns run in its own runtime.
+- Agents: the model picker lists each Claude Code and Antigravity model once; an Account choice under it picks the account when more than one offers the model, and every model has its own effort levels beside the picker.
+- Workbench: the Accounts popup lists the Router's Claude Code and Antigravity accounts, grouped by provider, searchable, with usage per window, and opens a pane on the picked account. Claude Code accounts share history, settings, skills, agents, and commands with `~/.claude` (so `/resume` lists every conversation); Antigravity accounts share conversations and settings with `~/.gemini` and skip onboarding.
+- Workbench: the Lana hooks install for Antigravity too.
+
+### Changed
+
+- Router: the Claude Code and Antigravity pages merge the account order and the account cards into one list with every usage window, named by label, then email, then account name; Quota cards use the same names.
+- The claude-swap "Claude accounts" plugin is retired; the Router manages the accounts.
+- Compaction and memory capture still use the background model, since they send tools the CLIs do not serve.
+
+### Fixed
+
+- Chat: the Learned line is clipped to one line and expands on click.
+- Workbench: the panel narrows instead of running past the page edge, the Following notice no longer pushes out the close button, and the worktree picker stays inside a narrow panel.
+- Router: the Command Code logo shows again.
+
 ## [0.6.0-beta.11] - 2026-11-25
 
 ### Added
