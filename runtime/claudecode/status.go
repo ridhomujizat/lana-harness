@@ -5,8 +5,10 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"regexp"
 	"strconv"
 	"strings"
@@ -110,12 +112,81 @@ type authStatus struct {
 	PlanTier         string `json:"planTier"`
 }
 
-// plan is subscriptionType, else planTier.
+// plan is planTier when it is more specific than subscriptionType ("max_20x"
+// over "max"), else subscriptionType, else planTier.
 func (a authStatus) plan() string {
-	if a.SubscriptionType != "" {
-		return a.SubscriptionType
+	if a.PlanTier != "" && strings.HasPrefix(a.PlanTier, a.SubscriptionType) {
+		return a.PlanTier
 	}
-	return a.PlanTier
+	return a.SubscriptionType
+}
+
+// accountPlan is the plan name Claude Code itself shows: the server's
+// display name cached in the global config file ("Ultra"), when the account
+// is logged in and that file belongs to the same login, else auth.plan().
+func accountPlan(auth authStatus, env []string) string {
+	if !auth.LoggedIn {
+		return auth.plan()
+	}
+	if name, email := planDisplayName(env); name != "" && (email == "" || strings.EqualFold(email, auth.Email)) {
+		return name
+	}
+	return auth.plan()
+}
+
+// maxGlobalConfig caps how much of the global config file is read.
+const maxGlobalConfig = 8 << 20
+
+// planDisplayName reads oauthAccount.planDisplayName and emailAddress from
+// Claude Code's global config file: $CLAUDE_CONFIG_DIR/.claude.json, else
+// $HOME/.claude.json, from env. Only those two fields are decoded; any error
+// gives empty values.
+func planDisplayName(env []string) (name, email string) {
+	path := globalConfigPath(env)
+	if path == "" {
+		return "", ""
+	}
+	f, err := os.Open(path)
+	if err != nil {
+		return "", ""
+	}
+	defer func() { _ = f.Close() }()
+	var cfg struct {
+		OAuthAccount struct {
+			PlanDisplayName string `json:"planDisplayName"`
+			EmailAddress    string `json:"emailAddress"`
+		} `json:"oauthAccount"`
+	}
+	if err := json.NewDecoder(io.LimitReader(f, maxGlobalConfig)).Decode(&cfg); err != nil {
+		return "", ""
+	}
+	return strings.TrimSpace(cfg.OAuthAccount.PlanDisplayName), strings.TrimSpace(cfg.OAuthAccount.EmailAddress)
+}
+
+// globalConfigPath is Claude Code's global config file for env.
+func globalConfigPath(env []string) string {
+	if dir := lastEnv(env, configDirEnv); dir != "" {
+		return filepath.Join(dir, ".claude.json")
+	}
+	home := lastEnv(env, "HOME")
+	if home == "" {
+		h, err := os.UserHomeDir()
+		if err != nil {
+			return ""
+		}
+		home = h
+	}
+	return filepath.Join(home, ".claude.json")
+}
+
+// lastEnv is the last value of name in env, as exec uses it.
+func lastEnv(env []string, name string) string {
+	for i := len(env) - 1; i >= 0; i-- {
+		if k, v, ok := strings.Cut(env[i], "="); ok && k == name {
+			return v
+		}
+	}
+	return ""
 }
 
 // parseAuthStatus reads `claude auth status --json` output. The command exits
@@ -262,7 +333,7 @@ func (r *Runtime) probeAccount(ctx context.Context, account core.RuntimeAccount)
 		return st
 	}
 	st.LoggedIn, st.AuthMethod = auth.LoggedIn, auth.AuthMethod
-	st.Email, st.Plan = truncate(auth.Email, 200), truncate(auth.plan(), 80)
+	st.Email, st.Plan = truncate(auth.Email, 200), truncate(accountPlan(auth, env), 80)
 	return st
 }
 
