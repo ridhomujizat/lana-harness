@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 
-import { errorMessage } from "../api/client";
+import { ApiError, errorMessage } from "../api/client";
 import {
   getAntigravity,
   getClaudeAgent,
@@ -12,16 +12,19 @@ import {
   type PlanWindow,
 } from "../api/router";
 import {
+  createWorkbenchSession,
   getAgentHook,
   getWorkbenchClaudeAccount,
   setAgentHook,
   setWorkbenchClaudeAccount,
-  type AgentHookFolder,
+  switchWorkbenchAccount,
   type AgentHookState,
   type WorkbenchClaudeAccount,
+  type WorkbenchSession,
 } from "../api/workbench";
 import { Popover } from "../ui/gr8r";
 import { Ic } from "../ui/icons";
+import { AGENT_HOOK_SETTINGS_HREF, AGENT_HOOK_TITLE, agentHookSummary } from "./agent-hook-settings";
 import { AgentLogo } from "./agent-logo";
 import { planLabel } from "./router/limits";
 
@@ -29,22 +32,105 @@ import { planLabel } from "./router/limits";
    grouped by provider, each account in its own folder, so no login is ever
    copied in or out of the Keychain. Adding, removing, renaming and signing in
    live in the Router.
-   - Claude Code (GET /v1/router/claude-agent): New tab, Beside (--continue),
+   - Claude Code (GET /v1/router/claude-agent): New tab, Switch here (spec 82:
+     the focused pane's conversation continues on the account, in place),
      Sign in (login_command, signed out only), Use for new terminals (the
      Workbench default account, REQ-WRA-005).
-   - Antigravity (GET /v1/router/antigravity): New tab and Beside run `agy`
-     with the account's HOME; sign-in is a link + code flow, so a signed-out
+   - Antigravity (GET /v1/router/antigravity): New tab runs `agy` with the
+     account's HOME, and Switch here moves the focused pane's conversation to
+     the account (spec 83); sign-in is a link + code flow, so a signed-out
      account links to the Router's Antigravity page. There is no default:
      HOME for a whole shell would break it.
    A search box filters both groups; each group collapses (remembered). */
 
+/* Kept here for the callers that import it with the popup. */
+export { agentHookCount } from "./agent-hook-settings";
+
 export interface AccountActions {
-  /* Opens `argv` in a new tab of the current space, in the focused folder.
-     Without a title the tab and its session follow the terminal's window
-     title, so a Claude Code tab shows its task or /rename name. */
-  newTab: (argv: string[], title?: string) => void;
-  /* Opens `argv` beside the focused pane (a new tab when there is none). */
-  beside: (argv: string[]) => void;
+  /* Opens a shell in a new tab of the current space, in the focused folder,
+     and types `line` into it. The pane stays the shell, so exiting the agent
+     returns to the prompt instead of ending the pane. Without a title the tab
+     and its session follow the terminal's window title, so a Claude Code tab
+     shows its task or /rename name. claudeAccount names the Claude Code
+     account the line launches, so the daemon mirrors the built-in account's
+     MCP servers into it first (spec 81). agyAccount names the Antigravity
+     account, so the daemon relinks its mcp_config.json first (spec 83). */
+  newTab: (line: string, title?: string, claudeAccount?: string, agyAccount?: string) => void;
+  /* The focused pane's session, which Switch here acts on; null or absent
+     when the space has no pane. */
+  focused?: WorkbenchSession | null;
+}
+
+/* Spec 82 REQ-WAS-001 and spec 83 REQ-WAG-003: why Switch here is off. */
+export const SWITCH_NO_CONVERSATION = "No Claude conversation in this pane";
+export const SWITCH_NO_AGY_CONVERSATION = "No Antigravity conversation in this pane";
+export const SWITCH_NOT_SWITCHABLE = "This pane was opened before account switching; use New tab";
+export const SWITCH_SAME_ACCOUNT = "This pane already runs on this account";
+
+export type SwitchAgent = "claude" | "agy";
+
+/* Why Switch here is off for an account of `agent` (its folder: the Claude
+   config dir or the agy HOME, "" for none) on the focused pane, "" when it is
+   on. An older core reports nothing about switching: a pane running the
+   agent is then let through, and the daemon answers core_outdated, after
+   which the popup offers New tab. */
+export function paneSwitchBlocked(
+  focused: WorkbenchSession | null | undefined,
+  agent: SwitchAgent,
+  builtin: boolean,
+  folder: string,
+): string {
+  const none = agent === "agy" ? SWITCH_NO_AGY_CONVERSATION : SWITCH_NO_CONVERSATION;
+  if (!focused) return none;
+  if (focused.account_switch === undefined) {
+    return focused.agent === agent || focused.resumed_agent === agent ? "" : none;
+  }
+  if (focused.account_switch === "no_conversation") return none;
+  if ((focused.conversation_agent || "claude") !== agent) return none;
+  if (focused.account_switch === "not_switchable") return SWITCH_NOT_SWITCHABLE;
+  const dir = focused.agent_config_dir || "";
+  const same = builtin ? dir === "" || dir === folder : dir === folder;
+  return same ? SWITCH_SAME_ACCOUNT : "";
+}
+
+/* Switch here for a Claude Code account (spec 82). */
+export function switchBlocked(focused: WorkbenchSession | null | undefined, a: ClaudeAccount): string {
+  return paneSwitchBlocked(focused, "claude", a.builtin, a.config_dir);
+}
+
+/* Switch here for an Antigravity account (spec 83). */
+export function agySwitchBlocked(focused: WorkbenchSession | null | undefined, a: AntigravityAccount): string {
+  return paneSwitchBlocked(focused, "agy", a.builtin, a.home);
+}
+
+/* One Switch here target: the account and the line New tab would run. */
+interface SwitchTarget {
+  agent: SwitchAgent;
+  name: string;
+  label: string;
+  line: string;
+}
+
+/* Starts the pane an account action opens: the owner's shell in dir (no
+   command), with `line` typed into it once it has printed. The pane stays the
+   shell, so exiting the agent returns to the prompt instead of showing
+   "Process exited" (spec 77 revision 7). A Claude Code account's name goes
+   along as claude_account (spec 81 REQ-SMC-005), an Antigravity account's as
+   agy_account (spec 83 REQ-WAG-004). */
+export function createAccountSession(
+  dir: string,
+  line: string,
+  title?: string,
+  claudeAccount?: string,
+  agyAccount?: string,
+): Promise<WorkbenchSession> {
+  return createWorkbenchSession({
+    dir: dir || undefined,
+    title,
+    input: line,
+    claude_account: claudeAccount || undefined,
+    agy_account: agyAccount || undefined,
+  });
 }
 
 const REFRESH_MS = 120_000;
@@ -134,12 +220,29 @@ export function agyWindowLabel(w: AntigravityWindow): string {
   return [w.group, span].filter(Boolean).join(" ");
 }
 
-/* The command a pane runs for an account (REQ-WRA-004): the account's own
-   config folder, or neither variable for the built-in account. */
-export function accountArgv(a: ClaudeAccount): string[] {
-  const binary = a.binary || "claude";
-  if (a.builtin) return ["env", "-u", "CLAUDE_CONFIG_DIR", "-u", "CLAUDE_SECURESTORAGE_CONFIG_DIR", binary];
-  return ["env", "CLAUDE_CONFIG_DIR=" + a.config_dir, "CLAUDE_SECURESTORAGE_CONFIG_DIR=" + a.config_dir, binary];
+/* POSIX single-quotes a value for a shell line: 'it'\''s' for it's. */
+export function shellQuote(value: string): string {
+  return "'" + value.replace(/'/g, "'\\''") + "'";
+}
+
+/* A program word: left bare when it is plain, quoted otherwise. */
+function shellWord(value: string): string {
+  return /^[A-Za-z0-9_./-]+$/.test(value) ? value : shellQuote(value);
+}
+
+/* KEY='value' for `env`. */
+function envAssign(kv: string): string {
+  const i = kv.indexOf("=");
+  return kv.slice(0, i) + "=" + shellQuote(kv.slice(i + 1));
+}
+
+/* The line a pane's shell runs for an account (REQ-WRA-004, revision 7): the
+   account's own config folder, or neither variable for the built-in account. */
+export function accountLine(a: ClaudeAccount): string {
+  const binary = shellWord(a.binary || "claude");
+  if (a.builtin) return "env -u CLAUDE_CONFIG_DIR -u CLAUDE_SECURESTORAGE_CONFIG_DIR " + binary;
+  const dir = shellQuote(a.config_dir);
+  return "env CLAUDE_CONFIG_DIR=" + dir + " CLAUDE_SECURESTORAGE_CONFIG_DIR=" + dir + " " + binary;
 }
 
 /* Spec 77 revision 4: set for every agy of an added account, like the daemon
@@ -148,15 +251,15 @@ export function accountArgv(a: ClaudeAccount): string[] {
    an account HOME that has no login keychain. */
 export const AGY_FILE_TOKEN_ENV = "SSH_CONNECTION=127.0.0.1 0 127.0.0.1 0";
 
-/* The command a pane runs for an Antigravity account: the account's own HOME
-   (where agy keeps its login), or plain agy for the built-in account. */
-export function agyArgv(a: AntigravityAccount, statusBinary = ""): string[] {
-  const binary = a.binary || statusBinary || "agy";
-  if (a.builtin) return [binary];
+/* The line a pane's shell runs for an Antigravity account: the account's own
+   HOME (where agy keeps its login), or plain agy for the built-in account. */
+export function agyLine(a: AntigravityAccount, statusBinary = ""): string {
+  const binary = shellWord(a.binary || statusBinary || "agy");
+  if (a.builtin) return binary;
   /* Without its own HOME an added account would run on the owner's own
      login, so it gets no command (its buttons are off). */
-  if (!a.home) return [];
-  return ["env", "HOME=" + a.home, AGY_FILE_TOKEN_ENV, binary];
+  if (!a.home) return "";
+  return "env HOME=" + shellQuote(a.home) + " " + envAssign(AGY_FILE_TOKEN_ENV) + " " + binary;
 }
 
 function cooling(a: { cooling_until?: string | null }, now = Date.now()): boolean {
@@ -302,7 +405,14 @@ export function AccountsPanel({
   const [busy, setBusy] = useState<string | null>(null);
   const [query, setQuery] = useState("");
   const [collapsed, setCollapsed] = useState(readCollapsed);
+  /* Spec 82: the account being switched to, the one whose "Claude is
+     working" question is open, and a refused switch's message. */
+  /* Keyed "<agent>:<account>". */
+  const [switching, setSwitching] = useState<string | null>(null);
+  const [confirmSwitch, setConfirmSwitch] = useState<string | null>(null);
+  const [switchNote, setSwitchNote] = useState<{ key: string; message: string; outdated: boolean } | null>(null);
   const searchRef = useRef<HTMLInputElement>(null);
+  const focused = actions.focused ?? null;
 
   /* Both providers in parallel; a failure stays inside its own group. */
   const load = useCallback(() => {
@@ -410,6 +520,80 @@ export function AccountsPanel({
       .finally(() => setBusy(null));
   };
 
+  /* Spec 82 REQ-WAS-002, spec 83 REQ-WAG-003: the daemon stops the pane's
+     agent and resumes its conversation on the account; a refusal stays in the
+     row, and an older core's "restart the Workbench" comes with New tab. */
+  const keyOf = (t: SwitchTarget) => t.agent + ":" + t.name;
+  const switchTo = (t: SwitchTarget) => {
+    if (!focused) return;
+    setConfirmSwitch(null);
+    setSwitchNote(null);
+    setSwitching(keyOf(t));
+    switchWorkbenchAccount(focused.id, t.name, t.agent)
+      .then(() => onClose())
+      .catch((err) =>
+        setSwitchNote({
+          key: keyOf(t),
+          message: errorMessage(err),
+          outdated: err instanceof ApiError && err.code === "core_outdated",
+        }),
+      )
+      .finally(() => setSwitching(null));
+  };
+  /* A running turn is stopped only after the owner says so. */
+  const askSwitch = (t: SwitchTarget) => {
+    setSwitchNote(null);
+    if (focused?.state === "working") setConfirmSwitch(keyOf(t));
+    else switchTo(t);
+  };
+  const openNewTab = (t: SwitchTarget) => {
+    if (t.agent === "agy") actions.newTab(t.line, undefined, undefined, t.name);
+    else actions.newTab(t.line, undefined, t.name);
+    onClose();
+  };
+  const switchButton = (t: SwitchTarget, blocked: string) => (
+    <button
+      type="button"
+      className="wb-acc-act"
+      disabled={Boolean(blocked) || switching !== null}
+      title={blocked || "Continue this pane's conversation on " + t.label}
+      onClick={() => askSwitch(t)}
+    >
+      <Ic name="arrow-left-right" size={13} /> {switching === keyOf(t) ? "Switching…" : "Switch here"}
+    </button>
+  );
+  const switchExtras = (t: SwitchTarget) => (
+    <>
+      {confirmSwitch === keyOf(t) ? (
+        <div className="wb-acc-confirm" role="group" aria-label={"Switch to " + t.label}>
+          <p>
+            {t.agent === "agy" ? "Antigravity" : "Claude"} is working in this pane. Stop it and switch to {t.label}?
+          </p>
+          <div className="wb-acc-actions">
+            <button type="button" className="wb-acc-act is-main" onClick={() => switchTo(t)}>
+              Switch
+            </button>
+            <button type="button" className="wb-acc-act" onClick={() => setConfirmSwitch(null)}>
+              Cancel
+            </button>
+          </div>
+        </div>
+      ) : null}
+      {switchNote?.key === keyOf(t) ? (
+        <div className="wb-acc-switch-note" role="alert">
+          <p className="wb-acc-error">{switchNote.message}</p>
+          {switchNote.outdated && t.line ? (
+            <div className="wb-acc-actions">
+              <button type="button" className="wb-acc-act" onClick={() => openNewTab(t)}>
+                <Ic name="square-terminal" size={13} /> Open in a new tab
+              </button>
+            </div>
+          ) : null}
+        </div>
+      ) : null}
+    </>
+  );
+
   return (
     <div className="wb-acc">
       <div className="wb-acc-top-bar">
@@ -482,6 +666,7 @@ export function AccountsPanel({
               <ul className="wb-acc-list" aria-label="Claude Code accounts">
                 {claudeShown.map((a) => {
                   const isDefault = a.name === defaultName;
+                  const target: SwitchTarget = { agent: "claude", name: a.name, label: a.display_name, line: accountLine(a) };
                   const sub = [a.email, a.plan ? planLabel(a.plan) : ""].filter(Boolean).join(" · ");
                   return (
                     <li key={a.name} className={"wb-acc-item" + (isDefault ? " is-active" : "")}>
@@ -517,7 +702,7 @@ export function AccountsPanel({
                             type="button"
                             className="wb-acc-act is-main"
                             onClick={() => {
-                              actions.newTab(["sh", "-c", a.login_command], "Sign in " + a.display_name);
+                              actions.newTab(a.login_command, "Sign in " + a.display_name, a.name);
                               onClose();
                             }}
                           >
@@ -528,28 +713,20 @@ export function AccountsPanel({
                           type="button"
                           className="wb-acc-act"
                           onClick={() => {
-                            actions.newTab(accountArgv(a));
+                            actions.newTab(accountLine(a), undefined, a.name);
                             onClose();
                           }}
                         >
                           <Ic name="square-terminal" size={13} /> New tab
                         </button>
-                        <button
-                          type="button"
-                          className="wb-acc-act"
-                          onClick={() => {
-                            actions.beside([...accountArgv(a), "--continue"]);
-                            onClose();
-                          }}
-                        >
-                          <Ic name="columns-2" size={13} /> Beside
-                        </button>
+                        {switchButton(target, switchBlocked(focused, a))}
                         {canSetDefault && !isDefault ? (
                           <button type="button" className="wb-acc-act is-quiet" disabled={busy === a.name} onClick={() => makeDefault(a)}>
                             <Ic name="check" size={13} /> Use for new terminals
                           </button>
                         ) : null}
                       </div>
+                      {switchExtras(target)}
                     </li>
                   );
                 })}
@@ -580,7 +757,8 @@ export function AccountsPanel({
             {agyShown.length ? (
               <ul className="wb-acc-list" aria-label="Antigravity accounts">
                 {agyShown.map((a) => {
-                  const argv = agyArgv(a, agy?.binary);
+                  const line = agyLine(a, agy?.binary);
+                  const target: SwitchTarget = { agent: "agy", name: a.name, label: a.display_name, line };
                   /* The display name, then email · tier; the email is left
                      out when it already is the display name. */
                   const sub = [a.email && a.email !== a.display_name ? a.email : "", a.tier].filter(Boolean).join(" · ");
@@ -629,26 +807,14 @@ export function AccountsPanel({
                         <button
                           type="button"
                           className="wb-acc-act"
-                          disabled={argv.length === 0}
-                          onClick={() => {
-                            actions.newTab(argv);
-                            onClose();
-                          }}
+                          disabled={!line}
+                          onClick={() => openNewTab(target)}
                         >
                           <Ic name="square-terminal" size={13} /> New tab
                         </button>
-                        <button
-                          type="button"
-                          className="wb-acc-act"
-                          disabled={argv.length === 0}
-                          onClick={() => {
-                            actions.beside([...argv, "--continue"]);
-                            onClose();
-                          }}
-                        >
-                          <Ic name="columns-2" size={13} /> Beside
-                        </button>
+                        {switchButton(target, line ? agySwitchBlocked(focused, a) : SWITCH_NO_AGY_CONVERSATION)}
                       </div>
+                      {switchExtras(target)}
                     </li>
                   );
                 })}
@@ -657,23 +823,8 @@ export function AccountsPanel({
           </Group>
         ) : null}
       </div>
-      <AgentHookRow />
+      <AgentHookLink onClose={onClose} />
     </div>
-  );
-}
-
-const AGENT_HOOK_TITLE = "Connect Claude Code and Antigravity to the Workbench";
-
-/* Spec 77 REQ-WRA-009: "Installed in 3 of 3 folders (Claude 2, Antigravity 1)".
-   A kind with no folder is left out of the brackets. */
-export function agentHookCount(folders: AgentHookFolder[]): string {
-  const installed = folders.filter((f) => f.installed).length;
-  const agy = folders.filter((f) => f.kind === "antigravity").length;
-  const parts: string[] = [];
-  if (folders.length - agy > 0) parts.push("Claude " + (folders.length - agy));
-  if (agy > 0) parts.push("Antigravity " + agy);
-  return (
-    "Installed in " + installed + " of " + folders.length + " folders" + (parts.length ? " (" + parts.join(", ") + ")" : "") + "."
   );
 }
 
@@ -752,13 +903,11 @@ export function AgentHookNotice() {
   );
 }
 
-/* Spec 69 REQ-WA-014: the switch for the Claude Code hooks (SessionStart and
-   PreToolUse pre-edit) that tell an agent it runs in a Workbench pane and
-   report the worktree its edits land in. */
-function AgentHookRow() {
+/* The popup's footer: one line with the hook state, linking to Settings >
+   General, where the switch lives (spec 77 REQ-WRA-009). Nothing shows while
+   the state is unknown. */
+function AgentHookLink({ onClose }: { onClose: () => void }) {
   const [state, setState] = useState<AgentHookState | null>(null);
-  const [busy, setBusy] = useState(false);
-  const [error, setError] = useState("");
   useEffect(() => {
     let cancelled = false;
     getAgentHook()
@@ -769,39 +918,13 @@ function AgentHookRow() {
     };
   }, []);
   if (!state) return null;
-  const broken = state.folders.filter((f) => f.error);
   return (
     <div className="wb-acc-hook">
-      <button
-        type="button"
-        role="switch"
-        aria-checked={state.enabled}
-        className="wb-acc-hook-row"
-        disabled={busy}
-        onClick={() => {
-          setBusy(true);
-          setError("");
-          setAgentHook(!state.enabled)
-            .then(setState)
-            .catch((err) => setError(errorMessage(err)))
-            .finally(() => setBusy(false));
-        }}
-      >
-        <span className="wb-acc-hook-text">
-          <b>{AGENT_HOOK_TITLE}</b>
-          <small>
-            Lana's hooks in Claude Code and Antigravity, so the Workbench can follow what they work on.
-            {state.enabled ? " " + agentHookCount(state.folders) : ""}
-          </small>
-        </span>
-        <span className={"wbg-switch" + (state.enabled ? " is-on" : "")} />
-      </button>
-      {broken.map((f) => (
-        <p key={f.dir} className="wb-acc-error">
-          {f.dir}: {f.error}
-        </p>
-      ))}
-      {error ? <p className="wb-acc-error">{error}</p> : null}
+      <a className="wb-acc-hook-link" href={AGENT_HOOK_SETTINGS_HREF} title={AGENT_HOOK_TITLE} onClick={onClose}>
+        <Ic name="plug" size={13} />
+        <span>{agentHookSummary(state)}</span>
+        <Ic name="arrow-up-right" size={13} />
+      </a>
     </div>
   );
 }

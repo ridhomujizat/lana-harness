@@ -1,10 +1,12 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { fireEvent, render, screen } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { ApiError } from "../api/client";
 import { changePassword } from "../api/auth";
 import type { DaemonInfo } from "../api/daemon";
 import type { GetConfigResponse } from "../api/settings";
 import * as settingsApi from "../api/settings";
+import * as workbenchApi from "../api/workbench";
+import type { AgentHookState } from "../api/workbench";
 import { SettingsGeneralPage } from "./settings-general";
 
 /* Settings > General loads the daemon, the config, and the browser sessions,
@@ -36,6 +38,11 @@ vi.mock("../api/settings", async (importOriginal) => {
     revokeOtherBrowsers: vi.fn(),
     saveWebAddress: vi.fn(),
   };
+});
+
+vi.mock("../api/workbench", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("../api/workbench")>();
+  return { ...actual, getAgentHook: vi.fn(), setAgentHook: vi.fn() };
 });
 
 const mockedChangePassword = vi.mocked(changePassword);
@@ -97,6 +104,7 @@ beforeEach(() => {
   vi.mocked(settingsApi.getDaemon).mockResolvedValue(daemon);
   vi.mocked(settingsApi.getConfig).mockResolvedValue(config);
   vi.mocked(settingsApi.listBrowserSessions).mockResolvedValue({ sessions: [] });
+  vi.mocked(workbenchApi.getAgentHook).mockResolvedValue(hookState({}));
 });
 
 describe("settings general change password", () => {
@@ -154,5 +162,63 @@ describe("settings general change password", () => {
       await screen.findByText("The two passwords do not match.")
     ).toBeTruthy();
     expect(mockedChangePassword).not.toHaveBeenCalled();
+  });
+});
+
+const claudeDir = { dir: "/Users/me/.claude", account: "claude-code", kind: "claude" as const, installed: true };
+const agyDir = { dir: "/Users/me/.gemini/config", account: "antigravity", kind: "antigravity" as const, installed: true };
+
+function hookState(over: Partial<AgentHookState>): AgentHookState {
+  return { enabled: true, state: "on", needs_install: false, folders: [claudeDir, agyDir], ...over };
+}
+
+function workbenchSection(): HTMLElement {
+  return screen.getByRole("heading", { name: "Workbench" }).closest("section") as HTMLElement;
+}
+
+/* Spec 77 REQ-WRA-009: the Workbench hook switch lives in Settings > General. */
+describe("settings general workbench hooks", () => {
+  it("shows the switch with the folder count and no Install when every folder has the hooks", async () => {
+    renderGeneral();
+    const toggle = (await screen.findByRole("checkbox", {
+      name: "Connect Claude Code and Antigravity to the Workbench",
+    })) as HTMLInputElement;
+    expect(toggle.checked).toBe(true);
+    const section = workbenchSection();
+    expect(section.textContent).toContain("Installed in 2 of 2 folders (Claude 1, Antigravity 1).");
+    expect(within(section).queryByRole("button", { name: "Install" })).toBeNull();
+  });
+
+  it("turns the hooks off from the switch", async () => {
+    vi.mocked(workbenchApi.setAgentHook).mockResolvedValue(hookState({ enabled: false, state: "off" }));
+    renderGeneral();
+    const toggle = (await screen.findByRole("checkbox", {
+      name: "Connect Claude Code and Antigravity to the Workbench",
+    })) as HTMLInputElement;
+    fireEvent.click(toggle);
+    expect(workbenchApi.setAgentHook).toHaveBeenCalledWith(false);
+    await waitFor(() => expect(toggle.checked).toBe(false));
+    expect(workbenchSection().textContent).not.toContain("Installed in");
+  });
+
+  it("offers Install while a folder lacks the hooks, even after the notice was dismissed", async () => {
+    vi.mocked(workbenchApi.getAgentHook).mockResolvedValue(
+      hookState({ enabled: false, state: "off", needs_install: true, folders: [{ ...claudeDir, installed: false }] }),
+    );
+    vi.mocked(workbenchApi.setAgentHook).mockResolvedValue(
+      hookState({ needs_install: true, folders: [{ ...claudeDir, installed: false, error: "permission denied" }] }),
+    );
+    renderGeneral();
+    await screen.findByRole("heading", { name: "Workbench" });
+    fireEvent.click(await within(workbenchSection()).findByRole("button", { name: "Install" }));
+    expect(workbenchApi.setAgentHook).toHaveBeenCalledWith(true);
+    expect(await screen.findByText("Some agent folders could not be updated")).toBeTruthy();
+    expect(screen.getByText("/Users/me/.claude: permission denied")).toBeTruthy();
+  });
+
+  it("shows why the hooks could not be read", async () => {
+    vi.mocked(workbenchApi.getAgentHook).mockRejectedValue(new ApiError(503, "unavailable", "hooks unavailable"));
+    renderGeneral();
+    expect(await screen.findByText("hooks unavailable")).toBeTruthy();
   });
 });

@@ -13,8 +13,10 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"path/filepath"
 	"strconv"
+	"strings"
 	"time"
 )
 
@@ -125,6 +127,20 @@ type Session struct {
 	// report store, and both are additive to protocol version 1.
 	WorkDir   string     `json:"work_dir,omitempty"`
 	WorkDirAt *time.Time `json:"work_dir_at,omitempty"`
+	// AccountSwitch tells whether the pane's Claude Code conversation can be
+	// switched to another account in place (spec 82 REQ-WAS-001):
+	// SwitchReady, or the code a switch would be refused with
+	// (CodeNoConversation, CodeNotSwitchable). ConversationID is the
+	// validated Claude Code conversation id the switch resumes and
+	// AgentConfigDir the claude config dir it runs under, "" for the built-in
+	// account. A core without FeatureSwitchAccount sends none of them; all
+	// three are additive to protocol version 1.
+	// ConversationAgent is the agent of that conversation, "claude" or "agy"
+	// (spec 83); AgentConfigDir is an agy pane's account HOME.
+	AccountSwitch     string `json:"account_switch,omitempty"`
+	ConversationAgent string `json:"conversation_agent,omitempty"`
+	ConversationID    string `json:"conversation_id,omitempty"`
+	AgentConfigDir    string `json:"agent_config_dir,omitempty"`
 }
 
 // Event is one line of a subscription stream (REQ-WB-030): what happened, and
@@ -144,6 +160,28 @@ type CreateOptions struct {
 	Rows    int               `json:"rows,omitempty"`
 	Title   string            `json:"title,omitempty"`
 	Labels  map[string]string `json:"labels,omitempty"`
+	// Input is one line typed into a new shell session, followed by a carriage
+	// return, once the shell has printed (the way a restore types its resume
+	// line). The pane stays the shell, so the program the line starts returns
+	// to the prompt when it ends. It applies only when Command is empty or a
+	// shell, is a single line of at most MaxCreateInput bytes, and is never
+	// persisted: a restore brings the shell back without typing it again.
+	Input string `json:"input,omitempty"`
+}
+
+// MaxCreateInput is the longest CreateOptions.Input the core accepts.
+const MaxCreateInput = 4096
+
+// ValidateCreateInput reports why input cannot be a CreateOptions.Input: it
+// holds a line break or is longer than MaxCreateInput.
+func ValidateCreateInput(input string) error {
+	if strings.ContainsAny(input, "\r\n") {
+		return errors.New("input must be a single line")
+	}
+	if len(input) > MaxCreateInput {
+		return fmt.Errorf("input is longer than %d bytes", MaxCreateInput)
+	}
+	return nil
 }
 
 // Hello is the core's answer to "hello".
@@ -151,6 +189,89 @@ type Hello struct {
 	Version int       `json:"version"`
 	PID     int       `json:"pid"`
 	Started time.Time `json:"started"`
+	// Features names what this core supports beyond protocol version 1. A
+	// core keeps running across app upgrades until it is empty, so a client
+	// asks before relying on a newer field; an older core sends none.
+	Features []string `json:"features,omitempty"`
+}
+
+// FeatureCreateInput is the Hello feature of a core that types
+// CreateOptions.Input into a new shell. An older core decodes the create
+// without the field and drops it.
+const FeatureCreateInput = "create_input"
+
+// FeatureSwitchAccount is the Hello feature of a core that serves the
+// "switch_account" op (spec 82 REQ-WAS-002). An older core answers it as an
+// unknown op, so the client asks first and reports ErrCoreOutdated.
+const FeatureSwitchAccount = "switch_account"
+
+// coreFeatures are the features this core advertises in its Hello.
+var coreFeatures = []string{FeatureCreateInput, FeatureSwitchAccount}
+
+// SwitchOptions asks the core to continue a pane's conversation on another
+// account (spec 82 REQ-WAS-002). Agent is "claude" ("" too) or "agy" (spec
+// 83); ConfigDir is the account's claude config dir or agy HOME, "" for the
+// built-in account.
+type SwitchOptions struct {
+	Agent     string `json:"agent,omitempty"`
+	ConfigDir string `json:"config_dir,omitempty"`
+}
+
+// SwitchReady is Session.AccountSwitch of a pane that can be switched.
+const SwitchReady = "ready"
+
+// Switch refusal codes (spec 82 REQ-WAS-002) and their messages. The core
+// answers them as wire codes; the daemon turns them into a 409 with the same
+// code. CodeCoreOutdated is the client's own answer for a core without
+// FeatureSwitchAccount.
+const (
+	CodeNoConversation = "no_conversation"
+	CodeNotSwitchable  = "not_switchable"
+	CodeStillRunning   = "still_running"
+	CodeCoreOutdated   = "core_outdated"
+)
+
+// switchRefusal is a switch refusal whose text is the message the owner sees
+// (spec 82 REQ-WAS-001, REQ-WAS-002), so it is written as a sentence.
+type switchRefusal string
+
+func (e switchRefusal) Error() string { return string(e) }
+
+// The sentinels the switch refusal codes stand for.
+var (
+	ErrNoConversation error = switchRefusal("No Claude conversation in this pane")
+	ErrNotSwitchable  error = switchRefusal("This pane was opened before account switching; use New tab")
+	ErrStillRunning   error = switchRefusal("Claude did not exit. Exit it in the pane and try again.")
+	ErrCoreOutdated   error = switchRefusal("Restart the Workbench to switch accounts in place")
+)
+
+// legacyInputTail ends the command a client sends instead of Input to a core
+// without FeatureCreateInput: after the line, the pane becomes the user's
+// shell, so exiting the program still lands at a prompt.
+const legacyInputTail = "\nexec \"${SHELL:-/bin/sh}\""
+
+// legacyInputOptions rewrites o for a core without FeatureCreateInput: the
+// input runs under `/bin/sh -c`, followed by the user's shell, and Input is
+// cleared. Options without Input, or with a non-shell Command, come back as
+// they are (Input is then dropped, as that core would).
+func legacyInputOptions(o CreateOptions) CreateOptions {
+	if o.Input == "" {
+		return o
+	}
+	input := o.Input
+	o.Input = ""
+	if len(o.Command) != 0 && !isShellCommand(o.Command[0]) {
+		return o
+	}
+	o.Command = []string{"/bin/sh", "-c", input + legacyInputTail}
+	return o
+}
+
+// isLegacyInputCommand reports whether argv is the form legacyInputOptions
+// sends. Restore brings such a session back as the plain user shell instead
+// of running the typed line again.
+func isLegacyInputCommand(argv []string) bool {
+	return len(argv) == 3 && argv[0] == "/bin/sh" && argv[1] == "-c" && strings.HasSuffix(argv[2], legacyInputTail)
 }
 
 // Request is a line of the control connection, from the client.
@@ -163,6 +284,7 @@ type Request struct {
 	Rows   int             `json:"rows,omitempty"`
 	Create *CreateOptions  `json:"create,omitempty"`
 	Layout json.RawMessage `json:"layout,omitempty"`
+	Switch *SwitchOptions  `json:"switch,omitempty"`
 }
 
 // Response answers the Request with the same ID.
@@ -191,19 +313,34 @@ type codeError struct {
 func (e *codeError) Error() string { return e.msg }
 func (e *codeError) Unwrap() error { return e.kind }
 
+// wireCodes pairs each wire code with the sentinel it stands for.
+var wireCodes = []struct {
+	code string
+	kind error
+}{
+	{codeNotFound, ErrNotFound},
+	{CodeNoConversation, ErrNoConversation},
+	{CodeNotSwitchable, ErrNotSwitchable},
+	{CodeStillRunning, ErrStillRunning},
+	{CodeCoreOutdated, ErrCoreOutdated},
+}
+
 // codeFor maps an error to its wire code, or "" for a plain error.
 func codeFor(err error) string {
-	if errors.Is(err, ErrNotFound) {
-		return codeNotFound
+	for _, w := range wireCodes {
+		if errors.Is(err, w.kind) {
+			return w.code
+		}
 	}
 	return ""
 }
 
 // kindFor maps a wire code back to the sentinel it stands for.
 func kindFor(code string) error {
-	switch code {
-	case codeNotFound:
-		return ErrNotFound
+	for _, w := range wireCodes {
+		if w.code == code {
+			return w.kind
+		}
 	}
 	return nil
 }

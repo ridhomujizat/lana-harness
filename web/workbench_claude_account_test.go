@@ -8,6 +8,8 @@ import (
 	"reflect"
 	"strings"
 	"testing"
+
+	"github.com/ridhomujizat/lana-harness/internal/workbench"
 )
 
 func decodeWorkbenchClaudeAccount(t *testing.T, code int, body []byte) workbenchClaudeAccountResponse {
@@ -159,5 +161,188 @@ func TestClaudeAccountSaveSharesHistory(t *testing.T) {
 	entries, _ := os.ReadDir(defaultDir)
 	if len(entries) != 3 {
 		t.Fatalf("default folder = %v, want settings.json, projects, history.jsonl", entries)
+	}
+}
+
+// AC-SMC-008: a create naming a Claude Code account mirrors the built-in
+// account's MCP servers into it before the pane starts; the built-in account,
+// another kind, or an unknown name mirror nothing and still create the pane.
+func TestWorkbenchCreateMirrorsClaudeMCP(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	dir := filepath.Join(t.TempDir(), "claude", "claude-3")
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	accountFile := filepath.Join(dir, ".claude.json")
+	if err := os.WriteFile(accountFile, []byte(`{"numStartups": 1}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(home, ".claude.json"), []byte(`{"mcpServers": {"hub": {"type": "http", "url": "https://hub.example.invalid/mcp"}}}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	config := routerTestConfig + "\n[providers.claude-3]\nkind = \"claude-code\"\nconfig_dir = \"" + dir + "\"\n"
+	s, _, _, cookie, csrf := newRouterTestServer(t, config)
+	fake := newFakeWorkbench()
+	var atCreate string
+	fake.onCreate = func(workbench.CreateOptions) {
+		data, _ := os.ReadFile(accountFile)
+		atCreate = string(data)
+	}
+	s.SetWorkbench(fake)
+
+	create := func(body string) {
+		t.Helper()
+		rr := workbenchRequest(s, http.MethodPost, "/v1/workbench/sessions", body, cookie, csrf)
+		if rr.Code != http.StatusOK {
+			t.Fatalf("create %s status = %d, body = %s", body, rr.Code, rr.Body.String())
+		}
+	}
+
+	for _, body := range []string{`{"input":"claude"}`, `{"input":"claude","claude_account":"claude-code"}`, `{"claude_account":"nope"}`, `{"claude_account":"deepseek"}`} {
+		create(body)
+		if strings.Contains(atCreate, "hub") {
+			t.Fatalf("%s mirrored: %s", body, atCreate)
+		}
+	}
+
+	create(`{"input":"env CLAUDE_CONFIG_DIR=x claude","claude_account":"claude-3"}`)
+	if !strings.Contains(atCreate, `"hub"`) || !strings.Contains(atCreate, `"numStartups": 1`) {
+		t.Fatalf("account file at create = %s", atCreate)
+	}
+	if last := fake.created[len(fake.created)-1]; last.Input != "env CLAUDE_CONFIG_DIR=x claude" {
+		t.Fatalf("created = %+v", last)
+	}
+
+	// A broken built-in config leaves the account as it was and still creates.
+	if err := os.WriteFile(filepath.Join(home, ".claude.json"), []byte(`{`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(accountFile, []byte(`{"mcpServers": {"own": {}}}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	create(`{"claude_account":"claude-3"}`)
+	if atCreate != `{"mcpServers": {"own": {}}}` {
+		t.Fatalf("account changed with a broken source: %s", atCreate)
+	}
+}
+
+// Spec 82 REQ-WAS-002: the switch endpoint checks the account, mirrors a
+// named account's MCP servers before the core switches, hands the core the
+// account's config dir ("" for the built-in account), and answers the core's
+// refusals 409 with their code and message.
+func TestWorkbenchSwitchAccount(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	dir := filepath.Join(t.TempDir(), "claude", "claude-3")
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	accountFile := filepath.Join(dir, ".claude.json")
+	if err := os.WriteFile(accountFile, []byte(`{"numStartups": 1}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(home, ".claude.json"), []byte(`{"mcpServers": {"hub": {"type": "http", "url": "https://hub.example.invalid/mcp"}}}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	missing := filepath.Join(t.TempDir(), "claude", "never-signed-in")
+	config := routerTestConfig +
+		"\n[providers.claude-3]\nkind = \"claude-code\"\nenabled = false\nconfig_dir = \"" + dir + "\"\n" +
+		"\n[providers.claude-new]\nkind = \"claude-code\"\nconfig_dir = \"" + missing + "\"\n"
+	s, _, _, cookie, csrf := newRouterTestServer(t, config)
+	fake := newFakeWorkbench()
+	fake.sessions = []workbench.Session{{ID: "p1", Command: []string{"/bin/zsh"}, AccountSwitch: workbench.SwitchReady}}
+	var atSwitch string
+	fake.onSwitch = func(string, string) {
+		data, _ := os.ReadFile(accountFile)
+		atSwitch = string(data)
+	}
+	s.SetWorkbench(fake)
+	post := func(id, body string) (int, string) {
+		rr := workbenchRequest(s, http.MethodPost, "/v1/workbench/sessions/"+id+"/switch-account", body, cookie, csrf)
+		return rr.Code, rr.Body.String()
+	}
+
+	// A disabled named account still switches; its MCP servers are mirrored
+	// before the core is asked.
+	code, body := post("p1", `{"claude_account":"claude-3"}`)
+	if code != http.StatusOK {
+		t.Fatalf("switch status = %d, body = %s", code, body)
+	}
+	var got workbench.Session
+	if err := json.Unmarshal([]byte(body), &got); err != nil || got.ID != "p1" || got.AgentConfigDir != dir {
+		t.Fatalf("switch body = %s (%v)", body, err)
+	}
+	if !strings.Contains(atSwitch, `"hub"`) {
+		t.Fatalf("account file at switch = %s", atSwitch)
+	}
+	if last := fake.switches[len(fake.switches)-1]; last != (workbenchSwitchCall{id: "p1", agent: "claude", configDir: dir}) {
+		t.Fatalf("switch call = %+v", last)
+	}
+
+	// The built-in account: no config dir.
+	if code, body := post("p1", `{"claude_account":"claude-code"}`); code != http.StatusOK {
+		t.Fatalf("built-in switch = %d %s", code, body)
+	}
+	if last := fake.switches[len(fake.switches)-1]; last != (workbenchSwitchCall{id: "p1", agent: "claude"}) {
+		t.Fatalf("built-in switch call = %+v", last)
+	}
+
+	// Bad accounts never reach the core.
+	calls := len(fake.switches)
+	for _, bad := range []string{`{"claude_account":"deepseek"}`, `{"claude_account":"nope"}`, `{"claude_account":""}`, `{}`, `{"claude_account":"claude-new"}`} {
+		if code, body := post("p1", bad); code != http.StatusBadRequest || !strings.Contains(body, "invalid_request") {
+			t.Fatalf("switch %s = %d %s, want 400 invalid_request", bad, code, body)
+		}
+	}
+	if len(fake.switches) != calls {
+		t.Fatalf("a refused account reached the core: %+v", fake.switches[calls:])
+	}
+
+	// An unknown pane is 404.
+	if code, body := post("nope", `{"claude_account":"claude-code"}`); code != http.StatusNotFound {
+		t.Fatalf("unknown pane = %d %s", code, body)
+	}
+
+	// The core's refusals are 409 with their code and message.
+	for _, tc := range []struct {
+		err  error
+		code string
+		msg  string
+	}{
+		{workbench.ErrNoConversation, "no_conversation", "No Claude conversation in this pane"},
+		{workbench.ErrNotSwitchable, "not_switchable", "This pane was opened before account switching; use New tab"},
+		{workbench.ErrStillRunning, "still_running", "Claude did not exit. Exit it in the pane and try again."},
+		{workbench.ErrCoreOutdated, "core_outdated", "Restart the Workbench to switch accounts in place"},
+	} {
+		fake.mu.Lock()
+		fake.switchErr = tc.err
+		fake.mu.Unlock()
+		code, body := post("p1", `{"claude_account":"claude-code"}`)
+		var apiErr struct {
+			Error struct {
+				Code    string `json:"code"`
+				Message string `json:"message"`
+			} `json:"error"`
+		}
+		_ = json.Unmarshal([]byte(body), &apiErr)
+		if code != http.StatusConflict || apiErr.Error.Code != tc.code || apiErr.Error.Message != tc.msg {
+			t.Fatalf("%s: switch = %d %s", tc.code, code, body)
+		}
+	}
+}
+
+// The switch is a state-changing workbench route: it needs the CSRF header.
+func TestWorkbenchSwitchAccountCSRF(t *testing.T) {
+	s, _, _, cookie, _ := newRouterTestServer(t, routerTestConfig)
+	fake := newFakeWorkbench()
+	fake.sessions = []workbench.Session{{ID: "p1"}}
+	s.SetWorkbench(fake)
+	rr := workbenchRequest(s, http.MethodPost, "/v1/workbench/sessions/p1/switch-account", `{"claude_account":"claude-code"}`, cookie, "")
+	if rr.Code != http.StatusForbidden {
+		t.Fatalf("switch without CSRF = %d %s", rr.Code, rr.Body.String())
+	}
+	if len(fake.switches) != 0 {
+		t.Fatalf("switch without CSRF reached the core: %+v", fake.switches)
 	}
 }

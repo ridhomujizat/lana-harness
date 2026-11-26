@@ -11,6 +11,7 @@ import (
 	"syscall"
 
 	creackpty "github.com/creack/pty"
+	"golang.org/x/sys/unix"
 )
 
 // pty is a pseudo-terminal and the program it runs.
@@ -78,6 +79,20 @@ func (p *pty) fd() uintptr {
 		return 0
 	}
 	return fd
+}
+
+// foregroundGroup returns the pty's foreground process group (tcgetpgrp on the
+// master), or false when it cannot be read.
+func (p *pty) foregroundGroup() (int, bool) {
+	fd := p.fd()
+	if fd == 0 {
+		return 0, false
+	}
+	pgid, err := unix.IoctlGetInt(int(fd), unix.TIOCGPGRP)
+	if err != nil || pgid <= 0 {
+		return 0, false
+	}
+	return pgid, true
 }
 
 func (p *pty) resize(cols, rows int) error {

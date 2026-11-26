@@ -34,8 +34,14 @@ type fakeWorkbench struct {
 	stream      *fakeWorkbenchStream
 	streams     map[string]*fakeWorkbenchStream
 	controlHook func([]byte)
-	attachSeen  []string
-	subscribe   chan workbench.Event
+	onCreate    func(workbench.CreateOptions)
+	// switches records each SwitchAccount call; switchErr, when set, is its
+	// answer, and onSwitch runs before it.
+	switches   []workbenchSwitchCall
+	switchErr  error
+	onSwitch   func(id, configDir string)
+	attachSeen []string
+	subscribe  chan workbench.Event
 }
 
 type workbenchResizeCall struct {
@@ -80,6 +86,9 @@ func (f *fakeWorkbench) Create(_ context.Context, opts workbench.CreateOptions) 
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.created = append(f.created, opts)
+	if f.onCreate != nil {
+		f.onCreate(opts)
+	}
 	sess := workbench.Session{ID: "created", Title: opts.Title, Dir: opts.Dir, Command: opts.Command, Cols: opts.Cols, Rows: opts.Rows, Labels: opts.Labels}
 	f.sessions = append(f.sessions, sess)
 	return sess, nil
@@ -101,6 +110,32 @@ func (f *fakeWorkbench) Restart(_ context.Context, id string) (workbench.Session
 	for _, s := range f.sessions {
 		if s.ID == id {
 			f.restarted = append(f.restarted, id)
+			return s, nil
+		}
+	}
+	return workbench.Session{}, workbench.ErrNotFound
+}
+
+type workbenchSwitchCall struct {
+	id, agent, configDir string
+}
+
+func (f *fakeWorkbench) SwitchAccount(_ context.Context, id, agent, configDir string) (workbench.Session, error) {
+	f.mu.Lock()
+	hook := f.onSwitch
+	f.mu.Unlock()
+	if hook != nil {
+		hook(id, configDir)
+	}
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	for _, s := range f.sessions {
+		if s.ID == id {
+			f.switches = append(f.switches, workbenchSwitchCall{id: id, agent: agent, configDir: configDir})
+			if f.switchErr != nil {
+				return workbench.Session{}, f.switchErr
+			}
+			s.AgentConfigDir = configDir
 			return s, nil
 		}
 	}
@@ -306,6 +341,36 @@ func TestWorkbenchUnavailableWithoutBackend(t *testing.T) {
 
 	rr = workbenchRequest(s, http.MethodPost, "/v1/workbench/sessions", "{}", cookie, csrf)
 	assertAuthError(t, rr, http.StatusServiceUnavailable, "workbench_unavailable")
+}
+
+// A create passes its input line to the core; a line break or an input over
+// the limit is a 400 that creates nothing.
+func TestWorkbenchCreateInput(t *testing.T) {
+	s, cookie, csrf := newWorkbenchServer(t)
+	fake := newFakeWorkbench()
+	s.SetWorkbench(fake)
+
+	rr := workbenchRequest(s, http.MethodPost, "/v1/workbench/sessions", `{"input":"env -u CLAUDE_CONFIG_DIR claude"}`, cookie, csrf)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("create status = %d, body = %q", rr.Code, rr.Body.String())
+	}
+	if len(fake.created) != 1 || fake.created[0].Input != "env -u CLAUDE_CONFIG_DIR claude" || len(fake.created[0].Command) != 0 {
+		t.Fatalf("created = %+v", fake.created)
+	}
+
+	for _, body := range []string{
+		`{"input":"claude\nrm -rf /"}`,
+		`{"input":"claude\r"}`,
+		`{"input":"` + strings.Repeat("a", workbench.MaxCreateInput+1) + `"}`,
+	} {
+		rr = workbenchRequest(s, http.MethodPost, "/v1/workbench/sessions", body, cookie, csrf)
+		if rr.Code != http.StatusBadRequest {
+			t.Fatalf("create %.40q status = %d, want 400", body, rr.Code)
+		}
+	}
+	if len(fake.created) != 1 {
+		t.Fatalf("create calls = %d, want 1", len(fake.created))
+	}
 }
 
 func TestWorkbenchListCreateKillRestart(t *testing.T) {

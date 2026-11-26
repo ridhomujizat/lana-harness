@@ -314,6 +314,11 @@
   overflow-wrap: anywhere;
 }
 
+/* Settings > General > Workbench: folders the hooks could not be written to. */
+.settings-hook-broken {
+  margin-bottom: var(--s-2);
+}
+
 .settings-update-manual {
   margin-top: var(--s-2);
   max-width: 520px;

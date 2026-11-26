@@ -222,7 +222,11 @@ func sameTracked(a, b Session) bool {
 		a.Rows == b.Rows &&
 		a.Attached == b.Attached &&
 		a.Agent == b.Agent &&
-		a.AgentState == b.AgentState
+		a.AgentState == b.AgentState &&
+		a.AccountSwitch == b.AccountSwitch &&
+		a.ConversationAgent == b.ConversationAgent &&
+		a.ConversationID == b.ConversationID &&
+		a.AgentConfigDir == b.AgentConfigDir
 }
 
 // shouldSend reports whether a dirty session may be sent now, so one session

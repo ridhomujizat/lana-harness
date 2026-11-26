@@ -78,6 +78,7 @@ func Serve(ctx context.Context, home string) error {
 		_ = os.Remove(pidPath)
 	}()
 
+	setCoreHome(home)
 	s := &server{home: home, started: time.Now(), sessions: map[string]*session{}, quit: make(chan struct{}), hub: newHub()}
 	if b, err := os.ReadFile(filepath.Join(dir, "layout.json")); err == nil && json.Valid(b) {
 		s.layout = b
@@ -158,14 +159,30 @@ func (s *server) restoreOne(rec sessionRecord) (*session, string, error) {
 		ss.mu.Lock()
 		ss.resumedAgent = rec.Agent
 		ss.mu.Unlock()
-		go ss.typeResume(line)
+		go func() {
+			// Spec 81 REQ-SMC-005: a named account's claude gets the built-in
+			// account's MCP servers before it is resumed. The mirror may wait
+			// on the account's lock, so it runs here, off the restore path.
+			if line != "" {
+				mirrorRestoredClaude(rec.Agent, rec.AgentConfigDir, s.home, home)
+				relinkRestoredAgy(rec.Agent, rec.AgentConfigDir, s.home, home)
+			}
+			ss.typeResume(line)
+		}()
 		return ss, line, nil
 	case len(rec.Command) == 0 || isShellCommand(rec.Command[0]):
 		// A shell comes back as itself in its last directory; what ran inside
-		// it is not re-run (REQ-WR-022).
+		// it is not re-run (REQ-WR-022). A `sh -c script` record counts as a
+		// shell and runs its script again; the one exception is the form a
+		// client sends an old core in place of CreateOptions.Input, which comes
+		// back as the plain user shell so the typed line is not re-run.
 		dir := firstDir(rec.LastDir, rec.Dir, home)
+		command := rec.Command
+		if isLegacyInputCommand(command) {
+			command = nil
+		}
 		ss, err := newSession(rec.ID, CreateOptions{
-			Command: rec.Command, Dir: dir, Env: rec.Env, Cols: rec.Cols,
+			Command: command, Dir: dir, Env: rec.Env, Cols: rec.Cols,
 			Rows: rec.Rows, Title: rec.Title, Labels: rec.Labels,
 		}, notify)
 		if err != nil {
@@ -339,8 +356,9 @@ func (s *server) control(conn net.Conn, r *bufio.Reader, first []byte) {
 	for {
 		var req Request
 		if err := json.Unmarshal(line, &req); err == nil && req.Op != "" {
-			if req.Op == "kill" {
-				// A kill waits for the process; answer it aside.
+			if req.Op == "kill" || req.Op == "switch_account" {
+				// A kill waits for the process and a switch for claude to
+				// exit; answer them aside.
 				go func() { reply(s.request(req)) }()
 			} else {
 				reply(s.request(req))
@@ -378,7 +396,7 @@ func (s *server) session(id string) (*session, error) {
 func (s *server) do(req Request) (any, error) {
 	switch req.Op {
 	case "hello":
-		return Hello{Version: ProtocolVersion, PID: os.Getpid(), Started: s.started}, nil
+		return Hello{Version: ProtocolVersion, PID: os.Getpid(), Started: s.started, Features: coreFeatures}, nil
 	case "list":
 		s.mu.Lock()
 		all := make([]*session, 0, len(s.order))
@@ -404,6 +422,9 @@ func (s *server) do(req Request) (any, error) {
 		if req.Create != nil {
 			o = *req.Create
 		}
+		if err := ValidateCreateInput(o.Input); err != nil {
+			return nil, err
+		}
 		id := newID()
 		ss, err := newSession(id, o, func() { s.hub.markDirty(id) })
 		if err != nil {
@@ -415,6 +436,12 @@ func (s *server) do(req Request) (any, error) {
 		s.mu.Unlock()
 		info := ss.info()
 		s.hub.created(ss, info)
+		// The line is typed into the shell, which stays the pane's process, so
+		// the program it starts returns to the prompt when it ends. Only the
+		// create types it: the session keeps no copy to persist or re-type.
+		if o.Input != "" && (len(o.Command) == 0 || isShellCommand(o.Command[0])) {
+			go ss.typeResume(o.Input)
+		}
 		return info, nil
 	case "kill":
 		ss, err := s.session(req.SID)
@@ -422,6 +449,7 @@ func (s *server) do(req Request) (any, error) {
 			return nil, err
 		}
 		ss.kill()
+		removeAgentRecord(s.home, req.SID)
 		s.mu.Lock()
 		delete(s.sessions, req.SID)
 		s.order = slices.DeleteFunc(s.order, func(id string) bool { return id == req.SID })
@@ -436,6 +464,22 @@ func (s *server) do(req Request) (any, error) {
 		if err := ss.restart(); err != nil {
 			return nil, err
 		}
+		return ss.info(), nil
+	case "switch_account":
+		// Spec 82 REQ-WAS-002: continue the pane's Claude Code conversation on
+		// another account.
+		ss, err := s.session(req.SID)
+		if err != nil {
+			return nil, err
+		}
+		o := SwitchOptions{}
+		if req.Switch != nil {
+			o = *req.Switch
+		}
+		if err := ss.switchAccount(o); err != nil {
+			return nil, err
+		}
+		logf("switched session %s to config dir %q", ss.id, o.ConfigDir)
 		return ss.info(), nil
 	case "resize":
 		ss, err := s.session(req.SID)
