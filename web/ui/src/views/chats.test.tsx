@@ -539,11 +539,11 @@ describe("Chat archive and clear (spec 85)", () => {
     expect(await screen.findByRole("tab", { name: "All 1" })).toBeTruthy();
     expect(container.querySelectorAll(".rooms-rows .rooms-row").length).toBe(1);
 
-    /* The Archived row carries the archived count and the names. */
+    /* The Archived row shows the names; the count is only in its label. */
     const archived = container.querySelector(".archived-row");
     expect(archived).not.toBeNull();
     expect(archived?.textContent).toContain("Archived");
-    expect(archived?.textContent).toContain("1");
+    expect(archived?.getAttribute("aria-label")).toBe("Archived, 1 chat");
     expect(archived?.textContent).toContain("zoe");
   });
 

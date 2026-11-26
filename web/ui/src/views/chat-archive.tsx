@@ -144,14 +144,17 @@ export function ArchivedLauncher({
   return (
     <div className="archived-block">
       <span className="archived-rule" aria-hidden="true" />
-      <a className="archived-row" href="#/chats/archived">
+      <a
+        className="archived-row"
+        href="#/chats/archived"
+        aria-label={"Archived, " + count + (count === 1 ? " chat" : " chats")}
+      >
         <span className="archived-tile" aria-hidden="true">
           <Ic name="archive" size={20} />
         </span>
         <span className="rooms-row-body">
           <span className="rooms-row-top">
             <span className="rooms-row-name">Archived</span>
-            <span className="rooms-row-time">{count}</span>
           </span>
           <span className="rooms-row-title truncated-names">{names}</span>
         </span>
