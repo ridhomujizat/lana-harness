@@ -104,7 +104,16 @@ func TestAttachRedrawNudgeKeepsLaterResize(t *testing.T) {
 // program that reports its pty size on SIGWINCH, the way a full-screen program
 // notices it must redraw: it sees the one-row-short size and then the restored
 // session size, not two back-to-back resizes of the same size.
+//
+// The handler reads the size with a forked stty, after the loop's sleep ends,
+// so on a loaded machine it can run only after the default 150ms restore and
+// print "40 100" for both signals. The nudge is lengthened so the first read
+// lands well inside the one-row-short window; what is checked is unchanged.
 func TestAttachRedrawNudgeRedrawsOnWinch(t *testing.T) {
+	old := redrawNudgeDelay
+	redrawNudgeDelay = 2 * time.Second
+	t.Cleanup(func() { redrawNudgeDelay = old })
+
 	home := shortHome(t)
 	serve(t, home)
 	c := mustClient(t, home)
@@ -125,7 +134,7 @@ func TestAttachRedrawNudgeRedrawsOnWinch(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	readUntil(t, view, "ready", 5*time.Second)
+	readUntil(t, view, "ready", 10*time.Second)
 	_ = view.Close()
 
 	stream, err := c.Attach(ctx, s.ID, "control")
@@ -135,9 +144,11 @@ func TestAttachRedrawNudgeRedrawsOnWinch(t *testing.T) {
 	defer func() { _ = stream.Close() }()
 
 	// The handler prints "rows cols": 39 while the pty is one row short, then
-	// 40 once it is restored.
-	got := readUntil(t, stream, "39 100", 5*time.Second)
-	if !strings.Contains(got, "40 100") {
-		readUntil(t, stream, "40 100", 5*time.Second)
+	// 40 once it is restored. The 40 must come after the 39, so only output
+	// past the 39 counts; anything before it (the replay) is skipped.
+	got := readUntil(t, stream, "39 100", 10*time.Second)
+	after := got[strings.Index(got, "39 100")+len("39 100"):]
+	if !strings.Contains(after, "40 100") {
+		readUntil(t, stream, "40 100", 10*time.Second)
 	}
 }

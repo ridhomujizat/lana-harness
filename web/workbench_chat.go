@@ -68,8 +68,9 @@ const chatViewBackoff = 2 * time.Second
 
 // chatViewSwapWait bounds how long a new view attachment opened for a size
 // change waits for the core's replay-end marker before it replaces the current
-// one (REQ-WC-020).
-const chatViewSwapWait = 500 * time.Millisecond
+// one (REQ-WC-020). It is a variable so tests can lengthen it, and so tell a
+// swap the marker made from one the fallback made.
+var chatViewSwapWait = 500 * time.Millisecond
 
 const (
 	// chatSubBuffer is the per-subscriber event queue; a slower reader is
