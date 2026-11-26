@@ -105,6 +105,30 @@ export function switchWorkbenchAccount(
   );
 }
 
+/* Spec 84 REQ-WBR-002: the Workbench core process and whether it is older
+   than the daemon (a core keeps running across updates). */
+export interface WorkbenchCore {
+  running: boolean;
+  version: string;
+  commit: string;
+  daemon_version: string;
+  daemon_commit: string;
+  outdated: boolean;
+  sessions: number;
+}
+
+export function getWorkbenchCore(): Promise<WorkbenchCore> {
+  return request("GET", "/v1/workbench/core");
+}
+
+/* Spec 84 REQ-WBR-003: stops the core and starts a new one from the daemon's
+   build; the panes come back through the spec 60 restore. 409
+   restart_running while another restart runs, 503 when the new core does not
+   come up. */
+export function restartWorkbenchCore(): Promise<WorkbenchCore> {
+  return request("POST", "/v1/workbench/core/restart");
+}
+
 export function resizeWorkbenchSession(id: string, cols: number, rows: number): Promise<unknown> {
   return request("POST", "/v1/workbench/sessions/" + encodeURIComponent(id) + "/resize", { cols, rows });
 }

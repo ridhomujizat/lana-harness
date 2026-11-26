@@ -193,6 +193,21 @@ type Hello struct {
 	// core keeps running across app upgrades until it is empty, so a client
 	// asks before relying on a newer field; an older core sends none.
 	Features []string `json:"features,omitempty"`
+	// AppVersion and Commit are the Lana build of the core, the values
+	// `lana version` shows (spec 84 REQ-WBR-001). Version above stays the
+	// protocol number. An older core sends neither.
+	AppVersion string `json:"app_version,omitempty"`
+	Commit     string `json:"commit,omitempty"`
+}
+
+// buildVersion and buildCommit are what this core reports as Hello.AppVersion
+// and Hello.Commit; `lana workbench serve` sets them with SetBuild.
+var buildVersion, buildCommit string
+
+// SetBuild records the Lana build this process serves the core as (spec 84
+// REQ-WBR-001). Call it before Serve.
+func SetBuild(version, commit string) {
+	buildVersion, buildCommit = version, commit
 }
 
 // FeatureCreateInput is the Hello feature of a core that types

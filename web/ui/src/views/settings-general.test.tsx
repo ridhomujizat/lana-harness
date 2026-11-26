@@ -42,7 +42,7 @@ vi.mock("../api/settings", async (importOriginal) => {
 
 vi.mock("../api/workbench", async (importOriginal) => {
   const actual = await importOriginal<typeof import("../api/workbench")>();
-  return { ...actual, getAgentHook: vi.fn(), setAgentHook: vi.fn() };
+  return { ...actual, getAgentHook: vi.fn(), setAgentHook: vi.fn(), getWorkbenchCore: vi.fn(), restartWorkbenchCore: vi.fn() };
 });
 
 const mockedChangePassword = vi.mocked(changePassword);
@@ -105,6 +105,15 @@ beforeEach(() => {
   vi.mocked(settingsApi.getConfig).mockResolvedValue(config);
   vi.mocked(settingsApi.listBrowserSessions).mockResolvedValue({ sessions: [] });
   vi.mocked(workbenchApi.getAgentHook).mockResolvedValue(hookState({}));
+  vi.mocked(workbenchApi.getWorkbenchCore).mockResolvedValue({
+    running: true,
+    version: "0.6.0-beta.13",
+    commit: "aaa1111",
+    daemon_version: "0.6.0-beta.14",
+    daemon_commit: "bbb2222",
+    outdated: true,
+    sessions: 2,
+  });
 });
 
 describe("settings general change password", () => {
@@ -175,6 +184,38 @@ function hookState(over: Partial<AgentHookState>): AgentHookState {
 function workbenchSection(): HTMLElement {
   return screen.getByRole("heading", { name: "Workbench" }).closest("section") as HTMLElement;
 }
+
+/* Spec 84 REQ-WBR-005: the Workbench section has the core row with Restart
+   Workbench, which asks first. */
+describe("settings general workbench core", () => {
+  it("shows the outdated core and restarts it after the confirm", async () => {
+    vi.mocked(workbenchApi.restartWorkbenchCore).mockResolvedValue({
+      running: true,
+      version: "0.6.0-beta.14",
+      commit: "bbb2222",
+      daemon_version: "0.6.0-beta.14",
+      daemon_commit: "bbb2222",
+      outdated: false,
+      sessions: 2,
+    });
+    renderGeneral();
+    await screen.findByRole("heading", { name: "Workbench" });
+    const section = workbenchSection();
+    expect(await within(section).findByText("Workbench core")).toBeTruthy();
+    expect(within(section).getByText("Outdated")).toBeTruthy();
+    expect(within(section).getByText(/Restart to use the new version \(0\.6\.0-beta\.14\)/)).toBeTruthy();
+
+    fireEvent.click(within(section).getByRole("button", { name: "Restart Workbench" }));
+    expect(
+      screen.getByText("All terminal panes close and reopen. Claude Code and Antigravity conversations resume; a running turn stops."),
+    ).toBeTruthy();
+    expect(workbenchApi.restartWorkbenchCore).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole("button", { name: "Restart" }));
+    expect(workbenchApi.restartWorkbenchCore).toHaveBeenCalledTimes(1);
+    expect((await screen.findAllByText("Restarted. 2 panes restored.")).length).toBeGreaterThan(0);
+    await waitFor(() => expect(within(workbenchSection()).queryByText("Outdated")).toBeNull());
+  });
+});
 
 /* Spec 77 REQ-WRA-009: the Workbench hook switch lives in Settings > General. */
 describe("settings general workbench hooks", () => {
