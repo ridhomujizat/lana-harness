@@ -104,8 +104,14 @@ func (r *Runtime) probeVersion(ctx context.Context, bin string) (string, error) 
 // version, plus the running and queued turn counts. Later tasks add the login
 // state and the accounts.
 func (r *Runtime) Status(ctx context.Context) core.RuntimeStatus {
+	return r.StatusOf(ctx, "")
+}
+
+// StatusOf is Status with the built-in account's configured binary ("" is
+// agy on PATH), so the runtime status agrees with the account rows.
+func (r *Runtime) StatusOf(ctx context.Context, binary string) core.RuntimeStatus {
 	var st core.RuntimeStatus
-	bin, err := r.resolveBinary("")
+	bin, err := r.resolveBinary(binary)
 	if err != nil {
 		st.Error = errNotInstalled
 	} else {

@@ -252,6 +252,13 @@ func (rt *Runtime) AgentRuntimeStatus(ctx context.Context, name string) (core.Ru
 	if err != nil {
 		return core.RuntimeStatus{}, err
 	}
+	// The Antigravity status probes the built-in account's binary setting,
+	// as AntigravityInstalled does, not only agy on PATH.
+	if of, ok := ext.(interface {
+		StatusOf(context.Context, string) core.RuntimeStatus
+	}); ok && name == AntigravityRuntime {
+		return of.StatusOf(ctx, rt.antigravityAccountConfig(AntigravityRuntime).Binary), nil
+	}
 	return ext.Status(ctx), nil
 }
 
