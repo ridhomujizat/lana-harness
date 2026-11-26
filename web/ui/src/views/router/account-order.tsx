@@ -69,6 +69,9 @@ export interface AccountOrderListProps {
   /* false: no handle, no "Use as backup" switch and no hint (a list of one
      account has no order). */
   sortable?: boolean;
+  /* What a row is in the hint, default "key" or "account" by variant (an
+     API provider's connections say "connection", spec 80). */
+  noun?: string;
 }
 
 type Zone = "pool" | "rest";
@@ -161,6 +164,7 @@ export function AccountOrderList({
   onSave,
   actions,
   sortable = true,
+  noun,
 }: AccountOrderListProps) {
   const hintId = useId();
   const moreId = useId();
@@ -482,7 +486,7 @@ export function AccountOrderList({
     <div className="rt-order">
       {sortable ? (
         <p id={hintId} className="hint rt-order-hint">
-          The top {variant === "key" ? "key" : "account"} is used first. Drag a row, or focus its handle and press ↑ or ↓.
+          The top {noun || (variant === "key" ? "key" : "account")} is used first. Drag a row, or focus its handle and press ↑ or ↓.
         </p>
       ) : null}
       <ol className="rt-order-list" ref={listRef} aria-label={label}>

@@ -23,6 +23,35 @@ func DefaultBaseURL(kind string) string {
 	return defaultBaseURLs[kind]
 }
 
+// EffectiveBaseURL returns the base URL a provider of kind with base_url
+// baseURL calls, in the form spec 80 compares: base_url, else the kind's
+// default, with surrounding spaces and trailing "/" removed and the scheme
+// and host in lower case. It is "" when neither is set.
+func EffectiveBaseURL(kind, baseURL string) string {
+	value := strings.TrimSpace(baseURL)
+	if value == "" {
+		value = DefaultBaseURL(kind)
+	}
+	value = strings.TrimRight(value, "/")
+	if value == "" {
+		return ""
+	}
+	parsed, err := url.Parse(value)
+	if err != nil || parsed.Scheme == "" || parsed.Host == "" {
+		return value
+	}
+	parsed.Scheme = strings.ToLower(parsed.Scheme)
+	parsed.Host = strings.ToLower(parsed.Host)
+	return strings.TrimRight(parsed.String(), "/")
+}
+
+// PoolGroup returns the connection pool group of an API connection (spec
+// 80): equal for two connections exactly when they share kind and effective
+// base URL.
+func PoolGroup(kind, baseURL string) string {
+	return kind + " " + EffectiveBaseURL(kind, baseURL)
+}
+
 // testModels are the cheapest chat models of each preset kind, used for a
 // one-token connection test.
 var testModels = map[string]string{

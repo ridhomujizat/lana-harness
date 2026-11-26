@@ -57,12 +57,15 @@ func (r *Router) streamChain(ctx context.Context, snap *snapshot, requested stri
 		return nil, Target{}, &core.ProviderError{Class: "client", Message: "provider target is empty"}
 	}
 	// Spec 78: a pooled Claude Code or Antigravity target tries every
-	// account of its pool (REQ-PAF-001).
-	chain, groups := r.runtimePool(chain)
+	// account of its pool (REQ-PAF-001); spec 80: a pooled API connection
+	// address tries every connection of its pool (REQ-ACP-001).
+	chain, groups := r.poolChain(snap, chain)
 	active := r.cool.filterIndex(chain, r.now())
 	var lastErr error
-	// skipGroup is the pool whose remaining accounts are skipped after a
-	// failure that is not an account's own (REQ-PAF-001); -1 for none.
+	// skipGroup is the pool whose remaining accounts or connections are
+	// skipped after a failure that is not an account's own (REQ-PAF-001,
+	// REQ-ACP-001); -1 for none. A target that is not pooled is its own
+	// group, so skipping it changes nothing.
 	skipGroup := -1
 targets:
 	for i, ci := range active {
@@ -106,10 +109,13 @@ targets:
 			}
 			lastErr = pe
 			class := effectiveClass(pe)
+			// The last failure of a target decides whether its pool moves on.
+			if poolMoves(class) {
+				skipGroup = -1
+			} else {
+				skipGroup = groups[ci]
+			}
 			if runtime {
-				if !poolMoves(class) {
-					skipGroup = groups[ci]
-				}
 				switch {
 				case runtimeInputError(pe):
 					// REQ-RPR-003: the next target may take tools or images.

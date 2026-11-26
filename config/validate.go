@@ -28,8 +28,8 @@ var claudeAccountKeys = []string{"allow_scheduled", "api_key_env", "auth", "bina
 // "antigravity", an Antigravity account (API-AGY-002).
 var antigravityAccountKeys = []string{"allow_scheduled", "binary", "disabled", "home", "kind", "label", "pool", "priority"}
 
-// poolAccountKeys are the subscription pool keys of spec 75 (REQ-PAF-001):
-// allowed for kind claude-code and antigravity only.
+// poolAccountKeys are the pool keys of spec 75 (REQ-PAF-001): allowed for
+// every kind, API connections included (spec 80 REQ-ACP-002).
 var poolAccountKeys = []string{"pool", "priority"}
 
 // apiKeyPoolKinds are the API kinds that may list backup keys in
@@ -436,11 +436,9 @@ func validateProvider(v map[string]any, path string, add func(string, string)) {
 			add(path+"."+key, "not allowed for kind claude-code")
 		case antigravity && !contains(antigravityAccountKeys, key):
 			add(path+"."+key, "not allowed for kind antigravity")
-		case !claude && !antigravity && kindValue != "" && contains(poolAccountKeys, key):
-			add(path+"."+key, "allowed only for kind claude-code or antigravity")
 		case key == "api_key_envs" && kindValue != "" && !contains(apiKeyPoolKinds, kindValue):
 			add(path+"."+key, "allowed only for API kinds ("+strings.Join(apiKeyPoolKinds, ", ")+")")
-		case !claude && !antigravity && kindValue != "" && contains(claudeAccountKeys, key) && !contains([]string{"api_key_env", "disabled", "kind"}, key):
+		case !claude && !antigravity && kindValue != "" && contains(claudeAccountKeys, key) && !contains([]string{"api_key_env", "disabled", "kind"}, key) && !contains(poolAccountKeys, key):
 			add(path+"."+key, "allowed only for kind claude-code")
 		case !claude && !antigravity && kindValue != "" && contains(antigravityAccountKeys, key) && !contains(claudeAccountKeys, key):
 			add(path+"."+key, "allowed only for kind antigravity")
@@ -452,9 +450,8 @@ func validateProvider(v map[string]any, path string, add func(string, string)) {
 	if antigravity {
 		validateAntigravityAccount(v, path, add)
 	}
-	if claude || antigravity {
-		validatePoolKeys(v, path, add)
-	}
+	// Spec 80 (REQ-ACP-002): API connections take priority and pool too.
+	validatePoolKeys(v, path, add)
 	if contains(apiKeyPoolKinds, kindValue) {
 		validateAPIKeyEnvs(v, path, add)
 	}
@@ -512,9 +509,9 @@ func validateProvider(v map[string]any, path string, add func(string, string)) {
 	}
 }
 
-// validatePoolKeys checks the subscription pool keys of a Claude Code or
-// Antigravity account (REQ-PAF-001): priority is an integer >= 0 and pool a
-// boolean.
+// validatePoolKeys checks the pool keys of a provider table: a Claude Code
+// or Antigravity account (REQ-PAF-001) or an API connection (spec 80
+// REQ-ACP-002). priority is an integer >= 0 and pool a boolean.
 func validatePoolKeys(v map[string]any, path string, add func(string, string)) {
 	if val, ok := v["priority"]; ok {
 		n, isInt := asInt(val)

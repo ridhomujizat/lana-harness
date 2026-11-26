@@ -229,24 +229,47 @@ func runtimeInputError(pe *core.ProviderError) bool {
 	return pe.Class == "client" && pe.Message == RuntimeInputMessage
 }
 
-// runtimePool expands the pooled Claude Code or Antigravity targets of chain
-// (the built-in "claude-code" or "antigravity" account) into one target per
-// account of the pool (spec 75 REQ-PAF-001, REQ-RPR-005), when a streamer is
-// set. groups[i] is the index in chain of the target that out[i] came from.
-func (r *Router) runtimePool(chain []Target) ([]Target, []int) {
+// poolChain expands the pooled targets of chain into one target per member
+// of the pool, in pool order: a pooled Claude Code or Antigravity target
+// (the built-in "claude-code" or "antigravity" account) into its accounts
+// when a streamer is set (spec 75 REQ-PAF-001, REQ-RPR-005), and a pooled
+// API connection address into the connections of its pool, streamer or not
+// (spec 80 REQ-ACP-001). A target that an expansion would try a second time
+// (same provider and model) is left out. groups[i] is the index in chain of
+// the target that out[i] came from.
+func (r *Router) poolChain(snap *snapshot, chain []Target) ([]Target, []int) {
 	groups := make([]int, 0, len(chain))
 	out := make([]Target, 0, len(chain))
-	expand := r.streamer() != nil
+	expandRuntime := r.streamer() != nil
+	// seen holds every target added; pooled the ones an expansion added.
+	seen := map[Target]bool{}
+	pooled := map[Target]bool{}
 	for i, t := range chain {
-		if expand && (t.Provider == ClaudeCode || t.Provider == Antigravity) {
-			if accounts := r.PoolAccounts(t.Provider); len(accounts) > 0 {
-				for _, name := range accounts {
-					out = append(out, Target{Provider: name, Model: t.Model})
-					groups = append(groups, i)
-				}
-				continue
+		var members []string
+		switch t.Provider {
+		case ClaudeCode, Antigravity:
+			if expandRuntime {
+				members = r.PoolAccounts(t.Provider)
 			}
+		default:
+			members = snap.apiPool(t.Provider)
 		}
+		if len(members) > 0 {
+			for _, name := range members {
+				member := Target{Provider: name, Model: t.Model}
+				if seen[member] {
+					continue
+				}
+				seen[member], pooled[member] = true, true
+				out = append(out, member)
+				groups = append(groups, i)
+			}
+			continue
+		}
+		if pooled[t] {
+			continue
+		}
+		seen[t] = true
 		out = append(out, t)
 		groups = append(groups, i)
 	}

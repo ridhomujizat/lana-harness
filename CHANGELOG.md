@@ -7,6 +7,10 @@ but their config keys, events, and tools may still change between betas.
 
 ## [Unreleased]
 
+### Added
+
+- Router: the connections of an API key provider (for example `commandcode` and `commandcode-2`) with the same kind and base URL form one ordered pool, like Claude Code and Antigravity accounts. Drag them on the provider page; the top connection is used first and the next one answers when a connection runs out of credit, hits its rate limit, or its key is rejected. `priority` and `pool = false` work on API connections.
+
 ## [0.6.0-beta.12] - 2026-11-26
 
 ### Added

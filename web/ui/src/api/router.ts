@@ -40,6 +40,13 @@ export interface ProviderRow {
   /* Spec 75 (REQ-PAF-005): the keys of an API provider in use order:
      api_key_env first, then api_key_envs. Secret names only. */
   keys?: ProviderKey[];
+  /* Spec 80 (REQ-ACP-004): an API connection's place in its connection
+     pool: its priority (default 100), false only with pool = false, and a
+     group equal for two connections exactly when they share kind and base
+     URL. An older daemon sends none of them. */
+  priority?: number;
+  pool?: boolean;
+  pool_group?: string;
 }
 
 /* One key of an API provider (spec 75): its secret name, whether the
@@ -1072,7 +1079,8 @@ export function setAntigravityAccountLabel(
 /* Account order and key pools (spec 75)                              */
 /* ------------------------------------------------------------------ */
 
-export type PoolRuntime = "claude-code" | "antigravity";
+/* "api" orders the connections of one API connection pool (spec 80). */
+export type PoolRuntime = "claude-code" | "antigravity" | "api";
 
 export interface PoolOrderResponse {
   version: string;
@@ -1080,8 +1088,9 @@ export interface PoolOrderResponse {
   pool: string[];
 }
 
-/* Rewrites the pool order of a subscription runtime: order holds the pooled
-   accounts top to bottom, unpooled the rest. Every account appears once. */
+/* Rewrites the pool order of a subscription runtime, or of one API
+   connection pool (runtime "api"): order holds the pooled accounts top to
+   bottom, unpooled the rest. Every account appears once. */
 export async function savePoolOrder(
   runtime: PoolRuntime,
   order: string[],
