@@ -80,12 +80,6 @@ func (h *harness) setFixture(name string) {
 	h.fixture.Store(abs)
 }
 
-func (h *harness) setEnv(env ...string) {
-	h.mu.Lock()
-	h.env = env
-	h.mu.Unlock()
-}
-
 // recorder collects emitted events.
 type recorder struct {
 	mu     sync.Mutex

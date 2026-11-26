@@ -164,7 +164,7 @@ func (r *Runtime) SignInWithEmail(ctx context.Context, account core.RuntimeAccou
 	scanDone := make(chan struct{})
 	go func() {
 		defer close(scanDone)
-		defer pr.Close()
+		defer func() { _ = pr.Close() }()
 		sc := bufio.NewScanner(pr)
 		sc.Buffer(make([]byte, 64<<10), signInScanBytes)
 		for sc.Scan() {
@@ -207,7 +207,7 @@ func (r *Runtime) SignInWithEmail(ctx context.Context, account core.RuntimeAccou
 			onLink(url)
 		}
 	case <-scanDone:
-		<-done
+		<-done //nolint:errcheck // only waits for the exit; exitFailure reports it
 		return "", exitFailure()
 	case <-runCtx.Done():
 		r.stopProbe(cmd, done)
@@ -221,7 +221,7 @@ func (r *Runtime) SignInWithEmail(ctx context.Context, account core.RuntimeAccou
 			// No code will come: give agy EOF and read its answer.
 			_ = stdin.Close()
 			select {
-			case <-done:
+			case <-done: //nolint:errcheck // only waits for the exit
 			case <-runCtx.Done():
 				r.stopProbe(cmd, done)
 				return "", signInContextErr(ctx)
@@ -235,7 +235,7 @@ func (r *Runtime) SignInWithEmail(ctx context.Context, account core.RuntimeAccou
 		}
 		_ = stdin.Close()
 	case <-scanDone:
-		<-done
+		<-done //nolint:errcheck // only waits for the exit; exitFailure reports it
 		return "", exitFailure()
 	case <-runCtx.Done():
 		r.stopProbe(cmd, done)

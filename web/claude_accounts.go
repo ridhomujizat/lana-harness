@@ -2,7 +2,6 @@ package web
 
 import (
 	"bytes"
-	"context"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -55,26 +54,6 @@ func (d providerDocument) claudeAccounts() map[string]bool {
 		}
 	}
 	return out
-}
-
-// claudeAccountsOf is claudeAccounts of raw config.toml; a parse failure
-// leaves only the built-in account.
-func claudeAccountsOf(raw []byte) map[string]bool {
-	document, err := parseProviderDocument(raw)
-	if err != nil {
-		return map[string]bool{core.ClaudeCodeProvider: true}
-	}
-	return document.claudeAccounts()
-}
-
-// claudeAccountSet returns the Claude Code accounts of the stored config.
-func (s *Server) claudeAccountSet(ctx context.Context) map[string]bool {
-	if s.configStore != nil {
-		if file, err := s.configStore.ConfigFile(ctx); err == nil && file.Exists {
-			return claudeAccountsOf(file.Raw)
-		}
-	}
-	return map[string]bool{core.ClaudeCodeProvider: true}
 }
 
 // isClaudeAccountModel reports whether model is a "<account>/<model>" address

@@ -161,7 +161,6 @@ type agyState struct {
 	accounts  map[string]*agyAccount
 	authRuns  map[string]context.CancelFunc
 	usageRuns map[uint64]context.CancelFunc
-	usageSeq  uint64
 }
 
 // agyAccount is the cached probe of one account.
@@ -422,7 +421,7 @@ func (r *Runtime) stopProbe(cmd *exec.Cmd, done <-chan error) {
 		_ = cmd.Process.Signal(syscall.SIGTERM)
 	}
 	select {
-	case <-done:
+	case <-done: //nolint:errcheck // only waits for the exit
 		return
 	case <-time.After(r.opts.KillGrace):
 	}
@@ -430,7 +429,7 @@ func (r *Runtime) stopProbe(cmd *exec.Cmd, done <-chan error) {
 		_ = cmd.Process.Kill()
 	}
 	select {
-	case <-done:
+	case <-done: //nolint:errcheck // only waits for the exit
 	case <-time.After(r.opts.KillGrace):
 	}
 }
