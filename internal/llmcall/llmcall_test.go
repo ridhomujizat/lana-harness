@@ -189,26 +189,26 @@ type bgRouter struct {
 
 func (r bgRouter) BackgroundModel() string { return r.background }
 
-// REQ-CCT-007: background passes never use claude-code targets: the rest of
-// the chain, else [router] background_model, else ErrNoBackgroundModel.
+// Spec 78 REQ-RPR-009 (superseding REQ-CCT-007): a background pass uses the
+// agent's chain as it is, Claude Code targets included; [router]
+// background_model is used only for an empty chain, else ErrNoBackgroundModel.
 func TestBackgroundChain(t *testing.T) {
 	r := newStubRouter()
-	r.combos["claude"] = []core.LLMTarget{{Provider: ClaudeCode, Model: "opus"}, {Provider: "a", Model: "x"}}
-	chain, requested, err := BackgroundChain(r, []core.LLMTarget{{Provider: ClaudeCode, Model: "opus"}, {Provider: "a", Model: "x"}}, "claude")
-	if err != nil || len(chain) != 1 || chain[0].Provider != "a" || requested != "claude" {
-		t.Fatalf("rest: chain=%v requested=%q err=%v", chain, requested, err)
+	full := []core.LLMTarget{{Provider: ClaudeCode, Model: "opus"}, {Provider: "a", Model: "x"}}
+	chain, requested, err := BackgroundChain(r, full, "claude")
+	if err != nil || !reflect.DeepEqual(chain, full) || requested != "claude" {
+		t.Fatalf("full: chain=%v requested=%q err=%v", chain, requested, err)
 	}
 	only := []core.LLMTarget{{Provider: ClaudeCode, Model: "opus"}}
-	if _, _, err := BackgroundChain(r, only, "claude-code/opus"); !errors.Is(err, ErrNoBackgroundModel) {
+	if chain, _, err := BackgroundChain(bgRouter{r, "b/y"}, only, "claude-code/opus"); err != nil || !reflect.DeepEqual(chain, only) {
+		t.Fatalf("only: chain=%v err=%v", chain, err)
+	}
+	if _, _, err := BackgroundChain(r, nil, ""); !errors.Is(err, ErrNoBackgroundModel) {
 		t.Fatalf("no background model: err = %v", err)
 	}
-	chain, requested, err = BackgroundChain(bgRouter{r, "b/y"}, only, "claude-code/opus")
+	chain, requested, err = BackgroundChain(bgRouter{r, "b/y"}, nil, "")
 	if err != nil || len(chain) != 1 || chain[0] != (core.LLMTarget{Provider: "b", Model: "y"}) || requested != "b/y" {
 		t.Fatalf("background model: chain=%v requested=%q err=%v", chain, requested, err)
-	}
-	plain := []core.LLMTarget{{Provider: "a", Model: "x"}}
-	if chain, _, _ := BackgroundChain(r, plain, "a/x"); !reflect.DeepEqual(chain, plain) {
-		t.Fatalf("plain chain changed: %v", chain)
 	}
 }
 

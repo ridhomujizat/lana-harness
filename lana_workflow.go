@@ -65,8 +65,10 @@ type workflowDeps struct{ rt *Runtime }
 func (d workflowDeps) RunAgent(ctx context.Context, req workflow.AgentRequest) (workflow.AgentResult, error) {
 	rt := d.rt
 	if req.Background {
-		// Spec 39 revision 5: a guardian's structured call is lana
-		// background work on the agent's background chain.
+		// Spec 78 REQ-RPR-009 (superseding spec 39 revision 5): a guardian's
+		// structured call runs on the guardian's own chain like an ordinary
+		// turn, in Claude Code or Antigravity when the chain starts there; it
+		// is not a scheduled run, so allow_scheduled does not apply.
 		if err := rt.backgroundRunAllowed(req.Agent); err != nil {
 			return workflow.AgentResult{}, err
 		}
@@ -79,11 +81,12 @@ func (d workflowDeps) RunAgent(ctx context.Context, req workflow.AgentRequest) (
 	if err != nil {
 		return workflow.AgentResult{}, err
 	}
-	// REQ-CCT-008, REQ-AGY-008: the run's turns skip Claude Code and
-	// Antigravity unless allow_scheduled.
-	defer rt.registry.MarkScheduled(session.ID)()
 	if req.Background {
 		defer rt.registry.MarkBackground(session.ID)()
+	} else {
+		// REQ-CCT-008, REQ-AGY-008: a workflow node's turns skip Claude Code
+		// and Antigravity unless allow_scheduled.
+		defer rt.registry.MarkScheduled(session.ID)()
 	}
 	entry := &workflowSession{lock: toolSet(req.Lock), maxSteps: req.MaxSteps}
 	if req.Tools != nil {
@@ -158,11 +161,10 @@ func (d workflowDeps) RunAssistantTurn(ctx context.Context, sessionID, note, tex
 }
 
 // backgroundRunAllowed checks a workflow guardian's structured call before it
-// starts (spec 39 revision 5): the call runs on the agent's background chain
-// (llmcall.AgentBackgroundChain), so an agent whose chain has only Claude
-// Code targets needs [router] background_model; without one the call fails
-// with a *workflow.GuardianBackgroundError the dashboard shows as is. A team
-// is checked by its lead.
+// starts: the call runs on the agent's chain (spec 78 REQ-RPR-009), and only
+// when no chain resolves at all, not even [router] background_model, does it
+// fail with a *workflow.GuardianBackgroundError the dashboard shows as is. A
+// team is checked by its lead.
 func (rt *Runtime) backgroundRunAllowed(agentName string) error {
 	cfg, ok := rt.agentConfig(agentName)
 	if !ok {

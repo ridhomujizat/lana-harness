@@ -56,15 +56,27 @@ func (r *Router) streamChain(ctx context.Context, snap *snapshot, requested stri
 	if len(chain) == 0 {
 		return nil, Target{}, &core.ProviderError{Class: "client", Message: "provider target is empty"}
 	}
-	active := r.cool.filter(chain, r.now())
+	// Spec 78: a pooled Claude Code or Antigravity target tries every
+	// account of its pool (REQ-PAF-001).
+	chain, groups := r.runtimePool(chain)
+	active := r.cool.filterIndex(chain, r.now())
 	var lastErr error
+	// skipGroup is the pool whose remaining accounts are skipped after a
+	// failure that is not an account's own (REQ-PAF-001); -1 for none.
+	skipGroup := -1
 targets:
-	for i, target := range active {
+	for i, ci := range active {
+		target := chain[ci]
+		if groups[ci] == skipGroup {
+			continue
+		}
+		skipGroup = -1
 		retries := retriesBeforeNext
 		last := i == len(active)-1
 		if last {
 			retries = retriesOnLast
 		}
+		_, runtime := snap.runtimeKind(target.Provider)
 		// REQ-PAF-005: a provider with several API keys moves to its next key
 		// before the chain moves on. tried holds the keys this target used.
 		entry := snap.providers[target.Provider]
@@ -94,6 +106,21 @@ targets:
 			}
 			lastErr = pe
 			class := effectiveClass(pe)
+			if runtime {
+				if !poolMoves(class) {
+					skipGroup = groups[ci]
+				}
+				switch {
+				case runtimeInputError(pe):
+					// REQ-RPR-003: the next target may take tools or images.
+					continue targets
+				case class == "rate_limit" || class == core.ErrorClassQuota:
+					// REQ-RPR-005: a usage limit does not clear in seconds; the
+					// account cools down and the chain moves on at once.
+					r.coolRuntime(snap, target, pe)
+					continue targets
+				}
+			}
 			if entry.pooled() && key != nil && keySpent(class, pe, k, retries) {
 				r.coolKey(snap, target.Provider, key.env, class, pe)
 				if tried == nil {
@@ -258,16 +285,10 @@ func (r *Router) KeyCooling(provider string) map[string]time.Time {
 // attempt makes one call to one target with one of its keys and waits for
 // its first event. key nil uses the provider's first adapter.
 func (r *Router) attempt(ctx context.Context, snap *snapshot, requested string, target Target, key *keyClient, n int, start time.Time, req core.ChatRequest, meta CallMeta) (core.ChatStream, error) {
-	if snap.isClaude(target.Provider) {
-		// ADR 0020: a Claude Code target runs in the Claude Code runtime; the
-		// agent dispatches it before the router, so this is never reached.
-		return nil, &core.ProviderError{Class: core.ErrorClassNotFound, Message: "claude-code targets run in the Claude Code runtime, not through the router"}
-	}
-	if snap.isAntigravity(target.Provider) {
-		// ADR 0022, AC-AGY-016: an Antigravity target runs in the Antigravity
-		// runtime; the agent dispatches it before the router, so this is never
-		// reached. This keeps it out of StreamChain, cooldown, and the proxy.
-		return nil, &core.ProviderError{Class: core.ErrorClassNotFound, Message: "antigravity targets run in the Antigravity runtime, not through the router"}
+	if kind, ok := snap.runtimeKind(target.Provider); ok {
+		// Spec 78, ADR 0023: a Claude Code or Antigravity target runs its
+		// account's CLI through the runtime streamer.
+		return r.attemptRuntime(ctx, snap, requested, target, kind, n, start, req, meta)
 	}
 	entry, ok := snap.providers[target.Provider]
 	if !ok {

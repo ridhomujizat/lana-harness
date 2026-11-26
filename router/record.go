@@ -92,7 +92,7 @@ func (r *Router) recordFailure(snap *snapshot, requested string, target Target, 
 	rec.Outcome = effectiveClass(pe)
 	rec.DurationMs = r.now().Sub(start).Milliseconds()
 	rec.Error = truncate(pe.Error(), maxRecordError)
-	rec.CostUSD = Cost(r.priceFor(snap, target), core.Usage{})
+	rec.CostUSD = r.callCost(snap, target, core.Usage{})
 	r.emit(rec)
 }
 
@@ -115,7 +115,7 @@ func (r *Router) recordedStream(snap *snapshot, first core.ChatEvent, pump *stre
 			rec.InputTokens = usage.InputTokens
 			rec.OutputTokens = usage.OutputTokens
 			rec.CachedTokens = usage.CachedInputTokens
-			rec.CostUSD = Cost(r.priceFor(snap, Target{Provider: base.Provider, Model: base.Model}), usage)
+			rec.CostUSD = r.callCost(snap, Target{Provider: base.Provider, Model: base.Model}, usage)
 			rec.Outcome = "ok"
 			if streamErr != nil {
 				pe := snap.redactError(r.opts.secrets, base.Provider, asProviderError(streamErr))
@@ -164,6 +164,15 @@ func (r *Router) emit(rec CallRecord) {
 	}
 	defer func() { _ = recover() }()
 	box.rec.Record(rec)
+}
+
+// callCost is the cost of a call on target: 0 for a Claude Code or
+// Antigravity account (spec 78 REQ-RPR-006), else Cost at the target's price.
+func (r *Router) callCost(snap *snapshot, target Target, usage core.Usage) *float64 {
+	if _, ok := snap.runtimeKind(target.Provider); ok {
+		return runtimeCost()
+	}
+	return Cost(r.priceFor(snap, target), usage)
 }
 
 // priceFor returns the price of a target: the provider's own model list

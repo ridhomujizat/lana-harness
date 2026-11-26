@@ -267,15 +267,9 @@ func (rn *Runner) resolve(ctx context.Context) (resolvedAgent, error) {
 	// never in lana's loop; runTurn dispatches them.
 	fullChain := targets
 	targets = llmcall.WithoutExternal(rn.reg.llm, fullChain)
-	// Spec 39 revision 5: a background-work session (a workflow guardian's
-	// structured call) runs on the background chain, never in Claude Code.
-	if rn.reg.isBackground(rn.sessionID) {
-		background, backgroundRequested, err := llmcall.BackgroundChain(rn.reg.llm, fullChain, requested)
-		if err != nil {
-			return resolvedAgent{}, fmt.Errorf("agent %s: %w", cfgName, err)
-		}
-		fullChain, targets, requested = background, background, backgroundRequested
-	}
+	// Spec 78 REQ-RPR-009: a background-work session (a workflow guardian's
+	// structured call) runs on the agent's own chain like any turn, in Claude
+	// Code or Antigravity when the chain starts there.
 	workspace := info.Workspace
 	if workspace == "" {
 		workspace = cfg.Workspace

@@ -618,8 +618,10 @@ func (s *Service) resolveChain(req core.CompactRequest, agentName string, events
 		if requested == "" {
 			requested = llmcall.Address(req.Targets[0])
 		}
-		// REQ-CCT-007: never a Claude Code target.
-		return llmcall.BackgroundChain(s.LLM, req.Targets, requested)
+		// Spec 78 REQ-RPR-009: the summary sends tools, which the Claude
+		// Code and Antigravity CLIs do not serve, so the chain without them,
+		// else [router] background_model.
+		return llmcall.ToolBackgroundChain(s.LLM, req.Targets, requested)
 	}
 	provider, model, fallback := s.resolveModel(agentName, events)
 	if req.Provider != "" {
@@ -635,8 +637,8 @@ func (s *Service) resolveChain(req core.CompactRequest, agentName string, events
 	if err != nil {
 		return nil, "", err
 	}
-	// REQ-CCT-007: a background pass never uses a Claude Code target.
-	return llmcall.BackgroundChain(s.LLM, chain, llmcall.Requested(provider, model))
+	// Spec 78 REQ-RPR-009: without the CLI targets (the summary sends tools).
+	return llmcall.ToolBackgroundChain(s.LLM, chain, llmcall.Requested(provider, model))
 }
 
 // resolveModel returns the provider, model, and fallback of the session's

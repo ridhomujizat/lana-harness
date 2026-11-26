@@ -192,7 +192,8 @@ func (s *Service) agentCall(name string, cfg core.AgentConfig) (agentCall, error
 	if s.llm == nil {
 		return agentCall{}, errors.New("no llm registry")
 	}
-	// REQ-CCT-007: knowledge passes never use Claude Code.
+	// Spec 78 REQ-RPR-009: knowledge passes use the agent's chain as it is,
+	// Claude Code and Antigravity targets included.
 	chain, requested, err := llmcall.AgentBackgroundChain(s.llm, cfg)
 	if errors.Is(err, llmcall.ErrNoBackgroundModel) {
 		llmcall.WarnNoBackground(name, "knowledge")

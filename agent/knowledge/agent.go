@@ -15,8 +15,8 @@ var knowledgeToolNames = []string{"knowledge_search", "knowledge_read", "knowled
 // name order whose tools list has a knowledge tool. Without one it returns ""
 // and a reason for the status.
 func knowledgeAgent(cfg core.Config) (name string, reason string) {
-	// REQ-CCT-007: a Claude Code agent runs the passes with its background
-	// chain.
+	// Spec 78 REQ-RPR-009: a Claude Code agent runs the passes on its own
+	// chain, through the router's CLI streamer.
 	if cfg.Knowledge.Agent != "" {
 		return cfg.Knowledge.Agent, ""
 	}

@@ -102,9 +102,10 @@ func (s *Service) run(req core.CaptureRequest) {
 		s.warn("provider is not registered", req, nil)
 		return
 	}
-	// REQ-CCT-007: the pass never uses Claude Code: the rest of the chain,
-	// else [router] background_model, else it is skipped.
-	chain, requested, err = llmcall.BackgroundChain(s.LLM, chain, requested)
+	// Spec 78 REQ-RPR-009: the pass sends tools, which the Claude Code and
+	// Antigravity CLIs do not serve, so the chain without them, else
+	// [router] background_model, else it is skipped.
+	chain, requested, err = llmcall.ToolBackgroundChain(s.LLM, chain, requested)
 	if errors.Is(err, llmcall.ErrNoBackgroundModel) {
 		llmcall.WarnNoBackground(req.AgentName, "memory_capture")
 		return

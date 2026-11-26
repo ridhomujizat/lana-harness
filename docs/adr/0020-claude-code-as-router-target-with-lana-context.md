@@ -5,6 +5,7 @@
 - **Deciders**: Ridho
 - **Related ADRs**: [0018](0018-claude-code-as-external-agent-runtime.md) (amended), [0019](0019-llm-router-as-embeddable-core.md), [0012](0012-acp-and-sdk-json-rpc.md)
 - **Amended**: 2026-11-08 (one-click sign-in and usage probe, below)
+- **Superseded in part by ADR 0023**: [0023](0023-claude-code-and-antigravity-through-the-router-endpoint.md) (2026-11-26) replaces item 6 (background passes) and lets the router run Claude Code targets as headless CLI calls; the agent runtime clauses stay.
 
 ## Context
 

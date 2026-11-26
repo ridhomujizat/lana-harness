@@ -1325,8 +1325,8 @@ func validateEffective(m map[string]any, positions map[string]pos, add func(stri
 		}
 		// API-KNU-001: knowledge.agent must name a configured agent.
 		if name, ok := k["agent"].(string); ok && name != "" {
-			// REQ-CCT-007: a Claude Code agent may run the passes; they use its
-			// background chain.
+			// Spec 78 REQ-RPR-009: a Claude Code agent may run the passes; they
+			// use its chain through the router.
 			if !contains(agentNames, name) {
 				add("knowledge.agent", fmt.Sprintf("unknown agent %q", name))
 			}

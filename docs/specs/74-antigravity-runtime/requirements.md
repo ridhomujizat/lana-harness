@@ -145,6 +145,10 @@ process group and the turn ends as cancelled.
 
 ### REQ-AGY-008: Fallback, background, schedules
 
+> Superseded in part by spec 78 (2026-11-26, ADR 0023): background work uses the agent's chain as it is,
+> Antigravity included, and the router's OpenAI-compatible endpoint serves Antigravity models as headless
+> `agy -p` calls (REQ-RPR-002, REQ-RPR-009). Agent turns are unchanged.
+
 As spec 39 REQ-CCT-004, 007, 008 with "Antigravity" for "Claude Code": fallback to the next chain target
 only before the first text or tool event (not installed, too old, not signed in, quota exhausted before
 output, process error); background passes and the title pass never run on Antigravity; scheduled runs

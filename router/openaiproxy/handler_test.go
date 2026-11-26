@@ -770,10 +770,10 @@ func TestRouting(t *testing.T) {
 	}
 }
 
-// AC-AGY-016, API-AGY-026: an Antigravity address is never served through the
-// proxy: it answers 404 model_not_found, lists no Antigravity model, and runs
-// nothing upstream.
-func TestProxyRejectsAntigravity(t *testing.T) {
+// Spec 78 (superseding AC-AGY-016's proxy clause): without a runtime
+// streamer an Antigravity address answers 404 not_found, lists no
+// Antigravity model, and runs nothing upstream.
+func TestProxyAntigravityWithoutStreamer(t *testing.T) {
 	p := &fakeProvider{events: textEvents("ok")}
 	e := newEnv(t, map[string]*fakeProvider{"a": p}, nil)
 	// The built-in "antigravity" account always exists; add a named one.
@@ -788,7 +788,7 @@ func TestProxyRejectsAntigravity(t *testing.T) {
 		if resp.StatusCode != http.StatusNotFound {
 			t.Fatalf("%s: status = %d: %s", model, resp.StatusCode, readBody(t, resp))
 		}
-		if got := decodeError(t, resp); got.Code != "model_not_found" {
+		if got := decodeError(t, resp); got.Code != core.ErrorClassNotFound {
 			t.Fatalf("%s: error = %+v", model, got)
 		}
 	}
