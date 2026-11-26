@@ -15,6 +15,7 @@ final class WindowShellTests: XCTestCase {
         XCTAssertEqual(ShellMessage.parse("dblclick"), .doubleClick)
         XCTAssertEqual(ShellMessage.parse("theme:dark"), .theme(dark: true))
         XCTAssertEqual(ShellMessage.parse("theme:light"), .theme(dark: false))
+        XCTAssertEqual(ShellMessage.parse("theme:system"), .themeSystem)
         XCTAssertNil(ShellMessage.parse("start"))
         XCTAssertNil(ShellMessage.parse(42))
     }
@@ -32,6 +33,8 @@ final class WindowShellTests: XCTestCase {
         XCTAssertTrue(prod.contains("\"--shell-lights-w\", \"84px\""))
         XCTAssertTrue(prod.contains("[data-drag-region]"))
         XCTAssertTrue(prod.contains("messageHandlers.lanaShell"))
+        XCTAssertTrue(prod.contains("theme:system"))
+        XCTAssertTrue(prod.contains("lana.theme"))
         XCTAssertFalse(prod.contains("shellVariant"))
         XCTAssertTrue(shellBootstrapScript(variant: .dev, lightsWidth: 84).contains("d.dataset.shellVariant = \"dev\""))
         XCTAssertEqual(fullscreenScript(true), "document.documentElement.toggleAttribute(\"data-shell-fullscreen\", true);")
