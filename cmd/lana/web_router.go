@@ -314,6 +314,9 @@ func webRouterLimit(snap router.LimitSnapshot) web.RouterLimit {
 			Granted: snap.Balance.Granted, ToppedUp: snap.Balance.ToppedUp,
 		}
 	}
+	if snap.Plan != nil {
+		out.Plan = &web.RouterPlan{Name: snap.Plan.Name, Status: snap.Plan.Status, RenewsAt: snap.Plan.RenewsAt}
+	}
 	for _, window := range snap.Windows {
 		out.Windows = append(out.Windows, web.RouterPlanWindow{
 			Type: window.Type, Status: window.Status, Utilization: window.Utilization, ResetsAt: window.ResetsAt,

@@ -7,6 +7,10 @@ but their config keys, events, and tools may still change between betas.
 
 ## [Unreleased]
 
+### Added
+
+- Router: Command Code providers report their plan usage on the Limits page: the plan and its renewal date, the credit left of the month's pool, and the 5-hour and weekly windows, read the way the official CLI's `/usage` reads them.
+
 ## [0.6.0-beta.12] - 2026-11-26
 
 ### Added

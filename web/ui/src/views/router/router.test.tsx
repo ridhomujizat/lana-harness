@@ -58,7 +58,7 @@ import { ProviderDetail } from "./provider-detail";
 import { ProviderLogo } from "./provider-logo";
 import { monogram, presetFor } from "./presets";
 import { resetsIn } from "./router-common";
-import { windowText } from "./limits";
+import { LimitCard, planLine, windowText } from "./limits";
 import { claudeLimitsStale } from "./limits-refresh";
 import { SIGN_IN_HELP, SIGN_IN_POLL_MS } from "./claude-code-page";
 
@@ -422,6 +422,48 @@ describe("router quota", () => {
     expect(within(screen.getByLabelText("Limits of openrouter")).getByText("$7.50 of $10 left")).toBeTruthy();
     expect(within(screen.getByLabelText("Limits of deepseek")).getByText("$4.20 balance")).toBeTruthy();
     expect(within(screen.getByLabelText("Limits of local")).getByText("Not reported by this provider")).toBeTruthy();
+  });
+
+  /* Spec 79 (AC-CCU-001..003): a Command Code card shows its plan, its
+     credit, and its 5-hour and weekly windows. */
+  it("renders the Command Code plan, credit, and windows", () => {
+    const day = 86400000;
+    const limit: LimitSnapshot = {
+      provider: "cmc",
+      kind: "commandcode",
+      updated_at: new Date().toISOString(),
+      credit: { limit_usd: 87.5, used_usd: 67.5, remaining_usd: 20 },
+      windows: [
+        { type: "five_hour", status: "allowed", utilization: 0.75, resets_at: new Date(Date.now() + 90 * 60000).toISOString() },
+        { type: "seven_day", status: "rejected", utilization: 1, resets_at: new Date(Date.now() + 3 * day).toISOString() },
+      ],
+      plan: { name: "Pro", status: "active", renews_at: new Date(Date.now() + 12 * day - 60000).toISOString() },
+    };
+    render(<LimitCard limit={limit} />);
+    const card = screen.getByLabelText("Limits of cmc");
+    expect(within(card).getByText("Pro plan · renews in 12 days")).toBeTruthy();
+    expect(within(card).getByText("$20.00 of $87.50 left")).toBeTruthy();
+    expect(within(card).getByText("5-hour window")).toBeTruthy();
+    expect(within(card).getByText(/^75 % used · resets in 1h 2\dm$/)).toBeTruthy();
+    expect(within(card).getByText("Weekly window")).toBeTruthy();
+    expect(within(card).getByText(/^100 % used · resets in 2d 23h$/)).toBeTruthy();
+    expect(within(card).getByLabelText("5-hour window")).toBeTruthy();
+    expect(within(card).queryByText("Not reported by this provider")).toBeNull();
+  });
+
+  it("counts a plan alone as a report and names a status other than active", () => {
+    const now = Date.parse("2026-11-26T00:00:00Z");
+    expect(planLine({ name: "Go", status: "past_due", renews_at: "2026-11-29T00:00:00Z" }, now)).toBe(
+      "Go plan · past due · renews in 3 days"
+    );
+    expect(planLine({ name: "Max", status: "canceled", renews_at: "2026-11-27T00:00:00Z" }, now)).toBe(
+      "Max plan · canceled · ends in 1 day"
+    );
+    expect(planLine({ name: "individual_custom" }, now)).toBe("individual_custom plan");
+    render(<LimitCard limit={{ provider: "solo", kind: "commandcode", plan: { name: "Go" }, windows: [] }} />);
+    const card = screen.getByLabelText("Limits of solo");
+    expect(within(card).getByText("Go plan")).toBeTruthy();
+    expect(within(card).queryByText("Not reported by this provider")).toBeNull();
   });
 
   /* Spec 39 Revision 4: Refresh posts /v1/router/limits/refresh. */
