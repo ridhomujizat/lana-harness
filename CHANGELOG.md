@@ -7,16 +7,12 @@ but their config keys, events, and tools may still change between betas.
 
 ## [Unreleased]
 
+## [0.6.0-beta.13] - 2026-11-26
+
 ### Added
 
 - Router: Command Code providers report their plan usage on the Limits page: the plan and its renewal date, the credit left of the month's pool, and the 5-hour and weekly windows, read the way the official CLI's `/usage` reads them.
-### Fixed
-
-- Router and Workbench: a Claude Code account shows the plan name Claude Code itself shows (for example "Ultra"), from the display name it caches in its global config file for the same login, else the more specific plan tier ("Max 20x" instead of "Max").
 - Router: the connections of an API key provider (for example `commandcode` and `commandcode-2`) with the same kind and base URL form one ordered pool, like Claude Code and Antigravity accounts. Drag them on the provider page; the top connection is used first and the next one answers when a connection runs out of credit, hits its rate limit, or its key is rejected. `priority` and `pool = false` work on API connections.
-### Fixed
-
-- Workbench: Show as chat works for Claude Code panes on a Router account (it was empty).
 - Workbench: MCP servers of the built-in account (`~/.claude.json`, user scope) are mirrored into every Claude Code account at launch, like claude-swap: a New tab, Beside, Sign in, or restored pane of an account gets the servers you added with `claude mcp add`, and adds, edits, and removals follow. The account's own previous entries are saved once to `.lana-mcp-displaced.json` in its folder. `lana claude mcp-sync --account <name>` runs the mirror by hand.
 
 ### Changed
@@ -27,6 +23,8 @@ but their config keys, events, and tools may still change between betas.
 
 ### Fixed
 
+- Router and Workbench: a Claude Code account shows the plan name Claude Code itself shows (for example "Ultra"), from the display name it caches in its global config file for the same login, else the more specific plan tier ("Max 20x" instead of "Max").
+- Workbench: Show as chat works for Claude Code panes on a Router account (it was empty).
 - Workbench: a pane opened from the Accounts popup (New tab, Beside, Sign in) is a shell with the agent typed in, so exiting Claude Code or Antigravity returns to the prompt instead of showing "Process exited".
 
 ## [0.6.0-beta.12] - 2026-11-26
