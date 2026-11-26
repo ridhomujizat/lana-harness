@@ -1412,24 +1412,23 @@ export function UserBubble({
   /* REQ-CHF-002: files sit above the bubble as cards; the bubble holds only
      the owner's text and is left out when there is none. A files-only send is
      stored with the placeholder text "(attachments)", which is not shown. */
-  if (attachments.length > 0 && text.trim() === ATTACHMENTS_PLACEHOLDER) {
-    text = "";
-  }
+  const shownText =
+    attachments.length > 0 && text.trim() === ATTACHMENTS_PLACEHOLDER ? "" : text;
   return (
     <div className="chat-user-row">
       <div className="chat-user-stack">
         {attachments.length > 0 ? <MessageFiles attachments={attachments} /> : null}
-        {text || replyTo ? (
+        {shownText || replyTo ? (
           <div className="chat-bubble">
             {replyTo ? (
               <span className="chat-bubble-quote" title={replyQuoteLabel(replyTo)}>
                 {replyQuoteLabel(replyTo)}
               </span>
             ) : null}
-            {text ? <FoldText text={text} /> : null}
+            {shownText ? <FoldText text={shownText} /> : null}
           </div>
         ) : null}
-        {text && at ? (
+        {shownText && at ? (
           <div className="chat-user-foot">
             <Button
               size="sm"
@@ -1438,7 +1437,7 @@ export function UserBubble({
               className="turn-copy"
               aria-label={copied ? "Copied" : "Copy message"}
               onClick={() => {
-                navigator.clipboard.writeText(text).then(
+                navigator.clipboard.writeText(shownText).then(
                   () => setCopied(true),
                   () => setCopied(false)
                 );

@@ -112,6 +112,8 @@ function routeContent(
       return <HomePage />;
     case "chats":
       return <ChatsPage />;
+    case "chats-archived":
+      return <ChatsPage archived />;
     case "chat":
       return <ChatsPage roomName={params.name} draft={params.draft} />;
     case "logs":
@@ -222,6 +224,8 @@ export function crumbsFor(
       return [{ label: "Home" }];
     case "chats":
       return [{ label: "Chats" }];
+    case "chats-archived":
+      return [{ label: "Chats", href: "#/chats" }, { label: "Archived" }];
     case "chat":
       return [
         { label: "Chats", href: "#/chats" },
@@ -364,6 +368,7 @@ export function pageKey(route: Route): string {
     case "router":
       return "router:" + (params.tab || "providers") + (params.provider ? "/" + params.provider : "");
     case "chats":
+    case "chats-archived":
     case "chat":
       return "chats";
     case "sessions":

@@ -1062,6 +1062,8 @@ export const roomsFixture: RoomRow[] = [
     unread: 2,
     turns_7d: 96,
     last_active_at: world - 2 * MIN,
+    archived_at: 0,
+    cleared_at: 0,
   },
   {
     name: "default",
@@ -1084,6 +1086,8 @@ export const roomsFixture: RoomRow[] = [
     unread: 0,
     turns_7d: 45,
     last_active_at: world - 35 * MIN,
+    archived_at: 0,
+    cleared_at: 0,
   },
   {
     name: "researcher",
@@ -1106,6 +1110,8 @@ export const roomsFixture: RoomRow[] = [
     unread: 1,
     turns_7d: 52,
     last_active_at: world - 8 * MIN,
+    archived_at: 0,
+    cleared_at: 0,
   },
   {
     name: "field-team",
@@ -1128,6 +1134,27 @@ export const roomsFixture: RoomRow[] = [
     unread: 1,
     turns_7d: 5,
     last_active_at: world - 18 * MIN,
+    archived_at: 0,
+    cleared_at: 0,
+  },
+  /* Spec 85 REQ-ARC-007: an archived room, so the Chats list ends with the
+     Archived row and #/chats/archived has something to show. */
+  {
+    name: "scout",
+    kind: "agent",
+    title: "Market scout",
+    color: "warning",
+    avatar: previewAvatar("scout"),
+    avatar_source: "default",
+    members: [],
+    lead: "",
+    presence: presence("resting", "Resting", world - 3 * DAY, ""),
+    last_message: null,
+    unread: 1,
+    turns_7d: 12,
+    last_active_at: world - 3 * DAY,
+    archived_at: world - 2 * DAY,
+    cleared_at: world - 4 * DAY,
   },
 ];
 
@@ -2066,6 +2093,9 @@ export function mockApi(method: string, url: URL, body?: unknown): MockResult {
       }
       if (at(3) === "messages") return { status: 200, body: roomSendFixture };
       if (at(3) === "read") return { status: 200, body: roomReadFixture };
+      /* Spec 85 REQ-ARC-002/003: archive and clear. */
+      if (at(3) === "archive") return { status: 200, body: { archived_at: world } };
+      if (at(3) === "clear") return { status: 200, body: { cleared_at: world, previous: 0 } };
       if (isGet) return { status: 200, body: { rooms: roomsFixture } };
       break;
     }

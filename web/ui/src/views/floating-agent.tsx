@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import type { RoomRow } from "../api/rooms";
 import type { Route } from "../app/router";
 import {
@@ -32,7 +32,7 @@ import {
 } from "./floating-agent-panel";
 import { FloatingPhone } from "./floating-agent-phone";
 import { useRooms } from "./presence";
-import { needsYou } from "./room-list-row";
+import { isArchived, needsYou } from "./room-list-row";
 
 /* Spec 72: one floating agent at the bottom right of every page but the
    Chats section. On a desktop it is a pill stuck to the right edge that opens
@@ -85,17 +85,21 @@ function FloatingLive() {
   const { rows, byName } = useRooms();
   const width = useViewportWidth();
   const phone = width <= PHONE_MAX;
-  useNotifications(rows, byName);
-  const current = pickCurrent(rows, fa.current);
+  /* Spec 85 REQ-ARC-012: the list, the phone stack and the notification counts
+     leave out archived rooms; a room already open in the panel stays open. */
+  const live = useMemo(() => rows.filter((row) => !isArchived(row)), [rows]);
+  useNotifications(live, byName);
+  const saved = fa.current ? rows.find((row) => row.name === fa.current) : undefined;
+  const current = saved || pickCurrent(live, "");
   if (!current) {
     return null;
   }
   const colors = colorMap(rows);
   if (phone) {
-    return <FloatingPhone rows={rows} byName={byName} colors={colors} current={current} fa={fa} />;
+    return <FloatingPhone rows={live} byName={byName} colors={colors} current={current} fa={fa} />;
   }
   return (
-    <FloatingDesktop rows={rows} byName={byName} colors={colors} current={current} fa={fa} />
+    <FloatingDesktop rows={live} byName={byName} colors={colors} current={current} fa={fa} />
   );
 }
 
