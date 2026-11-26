@@ -47,6 +47,17 @@ type Balance struct {
 	ToppedUp float64 `json:"topped_up"`
 }
 
+// Plan is the subscription plan a provider reports, such as Command Code's
+// "Pro" (spec 79).
+type Plan struct {
+	// Name is the plan's display name, else its raw id.
+	Name string `json:"name"`
+	// Status is the subscription status: "active", "trialing", "past_due", …
+	Status string `json:"status,omitempty"`
+	// RenewsAt is the end of the current billing period.
+	RenewsAt *time.Time `json:"renews_at,omitempty"`
+}
+
 // Window is a usage window of a plan, such as the Claude Agent five-hour
 // window (spec 38).
 type Window struct {
@@ -80,6 +91,7 @@ type LimitSnapshot struct {
 	Credit    *Credit     `json:"credit"`
 	Balance   *Balance    `json:"balance"`
 	Windows   []Window    `json:"windows"`
+	Plan      *Plan       `json:"plan,omitempty"`
 }
 
 // LimitUpdate is a partial snapshot merged into the stored one: a nil field
@@ -93,6 +105,8 @@ type LimitUpdate struct {
 	Credit *Credit     `json:"credit,omitempty"`
 	// Balance replaces the stored balance.
 	Balance *Balance `json:"balance,omitempty"`
+	// Plan replaces the stored plan.
+	Plan *Plan `json:"plan,omitempty"`
 	// Windows replaces the stored windows when non-nil, or, with
 	// MergeWindows, replaces the stored windows of the same types and keeps
 	// the others. A merged window without a label keeps the stored one.
@@ -203,6 +217,9 @@ func (r *Router) UpdateLimits(u LimitUpdate) {
 	}
 	if u.Balance != nil {
 		snap.Balance = u.Balance
+	}
+	if u.Plan != nil {
+		snap.Plan = u.Plan
 	}
 	if u.Windows != nil {
 		if u.MergeWindows {

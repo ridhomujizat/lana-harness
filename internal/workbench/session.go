@@ -81,9 +81,12 @@ type session struct {
 	// restart (spec 60 REQ-WR-024); both clear when it exits or restarts.
 	restored     time.Time
 	resumedAgent string
-	bellOsc      bool
-	bellEsc      bool
-	done         chan struct{}
+	// switching is set while an account switch runs in the session (spec 82
+	// REQ-WAS-002), so a second one is refused.
+	switching bool
+	bellOsc   bool
+	bellEsc   bool
+	done      chan struct{}
 }
 
 // attached is a connection attached to a session, whose output a goroutine
@@ -281,7 +284,7 @@ func sessionEnv(id string, extra []string) []string {
 		// A core started from inside a Claude Code session inherits its child
 		// markers; a terminal must start clean, like a new window would.
 		if k == "TERM" || k == "COLORTERM" || k == "LANA_WORKBENCH_SESSION" ||
-			k == "LANA_WORKBENCH_TTY" || k == "CLAUDECODE" || strings.HasPrefix(k, "CLAUDE_CODE_") {
+			k == "LANA_WORKBENCH_TTY" || k == envWorkbenchHome || k == "CLAUDECODE" || strings.HasPrefix(k, "CLAUDE_CODE_") {
 			continue
 		}
 		env = append(env, kv)
@@ -291,6 +294,11 @@ func sessionEnv(id string, extra []string) []string {
 		"COLORTERM=truecolor",
 		"LANA_WORKBENCH_SESSION="+id,
 	)
+	// Spec 83 REQ-WAG-001: a hook running under an account HOME finds the
+	// core's Lana home here.
+	if home := coreHome(); home != "" {
+		env = append(env, envWorkbenchHome+"="+home)
+	}
 	env = append(env, extra...)
 	// A non-login shell started from launchd has no locale: the core runs under
 	// launchd, which sets none, and a non-login shell skips /etc/zprofile,
@@ -752,6 +760,7 @@ func (s *session) refreshProgram() {
 				query = agentQuery{
 					Home: home, Env: s.env, PID: s.agentPID,
 					Cwd: s.cwd, Started: s.agentStarted,
+					SessionID: s.id, LanaHome: coreHome(),
 				}
 			}
 		}
@@ -891,6 +900,7 @@ func (s *session) info() Session {
 		}
 		out.ResumedAgent = s.resumedAgent
 	}
+	out.AccountSwitch, out.ConversationAgent, out.ConversationID, out.AgentConfigDir = s.switchStateLocked()
 	return out
 }
 

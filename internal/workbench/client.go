@@ -11,6 +11,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"sync"
 	"time"
 )
@@ -26,6 +27,8 @@ type Client struct {
 	pending map[int64]chan Response
 	err     error
 	closed  chan struct{}
+	// hello is the core's last Hello answer, nil until one is read.
+	hello *Hello
 }
 
 // Dial connects to a running core (REQ-WB-002); it does not start one.
@@ -218,7 +221,28 @@ func (c *Client) forget(id int64) {
 // Hello returns the core's version, pid and start time.
 func (c *Client) Hello(ctx context.Context) (h Hello, err error) {
 	err = c.call(ctx, Request{Op: "hello"}, &h)
+	if err == nil {
+		c.mu.Lock()
+		c.hello = &h
+		c.mu.Unlock()
+	}
 	return
+}
+
+// HasFeature reports whether the core advertises feature in its Hello,
+// reading the Hello once when the client has none yet.
+func (c *Client) HasFeature(ctx context.Context, feature string) (bool, error) {
+	c.mu.Lock()
+	h := c.hello
+	c.mu.Unlock()
+	if h == nil {
+		got, err := c.Hello(ctx)
+		if err != nil {
+			return false, err
+		}
+		h = &got
+	}
+	return slices.Contains(h.Features, feature), nil
 }
 
 // List returns every session, in creation order.
@@ -234,7 +258,20 @@ func (c *Client) Get(ctx context.Context, id string) (s Session, err error) {
 }
 
 // Create starts a session.
+//
+// A core started by an older app keeps running until it is empty and drops an
+// Input it does not know, so against a core without FeatureCreateInput the
+// input runs under `/bin/sh -c` and is followed by the user's shell instead.
 func (c *Client) Create(ctx context.Context, opts CreateOptions) (s Session, err error) {
+	if opts.Input != "" {
+		ok, err := c.HasFeature(ctx, FeatureCreateInput)
+		if err != nil {
+			return Session{}, err
+		}
+		if !ok {
+			opts = legacyInputOptions(opts)
+		}
+	}
 	err = c.call(ctx, Request{Op: "create", Create: &opts}, &s)
 	return
 }
@@ -247,6 +284,24 @@ func (c *Client) Kill(ctx context.Context, id string) error {
 // Restart runs a session's command again under the same id.
 func (c *Client) Restart(ctx context.Context, id string) (s Session, err error) {
 	err = c.call(ctx, Request{Op: "restart", SID: id}, &s)
+	return
+}
+
+// SwitchAccount continues a pane's conversation of agent ("claude" or "agy")
+// on the account of configDir, "" for the built-in account (spec 82
+// REQ-WAS-002, spec 83 REQ-WAG-003). A core without
+// FeatureSwitchAccount gets no request: the answer is ErrCoreOutdated. The
+// core's refusals come back as ErrNoConversation, ErrNotSwitchable and
+// ErrStillRunning.
+func (c *Client) SwitchAccount(ctx context.Context, id, agent, configDir string) (s Session, err error) {
+	ok, err := c.HasFeature(ctx, FeatureSwitchAccount)
+	if err != nil {
+		return Session{}, err
+	}
+	if !ok {
+		return Session{}, ErrCoreOutdated
+	}
+	err = c.call(ctx, Request{Op: "switch_account", SID: id, Switch: &SwitchOptions{Agent: agent, ConfigDir: configDir}}, &s)
 	return
 }
 

@@ -22,11 +22,13 @@ import {
   markSettingsSaved,
 } from "./settings-pages";
 import { SettingsUpdatesSection } from "./settings-updates";
+import { SettingsWorkbenchSection } from "./agent-hook-settings";
 
 /* Settings > General (REQ-WEB-054). The theme choice of REQ-WEB-031 stays here;
    the daemon, web dashboard, and about sections come from API-WEB-022,
    API-WEB-024, API-WEB-029, and API-WEB-013. "Change password" (REQ-WLG-007,
-   API-WLG-007) sets a new password and signs out the other browsers. */
+   API-WLG-007) sets a new password and signs out the other browsers. The
+   Workbench section holds the agent hook switch (spec 77 REQ-WRA-009). */
 
 const MIN_PASSWORD = 8;
 const SHORT_PASSWORD_TEXT = "Use at least 8 characters.";
@@ -361,7 +363,7 @@ export function SettingsGeneralPage({
       <SettingsPanel
         active="general"
         title="General"
-        description="The daemon, the dashboard, your password, and this browser."
+        description="The daemon, the dashboard, your password, the Workbench, and this browser."
       >
         <SettingsRestartBanner
           restartRequired={Boolean(config && config.restart_required)}
@@ -534,6 +536,8 @@ export function SettingsGeneralPage({
             </div>
           </form>
         </section>
+
+        <SettingsWorkbenchSection />
 
         <section className="sblock" aria-labelledby="settings-appearance-title">
           <h2 id="settings-appearance-title">Appearance</h2>

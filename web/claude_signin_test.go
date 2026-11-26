@@ -101,6 +101,42 @@ func configVersion(t *testing.T, store *testLiveConfigStore) string {
 // click (name claude-2, claude-3, …), creates its folder (0700), and starts
 // the sign-in; the sign-in can be read, refused while running, and
 // cancelled.
+// Spec 77 REQ-WRA-001, REQ-WRA-012: an account created from the Router page
+// shares the default folder's history and gets its .claude.json at once, not
+// only after the next daemon start.
+func TestClaudeAccountCreateSharesHistory(t *testing.T) {
+	s, store, _, cookie, csrf := newClaudeAuthServer(t)
+	defaultDir := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(defaultDir, "projects"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(defaultDir, "history.jsonl"), []byte("{}\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	s.SetClaudeDefaultDir(defaultDir)
+	defaultJSON := filepath.Join(t.TempDir(), ".claude.json")
+	if err := os.WriteFile(defaultJSON, []byte(`{"theme":"dark","oauthAccount":{"emailAddress":"o@example.com"}}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	s.SetClaudeDefaultJSON(defaultJSON)
+
+	created := serveMCP(t, s, http.MethodPost, "/v1/router/claude-code/accounts", "", cookie, csrf)
+	if created.code != http.StatusAccepted {
+		t.Fatalf("create = %d %s", created.code, created.body)
+	}
+	dir := filepath.Join(store.home, "claude", "claude-2")
+	for _, item := range []string{"projects", "history.jsonl"} {
+		target, err := os.Readlink(filepath.Join(dir, item))
+		if err != nil || target != filepath.Join(defaultDir, item) {
+			t.Fatalf("%s link = %q %v", item, target, err)
+		}
+	}
+	data, err := os.ReadFile(filepath.Join(dir, ".claude.json"))
+	if err != nil || !strings.Contains(string(data), `"theme"`) || strings.Contains(string(data), "oauthAccount") {
+		t.Fatalf(".claude.json = %s %v", data, err)
+	}
+}
+
 func TestClaudeAccountCreateAndSignIn(t *testing.T) {
 	s, store, auth, cookie, csrf := newClaudeAuthServer(t)
 

@@ -10,12 +10,21 @@ import {
   AccountsPanel,
   CLAUDE_MANAGE_HREF,
   COLLAPSE_STORAGE_KEY,
-  agyArgv,
+  createAccountSession,
+  accountLine,
+  agyLine,
   agyMostRoom,
   agyWindowLabel,
   agentHookCount,
   mostRoom,
+  shellQuote,
   sortAccounts,
+  switchBlocked,
+  agySwitchBlocked,
+  SWITCH_NO_AGY_CONVERSATION,
+  SWITCH_NO_CONVERSATION,
+  SWITCH_NOT_SWITCHABLE,
+  SWITCH_SAME_ACCOUNT,
   type AccountActions,
 } from "./workbench-accounts";
 
@@ -29,10 +38,12 @@ vi.mock("../api/workbench", async (importOriginal) => {
   const actual = await importOriginal<typeof import("../api/workbench")>();
   return {
     ...actual,
+    createWorkbenchSession: vi.fn(),
     getAgentHook: vi.fn(),
     setAgentHook: vi.fn(),
     getWorkbenchClaudeAccount: vi.fn(),
     setWorkbenchClaudeAccount: vi.fn(),
+    switchWorkbenchAccount: vi.fn(),
   };
 });
 
@@ -186,8 +197,32 @@ function agyStatus(accounts: router.AntigravityAccount[], installed = true): rou
   };
 }
 
-function actions() {
-  return { newTab: vi.fn<AccountActions["newTab"]>(), beside: vi.fn<AccountActions["beside"]>() };
+function actions(focused?: workbench.WorkbenchSession | null) {
+  return { newTab: vi.fn<AccountActions["newTab"]>(), focused };
+}
+
+/* A focused Workbench pane: a shell running claude on the built-in account. */
+function pane(over: Partial<workbench.WorkbenchSession> = {}): workbench.WorkbenchSession {
+  return {
+    id: "p1",
+    title: "",
+    command: ["/bin/zsh"],
+    dir: "/w",
+    pid: 10,
+    created: "",
+    cols: 80,
+    rows: 24,
+    program: "claude",
+    state: "idle",
+    exit_code: 0,
+    needs_you: false,
+    last_output: "",
+    attached: 1,
+    agent: "claude",
+    account_switch: "ready",
+    conversation_id: "0b1f4031-611b-4c77-8b94-2b941e4634f0",
+    ...over,
+  };
 }
 
 function row(name: string): HTMLElement {
@@ -234,39 +269,121 @@ describe("AccountsPanel: Claude Code", () => {
     expect(CLAUDE_MANAGE_HREF).toBe("#/router/providers/claude-code");
   });
 
-  it("opens the built-in account with -u and a Router account with its folder; Beside adds --continue", async () => {
+  it("opens the built-in account with -u and a Router account with its folder", async () => {
     const a = actions();
     const onClose = vi.fn();
     render(<AccountsPanel actions={a} onClose={onClose} />);
     await screen.findByText("Home");
 
     fireEvent.click(within(row("Home")).getByRole("button", { name: /New tab/ }));
-    expect(a.newTab).toHaveBeenLastCalledWith([
-      "env",
-      "-u",
-      "CLAUDE_CONFIG_DIR",
-      "-u",
-      "CLAUDE_SECURESTORAGE_CONFIG_DIR",
-      "/opt/bin/claude",
-    ]);
+    expect(a.newTab).toHaveBeenLastCalledWith(
+      "env -u CLAUDE_CONFIG_DIR -u CLAUDE_SECURESTORAGE_CONFIG_DIR /opt/bin/claude",
+      undefined,
+      "claude-code",
+    );
 
     fireEvent.click(within(row("Work")).getByRole("button", { name: /New tab/ }));
-    expect(a.newTab).toHaveBeenLastCalledWith([
-      "env",
-      "CLAUDE_CONFIG_DIR=/Users/me/.lana/claude/work",
-      "CLAUDE_SECURESTORAGE_CONFIG_DIR=/Users/me/.lana/claude/work",
-      "claude",
-    ]);
+    expect(a.newTab).toHaveBeenLastCalledWith(
+      "env CLAUDE_CONFIG_DIR='/Users/me/.lana/claude/work' CLAUDE_SECURESTORAGE_CONFIG_DIR='/Users/me/.lana/claude/work' claude",
+      undefined,
+      "claude-work",
+    );
 
-    fireEvent.click(within(row("Work")).getByRole("button", { name: /Beside/ }));
-    expect(a.beside).toHaveBeenLastCalledWith([
-      "env",
-      "CLAUDE_CONFIG_DIR=/Users/me/.lana/claude/work",
-      "CLAUDE_SECURESTORAGE_CONFIG_DIR=/Users/me/.lana/claude/work",
-      "claude",
-      "--continue",
-    ]);
-    expect(onClose).toHaveBeenCalledTimes(3);
+    // Spec 81 revision 2: the MCP servers are mirrored by the daemon, so the
+    // typed lines carry no --mcp-config.
+    for (const call of a.newTab.mock.calls) {
+      expect(call[0]).not.toContain("--mcp-config");
+    }
+    expect(onClose).toHaveBeenCalledTimes(2);
+  });
+
+  /* Spec 82 AC-WAS-004. */
+  it("shows Switch here instead of Beside, off with the reason when the pane has no conversation", async () => {
+    render(<AccountsPanel actions={actions(pane({ account_switch: "no_conversation", conversation_id: undefined }))} onClose={() => {}} />);
+    await screen.findByText("Home");
+    expect(within(group("Claude Code")).queryByRole("button", { name: /Beside/ })).toBeNull();
+    const button = within(row("Work")).getByRole("button", { name: /Switch here/ }) as HTMLButtonElement;
+    expect(button.disabled).toBe(true);
+    expect(button.title).toBe("No Claude conversation in this pane");
+    fireEvent.click(button);
+    expect(workbench.switchWorkbenchAccount).not.toHaveBeenCalled();
+  });
+
+  it("switches the focused pane to the account and closes", async () => {
+    vi.mocked(workbench.switchWorkbenchAccount).mockResolvedValue(pane({ agent_config_dir: work.config_dir }));
+    const a = actions(pane());
+    const onClose = vi.fn();
+    render(<AccountsPanel actions={a} onClose={onClose} />);
+    await screen.findByText("Home");
+    // The pane already runs on the built-in account.
+    const home = within(row("Home")).getByRole("button", { name: /Switch here/ }) as HTMLButtonElement;
+    expect(home.disabled).toBe(true);
+    expect(home.title).toBe(SWITCH_SAME_ACCOUNT);
+
+    const button = within(row("Work")).getByRole("button", { name: /Switch here/ }) as HTMLButtonElement;
+    expect(button.disabled).toBe(false);
+    expect(button.title).toBe("Continue this pane's conversation on Work");
+    fireEvent.click(button);
+    expect(workbench.switchWorkbenchAccount).toHaveBeenCalledWith("p1", "claude-work", "claude");
+    await waitFor(() => expect(onClose).toHaveBeenCalledTimes(1));
+    expect(a.newTab).not.toHaveBeenCalled();
+  });
+
+  it("asks first when the pane is working", async () => {
+    vi.mocked(workbench.switchWorkbenchAccount).mockResolvedValue(pane());
+    const onClose = vi.fn();
+    render(<AccountsPanel actions={actions(pane({ state: "working" }))} onClose={onClose} />);
+    await screen.findByText("Home");
+    fireEvent.click(within(row("Work")).getByRole("button", { name: /Switch here/ }));
+    expect(workbench.switchWorkbenchAccount).not.toHaveBeenCalled();
+    expect(within(row("Work")).getByText("Claude is working in this pane. Stop it and switch to Work?")).toBeTruthy();
+
+    fireEvent.click(within(row("Work")).getByRole("button", { name: "Cancel" }));
+    expect(within(row("Work")).queryByText(/Claude is working/)).toBeNull();
+    expect(workbench.switchWorkbenchAccount).not.toHaveBeenCalled();
+
+    fireEvent.click(within(row("Work")).getByRole("button", { name: /Switch here/ }));
+    fireEvent.click(within(row("Work")).getByRole("button", { name: "Switch" }));
+    expect(workbench.switchWorkbenchAccount).toHaveBeenCalledWith("p1", "claude-work", "claude");
+    await waitFor(() => expect(onClose).toHaveBeenCalled());
+  });
+
+  it("shows a refusal, and offers New tab when the core is outdated", async () => {
+    vi.mocked(workbench.switchWorkbenchAccount).mockRejectedValueOnce(
+      new ApiError(409, "still_running", "Claude did not exit. Exit it in the pane and try again."),
+    );
+    const a = actions(pane());
+    const onClose = vi.fn();
+    render(<AccountsPanel actions={a} onClose={onClose} />);
+    await screen.findByText("Home");
+    fireEvent.click(within(row("Work")).getByRole("button", { name: /Switch here/ }));
+    expect(await within(row("Work")).findByText("Claude did not exit. Exit it in the pane and try again.")).toBeTruthy();
+    expect(within(row("Work")).queryByRole("button", { name: /Open in a new tab/ })).toBeNull();
+    expect(onClose).not.toHaveBeenCalled();
+
+    vi.mocked(workbench.switchWorkbenchAccount).mockRejectedValueOnce(
+      new ApiError(409, "core_outdated", "Restart the Workbench to switch accounts in place"),
+    );
+    fireEvent.click(within(row("Work")).getByRole("button", { name: /Switch here/ }));
+    expect(await within(row("Work")).findByText("Restart the Workbench to switch accounts in place")).toBeTruthy();
+    fireEvent.click(within(row("Work")).getByRole("button", { name: /Open in a new tab/ }));
+    expect(a.newTab).toHaveBeenCalledWith(accountLine(work), undefined, "claude-work");
+    expect(onClose).toHaveBeenCalledTimes(1);
+  });
+
+  it("switchBlocked gives the reason Switch here is off", () => {
+    expect(switchBlocked(null, work)).toBe(SWITCH_NO_CONVERSATION);
+    expect(switchBlocked(pane({ account_switch: "no_conversation" }), work)).toBe(SWITCH_NO_CONVERSATION);
+    expect(switchBlocked(pane({ account_switch: "not_switchable" }), work)).toBe(SWITCH_NOT_SWITCHABLE);
+    expect(switchBlocked(pane(), work)).toBe("");
+    expect(switchBlocked(pane(), builtin)).toBe(SWITCH_SAME_ACCOUNT);
+    expect(switchBlocked(pane({ agent_config_dir: work.config_dir }), work)).toBe(SWITCH_SAME_ACCOUNT);
+    expect(switchBlocked(pane({ agent_config_dir: work.config_dir }), builtin)).toBe("");
+    // An older core sends no switch fields: a claude pane is let through (the
+    // daemon then answers core_outdated), anything else has no conversation.
+    const old = pane({ account_switch: undefined, conversation_id: undefined });
+    expect(switchBlocked(old, work)).toBe("");
+    expect(switchBlocked({ ...old, agent: "" }, work)).toBe(SWITCH_NO_CONVERSATION);
   });
 
   it("offers Sign in only on a signed-out account and runs its login command", async () => {
@@ -277,7 +394,7 @@ describe("AccountsPanel: Claude Code", () => {
     expect(within(row("Work")).queryByRole("button", { name: /Sign in/ })).toBeNull();
 
     fireEvent.click(within(row("Spare")).getByRole("button", { name: /Sign in/ }));
-    expect(a.newTab).toHaveBeenCalledWith(["sh", "-c", spare.login_command], "Sign in Spare");
+    expect(a.newTab).toHaveBeenCalledWith(spare.login_command, "Sign in Spare", "claude-spare");
   });
 
   it("Use for new terminals stores the default and moves the tag", async () => {
@@ -308,22 +425,30 @@ describe("AccountsPanel: Claude Code", () => {
     expect(screen.queryByRole("button", { name: /Use for new terminals/ })).toBeNull();
   });
 
-  it("opening probes usage once, then reads the accounts", async () => {
+  it("opening shows the accounts at once, then probes usage in the background and rereads", async () => {
+    let finish: () => void = () => {};
+    vi.mocked(router.refreshRouterLimits).mockImplementationOnce(
+      () => new Promise((resolve) => (finish = () => resolve([])))
+    );
     render(<AccountsPanel actions={actions()} onClose={() => {}} />);
+    /* The list shows while the probe is still running. */
     await screen.findByText("Home");
-    expect(router.refreshRouterLimits).toHaveBeenCalledTimes(1);
+    await waitFor(() => expect(router.refreshRouterLimits).toHaveBeenCalledTimes(1));
     expect(router.getClaudeAgent).toHaveBeenCalledTimes(1);
     expect(router.getAntigravity).toHaveBeenCalledTimes(1);
+    finish();
+    await waitFor(() => expect(router.getClaudeAgent).toHaveBeenCalledTimes(2));
+    await waitFor(() => expect(router.getAntigravity).toHaveBeenCalledTimes(2));
   });
 
   it("Refresh probes usage, then rereads the accounts", async () => {
     render(<AccountsPanel actions={actions()} onClose={() => {}} />);
     await screen.findByText("Home");
-    expect(router.getClaudeAgent).toHaveBeenCalledTimes(1);
+    await waitFor(() => expect(router.getClaudeAgent).toHaveBeenCalledTimes(2));
     fireEvent.click(screen.getByRole("button", { name: "Refresh" }));
     expect(router.refreshRouterLimits).toHaveBeenCalledTimes(2);
-    await waitFor(() => expect(router.getClaudeAgent).toHaveBeenCalledTimes(2));
-    await waitFor(() => expect(router.getAntigravity).toHaveBeenCalledTimes(2));
+    await waitFor(() => expect(router.getClaudeAgent).toHaveBeenCalledTimes(3));
+    await waitFor(() => expect(router.getAntigravity).toHaveBeenCalledTimes(3));
   });
 });
 
@@ -470,33 +595,81 @@ describe("AccountsPanel: groups, search, Antigravity", () => {
     expect(screen.queryByText("Home")).toBeNull();
   });
 
-  it("opens agy with the account's HOME, plain for the built-in; Beside adds --continue", async () => {
+  it("opens agy with the account's HOME, plain for the built-in", async () => {
     const a = actions();
     const onClose = vi.fn();
     render(<AccountsPanel actions={a} onClose={onClose} />);
     await screen.findByText("Agy Main");
 
     fireEvent.click(within(row("Agy Main")).getByRole("button", { name: /New tab/ }));
-    expect(a.newTab).toHaveBeenLastCalledWith(["/opt/bin/agy"]);
-    fireEvent.click(within(row("Agy Main")).getByRole("button", { name: /Beside/ }));
-    expect(a.beside).toHaveBeenLastCalledWith(["/opt/bin/agy", "--continue"]);
+    expect(a.newTab).toHaveBeenLastCalledWith("/opt/bin/agy", undefined, undefined, "antigravity");
 
+    const lab = "env HOME='/Users/me/.lana/agy/agy-2' SSH_CONNECTION='127.0.0.1 0 127.0.0.1 0' /opt/bin/agy";
     fireEvent.click(within(row("Agy Lab")).getByRole("button", { name: /New tab/ }));
-    expect(a.newTab).toHaveBeenLastCalledWith([
-      "env",
-      "HOME=/Users/me/.lana/agy/agy-2",
-      "SSH_CONNECTION=127.0.0.1 0 127.0.0.1 0",
-      "/opt/bin/agy",
-    ]);
-    fireEvent.click(within(row("Agy Lab")).getByRole("button", { name: /Beside/ }));
-    expect(a.beside).toHaveBeenLastCalledWith([
-      "env",
-      "HOME=/Users/me/.lana/agy/agy-2",
-      "SSH_CONNECTION=127.0.0.1 0 127.0.0.1 0",
-      "/opt/bin/agy",
-      "--continue",
-    ]);
-    expect(onClose).toHaveBeenCalledTimes(4);
+    expect(a.newTab).toHaveBeenLastCalledWith(lab, undefined, undefined, "agy-2");
+    expect(onClose).toHaveBeenCalledTimes(2);
+  });
+
+  /* Spec 83 AC-WAG-004. */
+  it("shows Switch here instead of Beside and switches an agy pane to the account", async () => {
+    vi.mocked(workbench.switchWorkbenchAccount).mockResolvedValue(pane());
+    const agyPane = pane({ agent: "agy", conversation_agent: "agy", conversation_id: "7f3c2a10-1b2c-4d5e-8f90-a1b2c3d4e5f6" });
+    const onClose = vi.fn();
+    render(<AccountsPanel actions={actions(agyPane)} onClose={onClose} />);
+    await screen.findByText("Agy Main");
+    expect(within(group("Antigravity")).queryByRole("button", { name: /Beside/ })).toBeNull();
+    // The pane runs on the built-in account already.
+    const main = within(row("Agy Main")).getByRole("button", { name: /Switch here/ }) as HTMLButtonElement;
+    expect(main.disabled).toBe(true);
+    expect(main.title).toBe(SWITCH_SAME_ACCOUNT);
+    // A Claude Code account cannot take an agy conversation.
+    const work = within(row("Work")).getByRole("button", { name: /Switch here/ }) as HTMLButtonElement;
+    expect(work.disabled).toBe(true);
+    expect(work.title).toBe(SWITCH_NO_CONVERSATION);
+
+    const lab = within(row("Agy Lab")).getByRole("button", { name: /Switch here/ }) as HTMLButtonElement;
+    expect(lab.disabled).toBe(false);
+    expect(lab.title).toBe("Continue this pane's conversation on Agy Lab");
+    fireEvent.click(lab);
+    expect(workbench.switchWorkbenchAccount).toHaveBeenCalledWith("p1", "agy-2", "agy");
+    await waitFor(() => expect(onClose).toHaveBeenCalledTimes(1));
+  });
+
+  it("asks first when an agy pane is working, and offers New tab when the core is outdated", async () => {
+    vi.mocked(workbench.switchWorkbenchAccount).mockRejectedValueOnce(
+      new ApiError(409, "core_outdated", "Restart the Workbench to switch accounts in place"),
+    );
+    const agyPane = pane({ agent: "agy", state: "working", conversation_agent: "agy" });
+    const a = actions(agyPane);
+    render(<AccountsPanel actions={a} onClose={() => {}} />);
+    await screen.findByText("Agy Lab");
+    fireEvent.click(within(row("Agy Lab")).getByRole("button", { name: /Switch here/ }));
+    expect(workbench.switchWorkbenchAccount).not.toHaveBeenCalled();
+    expect(within(row("Agy Lab")).getByText("Antigravity is working in this pane. Stop it and switch to Agy Lab?")).toBeTruthy();
+    fireEvent.click(within(row("Agy Lab")).getByRole("button", { name: "Switch" }));
+    expect(workbench.switchWorkbenchAccount).toHaveBeenCalledWith("p1", "agy-2", "agy");
+    expect(await within(row("Agy Lab")).findByText("Restart the Workbench to switch accounts in place")).toBeTruthy();
+    fireEvent.click(within(row("Agy Lab")).getByRole("button", { name: /Open in a new tab/ }));
+    expect(a.newTab).toHaveBeenLastCalledWith(
+      "env HOME='/Users/me/.lana/agy/agy-2' SSH_CONNECTION='127.0.0.1 0 127.0.0.1 0' /opt/bin/agy",
+      undefined,
+      undefined,
+      "agy-2",
+    );
+  });
+
+  it("agySwitchBlocked gives the reason Switch here is off", () => {
+    const agyPane = pane({ agent: "agy", conversation_agent: "agy" });
+    expect(agySwitchBlocked(null, agyLab)).toBe(SWITCH_NO_AGY_CONVERSATION);
+    expect(agySwitchBlocked(pane(), agyLab)).toBe(SWITCH_NO_AGY_CONVERSATION);
+    expect(agySwitchBlocked({ ...agyPane, account_switch: "no_conversation" }, agyLab)).toBe(SWITCH_NO_AGY_CONVERSATION);
+    expect(agySwitchBlocked({ ...agyPane, account_switch: "not_switchable" }, agyLab)).toBe(SWITCH_NOT_SWITCHABLE);
+    expect(agySwitchBlocked(agyPane, agyLab)).toBe("");
+    expect(agySwitchBlocked({ ...agyPane, agent_config_dir: agyLab.home }, agyLab)).toBe(SWITCH_SAME_ACCOUNT);
+    expect(agySwitchBlocked({ ...agyPane, agent_config_dir: agyLab.home }, agyMain)).toBe("");
+    expect(switchBlocked(agyPane, work)).toBe(SWITCH_NO_CONVERSATION);
+    // An older core: a pane running agy is let through.
+    expect(agySwitchBlocked(pane({ agent: "agy", account_switch: undefined }), agyLab)).toBe("");
   });
 
   it("a signed-out agy account links to the Router instead of Sign in", async () => {
@@ -591,13 +764,53 @@ describe("account helpers", () => {
     expect(agyMostRoom([agyOff])).toBeNull();
   });
 
-  it("agyArgv prefers the account binary, then the status binary, then agy", () => {
-    expect(agyArgv(agyMain)).toEqual(["agy"]);
-    expect(agyArgv({ ...agyMain, binary: "/x/agy" }, "/opt/bin/agy")).toEqual(["/x/agy"]);
-    expect(agyArgv(agyLab, "/opt/bin/agy")).toEqual(["env", "HOME=/Users/me/.lana/agy/agy-2", AGY_FILE_TOKEN_ENV, "/opt/bin/agy"]);
+  it("agyLine prefers the account binary, then the status binary, then agy", () => {
+    expect(agyLine(agyMain)).toBe("agy");
+    expect(agyLine({ ...agyMain, binary: "/x/agy" }, "/opt/bin/agy")).toBe("/x/agy");
+    expect(agyLine(agyLab, "/opt/bin/agy")).toBe(
+      "env HOME='/Users/me/.lana/agy/agy-2' SSH_CONNECTION='127.0.0.1 0 127.0.0.1 0' /opt/bin/agy",
+    );
     /* Spec 77 revision 4: agy uses its file token storage, no Keychain dialog. */
     expect(AGY_FILE_TOKEN_ENV).toBe("SSH_CONNECTION=127.0.0.1 0 127.0.0.1 0");
-    expect(agyArgv({ ...agyLab, home: "" }, "/opt/bin/agy")).toEqual([]);
+    expect(agyLine({ ...agyLab, home: "" }, "/opt/bin/agy")).toBe("");
+    expect(agyLine({ ...agyLab, home: "/Users/me/My Agy's" }, "/Apps/A gy/agy")).toBe(
+      "env HOME='/Users/me/My Agy'\\''s' SSH_CONNECTION='127.0.0.1 0 127.0.0.1 0' '/Apps/A gy/agy'",
+    );
+  });
+
+  it("an account pane is the shell with the line as input, never a command", async () => {
+    vi.mocked(workbench.createWorkbenchSession).mockResolvedValue({ id: "s1" } as workbench.WorkbenchSession);
+    const line = "env -u CLAUDE_CONFIG_DIR -u CLAUDE_SECURESTORAGE_CONFIG_DIR claude";
+    await createAccountSession("/w", line, "Sign in Home");
+    expect(workbench.createWorkbenchSession).toHaveBeenLastCalledWith({ dir: "/w", title: "Sign in Home", input: line });
+    await createAccountSession("", line);
+    const sent = vi.mocked(workbench.createWorkbenchSession).mock.lastCall?.[0];
+    expect(sent).toEqual({ dir: undefined, title: undefined, input: line });
+    expect(sent && "command" in sent).toBe(false);
+    expect(sent?.claude_account).toBeUndefined();
+    // Spec 81 REQ-SMC-005: a Claude Code account's name goes along.
+    await createAccountSession("/w", line, undefined, "claude-3");
+    expect(workbench.createWorkbenchSession).toHaveBeenLastCalledWith({
+      dir: "/w",
+      title: undefined,
+      input: line,
+      claude_account: "claude-3",
+    });
+  });
+
+  it("shellQuote single-quotes a value and escapes its single quotes", () => {
+    expect(shellQuote("plain")).toBe("'plain'");
+    expect(shellQuote("/a b/it's")).toBe("'/a b/it'\\''s'");
+    expect(shellQuote("")).toBe("''");
+  });
+
+  it("accountLine quotes a folder with a space and a single quote, and an odd binary", () => {
+    const acc = { builtin: false, config_dir: "/Users/me/Claude Work/it's", binary: "" } as unknown as Parameters<typeof accountLine>[0];
+    expect(accountLine(acc)).toBe(
+      "env CLAUDE_CONFIG_DIR='/Users/me/Claude Work/it'\\''s' CLAUDE_SECURESTORAGE_CONFIG_DIR='/Users/me/Claude Work/it'\\''s' claude",
+    );
+    const builtin = { builtin: true, config_dir: "", binary: "/My Apps/claude" } as unknown as Parameters<typeof accountLine>[0];
+    expect(accountLine(builtin)).toBe("env -u CLAUDE_CONFIG_DIR -u CLAUDE_SECURESTORAGE_CONFIG_DIR '/My Apps/claude'");
   });
 
   it("agyWindowLabel shortens the span", () => {
@@ -624,16 +837,26 @@ describe("Agent hook switch", () => {
     expect(agentHookCount([])).toBe("Installed in 0 of 0 folders.");
   });
 
-  it("shows the switch with the shared title and the count", async () => {
+  it("the popup has no switch, only a line that links to Settings > General", async () => {
     vi.mocked(workbench.getAgentHook).mockResolvedValue({
       enabled: true,
       state: "on",
-      needs_install: false,
-      folders: [claudeDir, agyDir],
+      needs_install: true,
+      folders: [claudeDir, { ...agyDir, installed: false }],
     });
+    const onClose = vi.fn();
+    render(<AccountsPanel actions={actions()} onClose={onClose} />);
+    const link = await screen.findByRole("link", { name: "Hooks: 1/2 folders" });
+    expect(link.getAttribute("href")).toBe("#/settings/general");
+    expect(screen.queryByRole("switch")).toBeNull();
+    expect(screen.queryByRole("checkbox")).toBeNull();
+    fireEvent.click(link);
+    expect(onClose).toHaveBeenCalled();
+  });
+
+  it("says Hooks off when the hooks are off", async () => {
+    vi.mocked(workbench.getAgentHook).mockResolvedValue({ enabled: false, state: "off", folders: [claudeDir] });
     render(<AccountsPanel actions={actions()} onClose={() => {}} />);
-    const sw = await screen.findByRole("switch");
-    expect(within(sw).getByText("Connect Claude Code and Antigravity to the Workbench")).toBeTruthy();
-    expect(sw.textContent).toContain("Installed in 2 of 2 folders (Claude 1, Antigravity 1).");
+    expect(await screen.findByRole("link", { name: "Hooks off" })).toBeTruthy();
   });
 });

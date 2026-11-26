@@ -11,6 +11,7 @@ import (
 	"sync"
 
 	"github.com/ridhomujizat/lana-harness/core"
+	"github.com/ridhomujizat/lana-harness/internal/claudemcp"
 	"github.com/ridhomujizat/lana-harness/internal/claudeshare"
 )
 
@@ -186,6 +187,29 @@ func (s *Server) workbenchClaudeEnv(ctx context.Context) []string {
 		return nil
 	}
 	return []string{"CLAUDE_CONFIG_DIR=" + dir, "CLAUDE_SECURESTORAGE_CONFIG_DIR=" + dir}
+}
+
+// mirrorClaudeMCP mirrors the built-in account's MCP servers ($HOME/.claude.json,
+// user scope) into the named Claude Code account before a Workbench pane
+// launches it (spec 81 REQ-SMC-004, REQ-SMC-005). The built-in account, an
+// unknown name, or any failure leaves the account as it was: it never fails or
+// blocks the create beyond the mirror's lock wait. Only a short reason is
+// logged, never a server entry.
+func (s *Server) mirrorClaudeMCP(ctx context.Context, name string) {
+	if name == "" || name == core.ClaudeCodeProvider {
+		return
+	}
+	dir, ok := s.claudeAccountDirs(ctx)[name]
+	if !ok || dir == "" {
+		return
+	}
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return
+	}
+	if _, err := claudemcp.Mirror(home, dir); err != nil {
+		s.logger.Info("web: claude MCP mirror skipped", "account", name, "reason", err.Error())
+	}
 }
 
 // claudeAccountDirs maps every Claude Code account of the stored config to its

@@ -895,6 +895,11 @@
 .rt-order-note { display: flex; align-items: center; gap: 6px; margin: 0; color: var(--green, var(--text-2)); font-size: var(--fs-sm); }
 .rt-order-note.is-error { color: var(--red, var(--text)); }
 .rt-order-panel .rt-conn-note, .rt-keys-panel .rt-conn-note { margin-top: 12px; }
+/* Spec 80: the connections of one API pool in the order list keep their
+   own buttons; they wrap rather than squeeze the name. */
+.rt-conns-pooled .rt-order-acts { flex: 0 1 auto; flex-wrap: wrap; }
+.rt-conns-pooled .rt-order-sub > .rt-conn-meta,
+.rt-conns-pooled .rt-order-sub > .rt-conn-users { display: inline-flex; }
 .rt-keys-add { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-top: 12px; }
 .rt-keys-add .input { width: 16rem; max-width: 100%; min-width: 0; }
 .rt-keys-add .hint { flex: 1 1 220px; min-width: 0; }

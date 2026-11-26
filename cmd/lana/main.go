@@ -90,6 +90,8 @@ func run(args []string) int {
 		return cmdWeb(args[1:])
 	case "workbench":
 		return cmdWorkbench(args[1:])
+	case "claude":
+		return cmdClaude(args[1:])
 	case "update":
 		return cmdUpdate(args[1:])
 	case "update-probe":
@@ -111,7 +113,7 @@ func help() {
 	if term.IsTerminal(os.Stdout.Fd()) {
 		fmt.Print("\n" + tui.LogoText() + "\n")
 	}
-	fmt.Print("lana - personal coding agent\n\n  lana init [--force] [--yes] [--provider openai|openrouter|deepseek|anthropic|claude-code] [--fallback <provider>/<model>]\n  lana run [--agent <name>] [--output text|json|stream-json] [--ask] [prompt...]\n  lana config check|path|edit\n  lana chat [--agent <name>] [--yolo] [--continue] [--resume <id>] [--verbose]\n  lana agent new <name> [--template assistant|worker|coder] [--model provider:model] [--yes]\n  lana agent list | edit <name> [persona|user|memory] | show <name> [--prompt]\n  lana mcp list | tools <server>\n  lana skill list | new <name> | show <name> [--agent <name>]\n  lana daemon\n  lana web reset-login\n  lana workbench serve | stop\n  lana update rollback\n  lana --version\n")
+	fmt.Print("lana - personal coding agent\n\n  lana init [--force] [--yes] [--provider openai|openrouter|deepseek|anthropic|claude-code] [--fallback <provider>/<model>]\n  lana run [--agent <name>] [--output text|json|stream-json] [--ask] [prompt...]\n  lana config check|path|edit\n  lana chat [--agent <name>] [--yolo] [--continue] [--resume <id>] [--verbose]\n  lana agent new <name> [--template assistant|worker|coder] [--model provider:model] [--yes]\n  lana agent list | edit <name> [persona|user|memory] | show <name> [--prompt]\n  lana mcp list | tools <server>\n  lana skill list | new <name> | show <name> [--agent <name>]\n  lana daemon\n  lana web reset-login\n  lana workbench serve | stop\n  lana claude mcp-sync --account <name>\n  lana update rollback\n  lana --version\n")
 }
 
 func homeDir() (string, error) { return config.HomeDir(nil) }

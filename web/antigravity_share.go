@@ -1,8 +1,10 @@
 package web
 
 import (
+	"context"
 	"sync"
 
+	"github.com/ridhomujizat/lana-harness/core"
 	"github.com/ridhomujizat/lana-harness/internal/claudeshare"
 )
 
@@ -44,5 +46,50 @@ func (s *Server) shareAntigravityAccount(name, home string) {
 	}
 	if report.Changed() {
 		s.logger.Info("web: shared Antigravity conversations", "account", name, "home", home)
+	}
+}
+
+// agyAccountHomes maps every Antigravity account of the stored config to its
+// HOME: the built-in "antigravity" to "", each kind=antigravity provider to
+// its folder (spec 83). A config that cannot be read leaves only the built-in
+// account.
+func (s *Server) agyAccountHomes(ctx context.Context) map[string]string {
+	out := map[string]string{core.AntigravityProvider: ""}
+	if s.configStore == nil {
+		return out
+	}
+	file, err := s.configStore.ConfigFile(ctx)
+	if err != nil || !file.Exists {
+		return out
+	}
+	document, err := parseProviderDocument(file.Raw)
+	if err != nil {
+		return out
+	}
+	for name, table := range document.Providers {
+		if name == core.AntigravityProvider || mapProviderString(table, "kind") != core.AntigravityKind {
+			continue
+		}
+		out[name] = s.antigravityHome(name, providerRecordFromMap(table))
+	}
+	return out
+}
+
+// relinkAgyMCP puts a named Antigravity account's mcp_config.json back as a
+// link to the owner's before a Workbench pane starts agy on it (spec 83
+// REQ-WAG-004). The built-in account (home "") is a no-op; a failure is only
+// logged and never blocks the launch.
+func (s *Server) relinkAgyMCP(name, home string) {
+	owner := s.antigravityShareHome()
+	if owner == "" || home == "" {
+		return
+	}
+	item, err := claudeshare.RelinkAgyMCPConfig(home, owner, s.nowTime())
+	if err != nil {
+		s.logger.Info("web: relink Antigravity mcp_config.json skipped", "account", name, "reason", err.Error())
+		return
+	}
+	if item.Action == claudeshare.Adopted {
+		s.logger.Info("web: relinked Antigravity mcp_config.json", "account", name, "backup", item.Backup)
 	}
 }

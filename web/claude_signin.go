@@ -254,6 +254,10 @@ func (s *Server) handleCreateClaudeAccount(w http.ResponseWriter, r *http.Reques
 		writeProviderIssue(w, "providers."+name+".config_dir", "cannot create the account folder: "+err.Error())
 		return
 	}
+	// Spec 77 REQ-WRA-001, REQ-WRA-012: like a save, the new account shares
+	// the default folder's history and settings and gets its .claude.json
+	// before the sign-in starts, so the login lands on top of them.
+	s.shareClaudeAccount(name, dir)
 	if err := store.ConfigWrite(r.Context(), candidate); err != nil {
 		s.logger.Error("web: write config for claude account create", "error", err)
 		writeAPIError(w, http.StatusInternalServerError, "internal_error", "internal server error")

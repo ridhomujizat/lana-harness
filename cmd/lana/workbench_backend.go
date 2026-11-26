@@ -143,6 +143,12 @@ func (b *workbenchBackend) Restart(ctx context.Context, id string) (workbench.Se
 	})
 }
 
+func (b *workbenchBackend) SwitchAccount(ctx context.Context, id, agent, configDir string) (workbench.Session, error) {
+	return workbenchDo(b, ctx, func(c *workbench.Client) (workbench.Session, error) {
+		return c.SwitchAccount(ctx, id, agent, configDir)
+	})
+}
+
 func (b *workbenchBackend) Resize(ctx context.Context, id string, cols, rows int) error {
 	_, err := workbenchDo(b, ctx, func(c *workbench.Client) (struct{}, error) {
 		return struct{}{}, c.Resize(ctx, id, cols, rows)

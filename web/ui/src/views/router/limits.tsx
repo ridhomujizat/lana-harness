@@ -3,6 +3,7 @@ import type {
   BalanceLimit,
   ClaudeAccount,
   CreditLimit,
+  LimitPlan,
   LimitSnapshot,
   PlanWindow,
   RateLimitValue,
@@ -15,6 +16,7 @@ import {
   agoText,
   count,
   kindLabel,
+  parseTime,
   resetsIn,
   usd,
   windowLabel,
@@ -120,6 +122,28 @@ function balanceText(balance: BalanceLimit): string {
   return money(balance.total, balance.currency) + " balance";
 }
 
+/* Spec 79: "Pro plan · renews in 12 days". A status other than active is
+   named ("Pro plan · past due · renews in 3 days"); a cancelled plan ends
+   instead of renewing. */
+export function planLine(plan: LimitPlan, now: number = Date.now()): string {
+  const parts = [plan.name + " plan"];
+  const status = String(plan.status || "").toLowerCase();
+  if (status && status !== "active") {
+    parts.push(status.replace(/[_-]+/g, " "));
+  }
+  const at = parseTime(plan.renews_at);
+  if (at) {
+    const verb = status === "canceled" || status === "cancelled" ? "ends" : "renews";
+    const days = Math.ceil((at - now) / 86400000);
+    if (days <= 0) {
+      parts.push(verb + " today");
+    } else {
+      parts.push(verb + " in " + days + (days === 1 ? " day" : " days"));
+    }
+  }
+  return parts.join(" · ");
+}
+
 export function hasReport(limit: LimitSnapshot): boolean {
   const rate = limit.rate;
   const hasRate = Boolean(
@@ -129,6 +153,7 @@ export function hasReport(limit: LimitSnapshot): boolean {
     hasRate ||
     Boolean(limit.credit) ||
     Boolean(limit.balance) ||
+    Boolean(limit.plan && limit.plan.name) ||
     (Array.isArray(limit.windows) && limit.windows.length > 0)
   );
 }
@@ -155,6 +180,7 @@ export function LimitCard({ limit, provider }: { limit: LimitSnapshot; provider?
     const value = rate[row.key];
     return value && Number(value.limit) > 0;
   });
+  const windows = Array.isArray(limit.windows) ? limit.windows : [];
   return (
     <article className="rt-limit" aria-label={"Limits of " + limit.provider}>
       <header className="rt-limit-h">
@@ -168,6 +194,7 @@ export function LimitCard({ limit, provider }: { limit: LimitSnapshot; provider?
         {limit.kind ? <Badge>{kindLabel(limit.kind)}</Badge> : null}
       </header>
       <div className="rt-limit-b">
+        {limit.plan && limit.plan.name ? <p className="rt-limit-none">{planLine(limit.plan)}</p> : null}
         {rows.map((row) => {
           const value = rate[row.key] as RateLimitValue;
           return (
@@ -197,6 +224,7 @@ export function LimitCard({ limit, provider }: { limit: LimitSnapshot; provider?
             }
           />
         ) : null}
+        {windows.length > 0 ? <PlanWindows windows={windows} /> : null}
         {limit.balance ? (
           <div className="rt-balance">
             <span className="rt-balance-v num">{balanceText(limit.balance)}</span>

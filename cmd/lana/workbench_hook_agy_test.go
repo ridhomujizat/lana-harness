@@ -3,16 +3,23 @@ package main
 import (
 	"bytes"
 	"encoding/json"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/ridhomujizat/lana-harness/internal/workbench"
 )
 
 // stubAgyHook stubs the pane check, the git root and the report for the agy
 // hook tests.
 func stubAgyHook(t *testing.T, inPane bool) *[]string {
 	t.Helper()
-	oldInPane, oldRoot, oldReport := hookInPane, hookGitRoot, workbenchAgyReport
-	t.Cleanup(func() { hookInPane, hookGitRoot, workbenchAgyReport = oldInPane, oldRoot, oldReport })
+	oldInPane, oldRoot, oldReport, oldRecord := hookInPane, hookGitRoot, workbenchAgyReport, workbenchAgyRecord
+	t.Cleanup(func() {
+		hookInPane, hookGitRoot, workbenchAgyReport, workbenchAgyRecord = oldInPane, oldRoot, oldReport, oldRecord
+	})
+	workbenchAgyRecord = func(string, string) {}
 	hookInPane = func() (string, bool) {
 		if inPane {
 			return "ws-7", true
@@ -134,5 +141,64 @@ func TestWorkbenchHookAgentFlag(t *testing.T) {
 		if code := cmdWorkbenchHook(args); code != 2 {
 			t.Errorf("%v exit = %d, want 2", args, code)
 		}
+	}
+}
+
+// AC-WAG-001: inside a pane both hooks record the conversation for the core,
+// under LANA_WORKBENCH_HOME, with the hook's HOME; the answers are unchanged.
+func TestAgyHooksRecordConversation(t *testing.T) {
+	stubAgyHook(t, true)
+	workbenchAgyRecord = recordAgyConversation
+	lanaHome := t.TempDir()
+	account := t.TempDir()
+	t.Setenv("LANA_WORKBENCH_HOME", lanaHome)
+	t.Setenv("HOME", account)
+	const conv = "7f3c2a10-1b2c-4d5e-8f90-a1b2c3d4e5f6"
+	var out bytes.Buffer
+	workbenchAgySessionStart(strings.NewReader(`{"conversationId":"`+conv+`","cwd":"/repo"}`), &out)
+	if !strings.Contains(out.String(), "injectSteps") {
+		t.Fatalf("stdout = %s", out.String())
+	}
+	data, err := os.ReadFile(filepath.Join(lanaHome, "workbench", "agents", "ws-7.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var rec workbench.AgentRecord
+	if err := json.Unmarshal(data, &rec); err != nil || rec.Agent != "agy" || rec.ConversationID != conv || rec.Home != account {
+		t.Fatalf("record = %s (%v)", data, err)
+	}
+	if info, err := os.Stat(filepath.Join(lanaHome, "workbench", "agents", "ws-7.json")); err != nil || info.Mode().Perm() != 0o600 {
+		t.Fatalf("record mode = %v, %v", info, err)
+	}
+
+	// The post-edit hook records too, and still answers {}.
+	const next = "9a8b7c6d-1b2c-4d5e-8f90-a1b2c3d4e5f6"
+	out.Reset()
+	workbenchAgyPostEdit(strings.NewReader(`{"conversationId":"`+next+`","toolCall":{"name":"write_file","args":{"Path":"/repo/a.go"}}}`), &out)
+	if strings.TrimSpace(out.String()) != "{}" {
+		t.Fatalf("post-edit stdout = %q", out.String())
+	}
+	data, _ = os.ReadFile(filepath.Join(lanaHome, "workbench", "agents", "ws-7.json"))
+	if !strings.Contains(string(data), next) {
+		t.Fatalf("record after post-edit = %s", data)
+	}
+}
+
+// Outside a pane, or with an id that is not shell-safe, nothing is written.
+func TestAgyHooksRecordNothing(t *testing.T) {
+	lanaHome := t.TempDir()
+	t.Setenv("LANA_WORKBENCH_HOME", lanaHome)
+	stubAgyHook(t, false)
+	workbenchAgyRecord = recordAgyConversation
+	var out bytes.Buffer
+	workbenchAgySessionStart(strings.NewReader(`{"conversationId":"7f3c2a10-1b2c-4d5e-8f90-a1b2c3d4e5f6"}`), &out)
+	stubAgyHook(t, true)
+	workbenchAgyRecord = recordAgyConversation
+	for _, bad := range []string{"c1", "x; rm -rf ~", "../../etc/passwd"} {
+		out.Reset()
+		workbenchAgySessionStart(strings.NewReader(`{"conversationId":"`+bad+`"}`), &out)
+	}
+	if entries, _ := os.ReadDir(filepath.Join(lanaHome, "workbench", "agents")); len(entries) != 0 {
+		t.Fatalf("records written: %v", entries)
 	}
 }

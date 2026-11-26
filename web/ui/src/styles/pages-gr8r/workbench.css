@@ -134,6 +134,9 @@
   color: #fff;
   font-size: 12px;
   font-weight: 600;
+  /* Center the letter on its cap height, not the line box (it sat low). */
+  line-height: 1;
+  text-box: trim-both cap alphabetic;
 }
 
 .wb-space {
@@ -2261,17 +2264,13 @@ body.wb-resizing {
   border-top: 1px solid var(--divider);
 }
 
-/* The hook switch: a footer under its own divider (overrides the spec 69
+/* The hook summary: a footer under its own divider (overrides the spec 69
    rule in workbench-git.css). */
 .wb-acc > .wb-acc-hook {
   flex: none;
   margin: 0;
   padding: 6px 8px;
   border-top: 1px solid var(--divider);
-}
-
-.wb-acc > .wb-acc-hook > .wb-acc-error {
-  padding: 2px 6px 4px;
 }
 
 /* Phone bottom sheet: the panel fills the sheet edge to edge so the
@@ -2777,4 +2776,30 @@ html[data-shell="macos-app"]:not([data-shell-fullscreen]) .wb-sheet.is-full {
 .wb-sheet .wb-card-x:hover {
   background: rgba(255, 255, 255, 0.18);
   color: #fff;
+}
+
+/* Spec 82: the "Claude is working" question and a refused switch, under the
+   row's buttons. */
+.wb-acc-confirm,
+.wb-acc-switch-note {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-left: 30px;
+  min-width: 0;
+}
+
+.wb-acc-confirm > p {
+  margin: 0;
+  color: var(--text-2);
+  font-size: var(--fs-sm);
+  overflow-wrap: anywhere;
+}
+
+.wb-acc-switch-note > .wb-acc-actions {
+  margin-left: 0;
+}
+
+.wb-acc-confirm > .wb-acc-actions {
+  margin-left: 0;
 }

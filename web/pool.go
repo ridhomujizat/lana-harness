@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/ridhomujizat/lana-harness/core"
+	"github.com/ridhomujizat/lana-harness/internal/models"
 	"github.com/ridhomujizat/lana-harness/internal/webfiles"
 )
 
@@ -20,6 +21,48 @@ import (
 
 // poolPriorityStep is the gap between two pool priorities: 10, 20, 30, …
 const poolPriorityStep = 10
+
+// poolRuntimeAPI is the pool-order runtime of API connections (spec 80
+// REQ-ACP-003).
+const poolRuntimeAPI = "api"
+
+// connectionPoolPriority is the pool priority of an API connection that sets
+// none (spec 80), the same as router.AccountPoolPriority.
+const connectionPoolPriority = 100
+
+// isAPIConnection reports whether a provider table is an API connection
+// (spec 80): a kind that is set and is not claude-code or antigravity.
+func isAPIConnection(record providerRecord) bool {
+	return record.Kind != "" && record.Kind != core.ClaudeCodeKind && record.Kind != core.AntigravityKind
+}
+
+// connectionPoolGroup is the pool group of an API connection (spec 80): kind
+// and effective base URL.
+func connectionPoolGroup(record providerRecord) string {
+	return models.PoolGroup(record.Kind, record.BaseURL)
+}
+
+// connectionPoolFields returns the priority (default 100), pool, and pool
+// group an API connection reports (spec 80 REQ-ACP-004).
+func connectionPoolFields(record providerRecord) (*int, *bool, string) {
+	priority := connectionPoolPriority
+	if record.Priority != nil {
+		priority = *record.Priority
+	}
+	pool := record.Pool == nil || *record.Pool
+	return &priority, &pool, connectionPoolGroup(record)
+}
+
+// apiConnections returns every API connection of a config document by name.
+func (d providerDocument) apiConnections() map[string]map[string]any {
+	out := map[string]map[string]any{}
+	for name, table := range d.Providers {
+		if isAPIConnection(providerRecordFromMap(table)) {
+			out[name] = table
+		}
+	}
+	return out
+}
 
 // apiKeyPoolKinds are the API kinds that may list backup keys
 // (REQ-PAF-005).
@@ -109,9 +152,11 @@ func (d providerDocument) poolAccounts(runtime string) map[string]map[string]any
 }
 
 // handlePutPoolOrder rewrites the pool order of a subscription runtime
-// (REQ-PAF-006): priority 10, 20, … for order then unpooled, pool removed for
+// (REQ-PAF-006) or of one API connection pool (runtime "api", spec 80
+// REQ-ACP-003): priority 10, 20, … for order then unpooled, pool removed for
 // order and pool = false for unpooled, in one config write. Every account of
-// the runtime appears exactly once; anything else is 422.
+// the runtime, or every connection of the pool's kind and base URL, appears
+// exactly once; anything else is 422.
 func (s *Server) handlePutPoolOrder(w http.ResponseWriter, r *http.Request) {
 	store := s.configStoreOrError(w)
 	if store == nil {
@@ -121,8 +166,9 @@ func (s *Server) handlePutPoolOrder(w http.ResponseWriter, r *http.Request) {
 	if !decodeJSONObject(w, r, routerBodyLimit, &body) {
 		return
 	}
-	if body.Runtime != core.ClaudeCodeKind && body.Runtime != core.AntigravityKind {
-		writeRouterInvalid(w, []ConfigIssue{{Key: "runtime", Message: "runtime must be claude-code or antigravity"}})
+	api := body.Runtime == poolRuntimeAPI
+	if body.Runtime != core.ClaudeCodeKind && body.Runtime != core.AntigravityKind && !api {
+		writeRouterInvalid(w, []ConfigIssue{{Key: "runtime", Message: "runtime must be claude-code, antigravity, or api"}})
 		return
 	}
 	if len(body.Order)+len(body.Unpooled) == 0 {
@@ -154,6 +200,11 @@ func (s *Server) handlePutPoolOrder(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	accounts := document.poolAccounts(body.Runtime)
+	noun := body.Runtime + " account"
+	if api {
+		accounts = document.apiConnections()
+		noun = "API connection"
+	}
 	var issues []ConfigIssue
 	seen := map[string]bool{}
 	check := func(field string, names []string) {
@@ -166,7 +217,7 @@ func (s *Server) handlePutPoolOrder(w http.ResponseWriter, r *http.Request) {
 				issues = append(issues, ConfigIssue{Key: key, Message: "name must match [a-z0-9-]+"})
 			default:
 				if _, ok := accounts[name]; !ok {
-					issues = append(issues, ConfigIssue{Key: key, Message: "no " + body.Runtime + " account named " + name})
+					issues = append(issues, ConfigIssue{Key: key, Message: "no " + noun + " named " + name})
 				}
 			}
 			seen[name] = true
@@ -174,6 +225,12 @@ func (s *Server) handlePutPoolOrder(w http.ResponseWriter, r *http.Request) {
 	}
 	check("order", body.Order)
 	check("unpooled", body.Unpooled)
+	if api {
+		// Spec 80: one pool only, every connection of its kind and base URL.
+		var poolIssues []ConfigIssue
+		accounts, poolIssues = apiPoolMembers(accounts, body.Order, body.Unpooled)
+		issues = append(issues, poolIssues...)
+	}
 	missing := []string{}
 	for name := range accounts {
 		if !seen[name] {
@@ -182,7 +239,11 @@ func (s *Server) handlePutPoolOrder(w http.ResponseWriter, r *http.Request) {
 	}
 	sort.Strings(missing)
 	for _, name := range missing {
-		issues = append(issues, ConfigIssue{Key: "order", Message: name + " is missing; every account must appear once"})
+		message := name + " is missing; every account must appear once"
+		if api {
+			message = name + " is missing; every connection of the pool must appear once"
+		}
+		issues = append(issues, ConfigIssue{Key: "order", Message: message})
 	}
 	if len(issues) > 0 {
 		writeRouterInvalid(w, issues)
@@ -194,7 +255,9 @@ func (s *Server) handlePutPoolOrder(w http.ResponseWriter, r *http.Request) {
 	all := append(append([]string{}, body.Order...), body.Unpooled...)
 	for i, name := range all {
 		record := providerRecordFromMap(accounts[name])
-		record.Kind = body.Runtime
+		if !api {
+			record.Kind = body.Runtime
+		}
 		priority := (i + 1) * poolPriorityStep
 		record.Priority = &priority
 		record.Pool = nil
@@ -203,10 +266,13 @@ func (s *Server) handlePutPoolOrder(w http.ResponseWriter, r *http.Request) {
 			record.Pool = &unpooled
 		}
 		var table string
-		if body.Runtime == core.ClaudeCodeKind {
+		switch body.Runtime {
+		case core.ClaudeCodeKind:
 			table = renderClaudeAccountTable(name, record)
-		} else {
+		case core.AntigravityKind:
 			table = renderAntigravityAccountTable(name, record)
+		default:
+			table = renderProviderTable(name, record)
 		}
 		next, _, err := webfiles.RewriteTable(r.Context(), noCheck, candidate, "[providers."+name+"]", table)
 		if err != nil {
@@ -240,6 +306,45 @@ func (s *Server) handlePutPoolOrder(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, poolOrderResponse{
 		Version: webfiles.ConfigVersion(candidate), RestartRequired: restartRequired, Pool: pool,
 	})
+}
+
+// apiPoolMembers returns the API connections of the pool that the listed
+// names belong to (spec 80 REQ-ACP-003): the pool group of the first listed
+// connection, with one issue per listed connection of another group. With no
+// listed connection, it returns none.
+func apiPoolMembers(connections map[string]map[string]any, order, unpooled []string) (map[string]map[string]any, []ConfigIssue) {
+	var issues []ConfigIssue
+	group, first := "", ""
+	members := map[string]map[string]any{}
+	check := func(field string, names []string) {
+		for i, name := range names {
+			table, ok := connections[name]
+			if !ok {
+				continue
+			}
+			g := connectionPoolGroup(providerRecordFromMap(table))
+			if first == "" {
+				group, first = g, name
+			}
+			if g != group {
+				issues = append(issues, ConfigIssue{
+					Key:     field + "[" + strconv.Itoa(i) + "]",
+					Message: name + " is not in the pool of " + first + "; a pool holds connections of one kind and base URL",
+				})
+			}
+		}
+	}
+	check("order", order)
+	check("unpooled", unpooled)
+	if first == "" {
+		return members, issues
+	}
+	for name, table := range connections {
+		if connectionPoolGroup(providerRecordFromMap(table)) == group {
+			members[name] = table
+		}
+	}
+	return members, issues
 }
 
 type providerKeysRequest struct {

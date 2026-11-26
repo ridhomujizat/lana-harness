@@ -174,6 +174,16 @@ type RouterLimit struct {
 	Credit    *RouterCredit      `json:"credit"`
 	Balance   *RouterBalance     `json:"balance"`
 	Windows   []RouterPlanWindow `json:"windows"`
+	// Plan is the provider's subscription plan (spec 79); omitted when not
+	// reported.
+	Plan *RouterPlan `json:"plan,omitempty"`
+}
+
+// RouterPlan is a provider's subscription plan, such as Command Code's.
+type RouterPlan struct {
+	Name     string     `json:"name"`
+	Status   string     `json:"status,omitempty"`
+	RenewsAt *time.Time `json:"renews_at,omitempty"`
 }
 
 // RouterRateLimits are the rate limits a provider reports in its headers.
@@ -364,6 +374,11 @@ type routerProviderJSON struct {
 	KeyState       string   `json:"key_state"`
 	UsedBy         []string `json:"used_by"`
 	Disabled       bool     `json:"disabled"`
+	// Priority, Pool, and PoolGroup are set for an API connection (spec 80
+	// REQ-ACP-004), as on GET /v1/providers.
+	Priority  *int   `json:"priority,omitempty"`
+	Pool      *bool  `json:"pool,omitempty"`
+	PoolGroup string `json:"pool_group,omitempty"`
 }
 
 // routerComboJSON is one combo row of GET /v1/router.
@@ -467,7 +482,7 @@ func (s *Server) handleRouterOverview(w http.ResponseWriter, r *http.Request) {
 	providers := sortedMapKeys(document.Providers)
 	for _, name := range providers {
 		record := providerRecordFromMap(document.Providers[name])
-		response.Providers = append(response.Providers, routerProviderJSON{
+		row := routerProviderJSON{
 			Name:           name,
 			Kind:           record.Kind,
 			BaseURL:        record.BaseURL,
@@ -475,7 +490,11 @@ func (s *Server) handleRouterOverview(w http.ResponseWriter, r *http.Request) {
 			KeyState:       providerKeyState(providerEffectiveKeyEnv(record, name), secretValues),
 			UsedBy:         document.agentsUsingProvider(name),
 			Disabled:       record.Disabled,
-		})
+		}
+		if isAPIConnection(record) {
+			row.Priority, row.Pool, row.PoolGroup = connectionPoolFields(record)
+		}
+		response.Providers = append(response.Providers, row)
 	}
 	for _, name := range sortedMapKeys(document.Combos) {
 		table := document.Combos[name]

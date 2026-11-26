@@ -76,7 +76,7 @@ import { WbGitContext, useWbGit, useWorkbenchGit } from "./workbench-git-state";
 import { emitGitRootEvent } from "../api/workbench-git";
 import { baseName, isUnder, repoDisplay } from "./workbench-git-model";
 import { ProgramTile, TabTiles } from "./workbench-tile";
-import { AccountsPanel, AccountsPopover, AgentHookNotice, type AccountActions } from "./workbench-accounts";
+import { AccountsPanel, AccountsPopover, AgentHookNotice, createAccountSession, type AccountActions } from "./workbench-accounts";
 import { chime, setSoundEnabled, soundEnabled, unlockAudio } from "./workbench-sound";
 import { ActionMenu, CloseSpaceDialog, RenameDialog, longPress, type DialogState, type MenuTarget } from "./workbench-actions";
 import { Menu, MenuItem, MenuSeparator } from "../ui/gr8r";
@@ -1937,6 +1937,12 @@ export function WorkbenchPage() {
     []
   );
 
+  const createAccount = useCallback(async (dir: string, line: string, title?: string, claudeAccount?: string, agyAccount?: string) => {
+    const s = await createAccountSession(dir, line, title, claudeAccount, agyAccount);
+    setSessions((prev) => ({ ...prev, [s.id]: s }));
+    return s;
+  }, []);
+
   /* herdr behaviour: a new terminal opens in the folder of the space's
      active terminal; in an empty space it opens in the home folder. */
   const newTerminal = useCallback(async () => {
@@ -2108,31 +2114,21 @@ export function WorkbenchPage() {
   const [accountsAnchor, setAccountsAnchor] = useState<HTMLElement | null>(null);
   const [accountsSheet, setAccountsSheet] = useState(false);
   const { attach: accountsAttach, full: accountsFull, gripProps: accountsGrip } = useSheetDrag(() => setAccountsSheet(false));
+  /* Spec 82: Switch here acts on the focused pane of the shown tab. */
+  const accountsTab = pickTab(pickSpace(layout));
+  const accountsFocusId = accountsTab?.focus || (accountsTab ? tabSessions(accountsTab)[0] : undefined);
   const accountActions: AccountActions = {
-    newTab: (argv, title) => {
+    focused: accountsFocusId ? sessions[accountsFocusId] ?? null : null,
+    /* The pane is the owner's shell with the account's line typed in, so
+       exiting the agent returns to the prompt (spec 77 revision 7). */
+    newTab: (line, title, claudeAccount, agyAccount) => {
       const sp = pickSpace(layoutRef.current);
       if (!sp) return;
-      create(spaceCwd(sp, sessionsRef.current), argv, title)
+      createAccount(spaceCwd(sp, sessionsRef.current), line, title, claudeAccount, agyAccount)
         .then((s) => {
           markEntering(s.id);
           update((l) => addTab(l, sp.id, s.id, title));
           setPhoneView("space");
-        })
-        .catch((err) => setError(errorMessage(err)));
-    },
-    beside: (argv) => {
-      const sp = pickSpace(layoutRef.current);
-      const t = pickTab(sp);
-      const target = t?.focus || (t ? tabSessions(t)[0] : undefined);
-      if (!sp || !t || !target) {
-        accountActions.newTab(argv);
-        return;
-      }
-      const dir = sessionsRef.current[target]?.cwd || spaceCwd(sp, sessionsRef.current);
-      create(dir, argv)
-        .then((s) => {
-          markEntering(s.id);
-          update((l) => splitPane(l, sp.id, t.id, target, s.id, "row"));
         })
         .catch((err) => setError(errorMessage(err)));
     },
