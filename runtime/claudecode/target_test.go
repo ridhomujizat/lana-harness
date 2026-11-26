@@ -78,6 +78,11 @@ func TestRejectedPlanWindowIsEarly(t *testing.T) {
 	if time.Since(start) > 5*time.Second {
 		t.Fatalf("rejected turn took %v", time.Since(start))
 	}
+	// Spec 75 REQ-PAF-004: the early error carries the window's reset time.
+	var early *core.RuntimeEarlyError
+	if !errors.As(err, &early) || !early.ResetAt.Equal(time.Unix(1794088200, 0)) {
+		t.Fatalf("reset = %+v", early)
+	}
 	limits := false
 	for _, ev := range events {
 		limits = limits || ev.Kind == core.RuntimeLimits

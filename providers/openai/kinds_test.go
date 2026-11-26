@@ -211,7 +211,17 @@ func TestOpenAIEffortBodies(t *testing.T) {
 		{"catalog thinking high", core.ChatRequest{Model: "gpt-5-mini", ReasoningEffort: "high"}, "high", false},
 		{"catalog thinking low", core.ChatRequest{Model: "gpt-5", ReasoningEffort: "low"}, "low", false},
 		{"catalog thinking off", core.ChatRequest{Model: "gpt-5", ReasoningEffort: "off"}, "minimal", false},
-		{"catalog thinking max", core.ChatRequest{Model: "gpt-5.1", ReasoningEffort: "max"}, "xhigh", false},
+		// Spec 76 AC-MES-003 (revision 2026-11-26): a level the model does
+		// not list falls back to its default, not mapped (max sent xhigh
+		// before, which GPT-5.1 rejects).
+		{"catalog thinking max", core.ChatRequest{Model: "gpt-5.1", ReasoningEffort: "max"}, "none", false},
+		{"catalog thinking xhigh", core.ChatRequest{Model: "gpt-5", ReasoningEffort: "xhigh"}, "medium", false},
+		{"catalog thinking minimal", core.ChatRequest{Model: "gpt-5", ReasoningEffort: "minimal"}, "minimal", false},
+		{"catalog thinking medium", core.ChatRequest{Model: "gpt-5", ReasoningEffort: "medium"}, "medium", false},
+		{"catalog gpt-5.1 none", core.ChatRequest{Model: "gpt-5.1", ReasoningEffort: "none"}, "none", false},
+		{"catalog gpt-5.1 off", core.ChatRequest{Model: "gpt-5.1", ReasoningEffort: "off"}, "none", false},
+		{"unknown off", core.ChatRequest{Model: "o9-new", ReasoningEffort: "off"}, nil, true},
+		{"unknown max", core.ChatRequest{Model: "o9-new", ReasoningEffort: "max"}, nil, true},
 		{"catalog thinking default", core.ChatRequest{Model: "gpt-5"}, nil, false},
 		{"catalog non-thinking", core.ChatRequest{Model: "gpt-4.1", ReasoningEffort: "high"}, nil, true},
 		{"unknown with effort", core.ChatRequest{Model: "o9-new", ReasoningEffort: "high"}, "high", true},
@@ -252,7 +262,12 @@ func TestOpenRouterEffortBodies(t *testing.T) {
 		{"off", map[string]any{"enabled": false}},
 		{"low", map[string]any{"effort": "low"}},
 		{"high", map[string]any{"effort": "high"}},
-		{"max", map[string]any{"effort": "high"}},
+		// Spec 76: gpt-5-mini does not list max, so its default applies.
+		{"max", map[string]any{"effort": "medium"}},
+		{"medium", map[string]any{"effort": "medium"}},
+		{"minimal", map[string]any{"effort": "minimal"}},
+		// Spec 76: gpt-5-mini does not list xhigh, so its default applies.
+		{"xhigh", map[string]any{"effort": "medium"}},
 	}
 	for _, tc := range cases {
 		t.Run("effort "+tc.effort, func(t *testing.T) {

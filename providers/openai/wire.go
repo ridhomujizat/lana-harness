@@ -205,25 +205,32 @@ func toolResultMessage(block core.ContentBlock) map[string]any {
 	}
 }
 
+// deepseekEfforts are the levels the deepseek thinking format sends for a
+// model the catalog does not know: off, and low, high, max as
+// reasoning_effort (REQ-MDL-002).
+var deepseekEfforts = []string{"off", "low", "high", "max"}
+
 // applyThinking sets the thinking and reasoning_effort fields on a deepseek
 // request and reports whether every assistant message carries reasoning_content.
 // An empty effort sends neither field: the server default applies, and
 // reasoning_content is added only when the history already has a thinking block
-// (REQ-MDL-002, REQ-MDL-004).
+// (REQ-MDL-002, REQ-MDL-004). A value the model does not list falls back to
+// its default (spec 76 REQ-MES-003); a catalog model without effort control
+// gets neither field.
 func applyThinking(req core.ChatRequest, format string, out *wireRequest) bool {
 	if format != formatDeepSeek {
 		return false
 	}
-	switch req.ReasoningEffort {
+	switch effort := models.EffortFor(req.Model, req.ReasoningEffort, deepseekEfforts); effort {
 	case "off":
 		out.Thinking = map[string]string{"type": "disabled"}
 		return false
-	case "low", "high", "max":
-		out.Thinking = map[string]string{"type": "enabled"}
-		out.ReasoningEffort = req.ReasoningEffort
-		return true
-	default:
+	case "":
 		return historyHasThinking(req.Messages)
+	default:
+		out.Thinking = map[string]string{"type": "enabled"}
+		out.ReasoningEffort = effort
+		return true
 	}
 }
 
@@ -239,13 +246,17 @@ func historyHasThinking(messages []core.Message) bool {
 	return false
 }
 
-// openAIEfforts maps lana efforts to OpenAI reasoning_effort values.
-var openAIEfforts = map[string]string{"off": "minimal", "low": "low", "high": "high", "max": "xhigh"}
+// openAIUnknownEfforts are the reasoning_effort values kind openai sends for
+// a model the catalog does not know: the values every OpenAI reasoning model
+// accepts. Any other value sends nothing (spec 76 REQ-MES-004).
+var openAIUnknownEfforts = []string{"low", "medium", "high"}
 
 // applyOpenAIEffort sets reasoning_effort on a kind openai request. An empty
-// effort sends nothing (the model default applies). A catalog model without
-// thinking never gets it, since OpenAI rejects the field there; a catalog
-// thinking model and an unknown model get it when the agent sets an effort.
+// effort sends nothing (the model default applies). A value the catalog model
+// lists is sent as is; any other value falls back to the model's default
+// (spec 76 REQ-MES-003). A catalog model without thinking never gets the
+// field, since OpenAI rejects it there. lana's internal "off" sends the
+// model's lowest level ("minimal", "none"), and nothing on an unknown model.
 // Catalog thinking models also drop temperature, which OpenAI reasoning
 // models reject.
 func applyOpenAIEffort(req core.ChatRequest, out *wireRequest) {
@@ -253,23 +264,34 @@ func applyOpenAIEffort(req core.ChatRequest, out *wireRequest) {
 	if known && entry.Thinking != "" {
 		out.Temperature = nil
 	}
-	effort, ok := openAIEfforts[req.ReasoningEffort]
-	if !ok || (known && entry.Thinking == "") {
+	if known && entry.Thinking == "" {
 		return
+	}
+	effort := models.EffortFor(req.Model, req.ReasoningEffort, openAIUnknownEfforts)
+	if effort == models.EffortOff {
+		effort = ""
+		if efforts, _, ok := models.ModelEfforts(req.Model); ok && len(efforts) > 0 {
+			effort = efforts[0]
+		}
 	}
 	out.ReasoningEffort = effort
 }
 
+// openRouterEfforts are the effort values of OpenRouter's reasoning object.
+var openRouterEfforts = []string{"minimal", "low", "medium", "high"}
+
 // applyOpenRouterReasoning sets OpenRouter's reasoning object: off disables
-// reasoning, low and high pass through, and max maps to high. An empty
-// effort sends nothing.
+// reasoning, an effort OpenRouter takes passes through (after the catalog
+// model's fallback to its default), and max maps to high as before spec 76.
+// Any other value, and an empty effort, sends nothing.
 func applyOpenRouterReasoning(req core.ChatRequest, out *wireRequest) {
-	switch req.ReasoningEffort {
-	case "off":
+	effort := models.EffortFor(req.Model, req.ReasoningEffort, nil)
+	switch {
+	case effort == models.EffortOff:
 		out.Reasoning = map[string]any{"enabled": false}
-	case "low":
-		out.Reasoning = map[string]any{"effort": "low"}
-	case "high", "max":
+	case effort == "max":
 		out.Reasoning = map[string]any{"effort": "high"}
+	case models.PickEffort(effort, openRouterEfforts, "") != "":
+		out.Reasoning = map[string]any{"effort": effort}
 	}
 }

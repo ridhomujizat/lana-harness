@@ -46,6 +46,11 @@ type RuntimeDeps struct {
 // (ADR 0020, API-CCT-001). It is also the runtime name.
 const ClaudeCodeProvider = "claude-code"
 
+// AntigravityProvider is the built-in provider name of Antigravity router
+// targets: "antigravity/<model>" runs the turn in the Antigravity runtime over
+// `agy acp` (ADR 0022, API-AGY-010). It is also the runtime name.
+const AntigravityProvider = "antigravity"
+
 // RuntimeModel is one model an external runtime offers, as its binary
 // reports it (for Claude Code, an entry of the initialize response's models).
 type RuntimeModel struct {
@@ -71,9 +76,13 @@ type RuntimeModelLister interface {
 // shown, so the caller may run the turn on another target.
 type RuntimeEarlyError struct {
 	// Class is the router outcome class of the failure, for example "auth",
-	// "rate_limit", "not_found", "missing_secret", "client", or "runtime".
+	// "rate_limit", "quota", "not_found", "missing_secret", "client", or
+	// "runtime".
 	Class   string
 	Message string
+	// ResetAt is when the exhausted window or quota resets, when the runtime
+	// knows it (spec 75 REQ-PAF-004); zero otherwise.
+	ResetAt time.Time
 }
 
 func (e *RuntimeEarlyError) Error() string { return e.Message }
@@ -113,7 +122,9 @@ type RuntimeConfig struct {
 	APIKeyEnv string
 	// Model is passed to --model. Empty uses the runtime's default.
 	Model string
-	// Effort is passed to --effort. Empty uses the runtime's default.
+	// Effort is passed to --effort (Claude Code). Antigravity picks the
+	// variant of a base model for it (spec 76 REQ-MES-005). Empty uses the
+	// runtime's default.
 	Effort string
 	// Binary is the executable path. Empty looks the binary up on PATH.
 	Binary string
@@ -134,6 +145,10 @@ type RuntimeConfig struct {
 	// ConfigDir is set as CLAUDE_CONFIG_DIR of the process. Empty keeps the
 	// daemon's environment as it is (the built-in account).
 	ConfigDir string
+	// Home is the HOME of the child process. An Antigravity account runs agy
+	// with its own HOME so its Google login stays apart (ADR 0022); empty
+	// keeps the daemon's HOME (the built-in account).
+	Home string
 }
 
 // RuntimeAccount names one Claude Code account for a status probe
@@ -147,6 +162,42 @@ type RuntimeAccount struct {
 	Binary    string
 	Auth      string
 	APIKeyEnv string
+	// Home is the account's HOME for an Antigravity account: the probe and
+	// the sign-in run with it, so the account's own Google login is used
+	// (ADR 0022); "" keeps the daemon's HOME (the built-in account). Claude
+	// Code accounts leave it empty.
+	Home string
+}
+
+// RuntimePrompt is one headless, tool-less prompt run of an external runtime
+// for a router call (spec 78, REQ-RPR-002): the official CLI in print mode,
+// the prompt on stdin, no tools, no MCP, nothing kept for a resume.
+type RuntimePrompt struct {
+	// Config holds the account keys (Account, Binary, Auth, APIKeyEnv,
+	// ConfigDir or Home), Model, and Effort, as an agent turn of the account
+	// gets them. Workspace, AppendSystemPrompt, and MCPKey are not used.
+	Config RuntimeConfig
+	// System is the system text (Claude Code: --system-prompt). Antigravity
+	// has no system flag: the caller puts the text in Prompt.
+	System string
+	// Prompt is written to the process's stdin, never passed as an argument.
+	Prompt string
+	// Dir is the working directory: an empty folder the caller owns.
+	Dir string
+	// Emit gets the run's text and thinking deltas, whole assistant
+	// messages, usage, and plan windows, in order. It may be nil.
+	Emit func(RuntimeEvent)
+}
+
+// RuntimePrompter is implemented by an external runtime that runs one
+// RuntimePrompt (spec 78). RunPrompt takes a slot of the runtime's
+// concurrency limit, as a turn does, and kills the process group when ctx
+// ends. A failure before the first text returns a *RuntimeEarlyError whose
+// Class is a router class ("not_found", "auth", "rate_limit", "quota",
+// "missing_secret", "client", "runtime") and whose Message is the CLI's own
+// short message; a failure after it returns another error.
+type RuntimePrompter interface {
+	RunPrompt(ctx context.Context, p RuntimePrompt) error
 }
 
 // RuntimeAccountStatus is the health of one Claude Code account
@@ -271,8 +322,8 @@ const (
 //   - text_delta, thinking_delta, assistant_message: Text.
 //   - tool_call: ID, Name, Input, Risk. The runtime executes the tool itself.
 //   - tool_result: ID, Output, IsError.
-//   - session_meta: ClaudeSessionID, Model, Tools, Version. Sent once per
-//     runtime process, on its first init.
+//   - session_meta: ClaudeSessionID, Model, Tier, Tools, Version. Sent once
+//     per runtime process, on its first init.
 //   - usage: Usage, CostUSD, Model, DurationMS. Sent once per turn, before end.
 //   - limits: Windows.
 //   - end: StopReason, IsError, ErrorText. Always the last event.
@@ -287,10 +338,17 @@ type RuntimeEvent struct {
 	Risk   Risk
 	Output string
 
+	// ClaudeSessionID is the runtime's own session ID for the session_meta
+	// event: the Claude Code session ID, or the ACP session ID of the
+	// Antigravity runtime (ADR 0022). The name and JSON key are kept for the
+	// stored logs.
 	ClaudeSessionID string
 	Model           string
-	Tools           []string
-	Version         string
+	// Tier is the plan tier the runtime reported, when it does: the name from
+	// the Antigravity session/new result's _meta.antigravity.tier.name.
+	Tier    string
+	Tools   []string
+	Version string
 
 	Usage      Usage
 	CostUSD    float64

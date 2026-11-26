@@ -75,10 +75,17 @@ func workbenchPreEdit(in io.Reader) int {
 	if target == "" {
 		target = input.ToolInput.NotebookPath
 	}
+	return workbenchReportEdit(id, input.Cwd, target)
+}
+
+// workbenchReportEdit reports the worktree of an edited path for the pane
+// session id: the shared part of the Claude Code pre-edit hook and the agy
+// post-edit hook (spec 69, spec 77 REQ-WRA-009). cwd is the agent's working
+// folder ("" for the process's). It never fails: it always returns 0.
+func workbenchReportEdit(id, cwd, target string) int {
 	if target == "" {
 		return 0
 	}
-	cwd := input.Cwd
 	if cwd == "" {
 		cwd, _ = os.Getwd()
 	}

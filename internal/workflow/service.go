@@ -25,15 +25,16 @@ import (
 var ErrGuardianUnavailable = errors.New("workflow: guardian unavailable")
 
 // GuardianBackgroundError is the error of a guardian structured call
-// (AgentRequest.Background) whose agent runs only on Claude Code and has no
-// background model (spec 39 revision 5, REQ-CCT-007). The web answers it with
-// 503 guardian_needs_background_model and this message.
+// (AgentRequest.Background) when no chain resolves for the guardian, not even
+// [router] background_model (spec 78 REQ-RPR-009; before it, spec 39 revision
+// 5 refused any guardian that ran only on Claude Code). The web answers it
+// with 503 guardian_needs_background_model and this message.
 type GuardianBackgroundError struct {
 	Agent string
 }
 
 func (e *GuardianBackgroundError) Error() string {
-	return fmt.Sprintf("The guardian %s runs on Claude Code. Set a background model in Router (or add an API model to its combo) so it can plan workflow changes.", e.Agent)
+	return fmt.Sprintf("The guardian %s has no model to run on. Set its model, or a background model in Router, so it can plan workflow changes.", e.Agent)
 }
 
 // Service tuning constants.

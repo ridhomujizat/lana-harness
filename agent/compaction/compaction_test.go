@@ -898,7 +898,8 @@ func TestOnCompactedObserverNotCalledOnAppendFailure(t *testing.T) {
 	}
 }
 
-// REQ-CCT-007 (was REQ-CCR-007): compaction never calls Claude Code; an agent
+// REQ-CCT-007 (was REQ-CCR-007, kept by spec 78 ToolBackgroundChain):
+// compaction never calls Claude Code; an agent
 // whose chain has only claude-code targets and no [router] background_model
 // gets ErrNoBackgroundModel and no model call.
 func TestCompactNowRefusesRuntimeAgent(t *testing.T) {

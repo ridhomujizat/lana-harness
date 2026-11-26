@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 
 /* The network calls of the General tab are mocked so the model picker, the
    Thinking select, and the legacy banner can be observed (REQ-MDL-012,
@@ -199,26 +199,31 @@ describe("agent model settings", () => {
     ).toContain("DeepSeek Flash");
   });
 
-  /* REQ-MDL-020: the Thinking select is shown for a thinking model, with the
-     effort descriptions as its options. */
-  it("shows the Thinking select with effort descriptions for a thinking model", async () => {
+  /* REQ-MDL-020 + spec 76: a legacy provider/model pair falls back to the
+     catalog's Thinking levels, with the descriptions as tooltips. */
+  it("shows the effort control with catalog levels for a thinking model", async () => {
     load("deepseek-flash");
 
-    const thinking = await screen.findByRole("combobox", { name: "Thinking" });
-    expect(thinking.textContent).toContain("Model default");
-    fireEvent.click(thinking);
-    expect(
-      await screen.findByRole("option", {
-        name: /Prefer for routine or latency-sensitive tasks/,
-      })
-    ).toBeTruthy();
+    const group = await screen.findByRole("radiogroup", { name: "Reasoning effort" });
+    const radios = Array.from(group.querySelectorAll('[role="radio"]'));
+    expect(radios.map((node) => node.textContent)).toEqual([
+      "Default (High)",
+      "Off",
+      "Low",
+      "High",
+      "Max",
+    ]);
+    expect(screen.getByRole("radio", { name: "Default (High)" }).getAttribute("aria-checked")).toBe("true");
+    expect(screen.getByRole("radio", { name: "Low" }).getAttribute("title")).toBe(
+      "Prefer for routine or latency-sensitive tasks."
+    );
   });
 
-  it("hides the Thinking select for a non-thinking model", async () => {
+  it("hides the effort control for a non-thinking model", async () => {
     load("deepseek-chat");
 
     await screen.findByText("Legacy model — switch to deepseek-flash");
-    expect(screen.queryByRole("combobox", { name: "Thinking" })).toBeNull();
+    expect(screen.queryByRole("radiogroup", { name: "Reasoning effort" })).toBeNull();
   });
 
   /* REQ-MDL-020: a model outside the router choices stays selected in the
@@ -372,14 +377,14 @@ describe("Claude Code as a model (AC-CCT-011)", () => {
     const model = await screen.findByRole("combobox", { name: "Model" });
     expect(screen.queryByRole("radio", { name: "Claude Agent" })).toBeNull();
     expect(screen.queryByText("Engine")).toBeNull();
-    expect(screen.queryByRole("combobox", { name: "Reasoning effort" })).toBeNull();
+    expect(screen.queryByRole("radiogroup", { name: "Reasoning effort" })).toBeNull();
     fireEvent.click(model);
     fireEvent.click(await screen.findByRole("option", { name: "Claude Code · Opus (latest)" }));
 
     expect(
       screen.getByText(/Runs in Claude Code with your Claude plan\. Claude Code uses its own file and shell tools; lana's memory, knowledge, calendar, workflow and other tools come in through MCP\. Max steps and compaction settings don't apply\./)
     ).toBeTruthy();
-    expect(screen.getByRole("combobox", { name: "Reasoning effort" })).toBeTruthy();
+    expect(screen.getByRole("radiogroup", { name: "Reasoning effort" })).toBeTruthy();
     expect(screen.getByRole("link", { name: /Allow scheduled runs on claude-code/ }).getAttribute("href")).toBe(
       "#/router/providers/claude-code"
     );
@@ -429,13 +434,13 @@ describe("Claude Code as a model (AC-CCT-011)", () => {
     });
   });
 
-  it("groups Claude Code models per account with the account email", async () => {
-    mockRouterAgent("coding");
+  it("lists each Claude Code model once and picks the account under it", async () => {
+    mockRouterAgent("claude-code/opus");
     vi.mocked(getRouter).mockResolvedValue({
       ...CLAUDE_ROUTER,
       choices: [
         ...CLAUDE_ROUTER.choices,
-        { value: "claude-work/opus", label: "Claude Code · Opus (latest)", group: "Claude Code" },
+        { value: "claude-work/opus", label: "Claude Code (claude-work) · Opus (latest)", group: "Claude Code" },
       ],
     });
     vi.mocked(getClaudeAgent).mockResolvedValue({
@@ -461,11 +466,20 @@ describe("Claude Code as a model (AC-CCT-011)", () => {
       const groups = Array.from(listbox.querySelectorAll('[role="group"]')).map((node) =>
         node.getAttribute("aria-label")
       );
-      expect(groups).toContain("Claude Code · claude-code (me@home.dev)");
-      expect(groups).toContain("Claude Code · claude-work (me@work.dev)");
+      expect(groups.filter((group) => String(group).startsWith("Claude Code"))).toEqual(["Claude Code"]);
     });
-    const work = listbox.querySelector('[aria-label="Claude Code · claude-work (me@work.dev)"]') as HTMLElement;
-    expect(work.querySelector('[data-logo="claude"]')).toBeTruthy();
+    const claude = listbox.querySelector('[aria-label="Claude Code"]') as HTMLElement;
+    expect(claude.querySelector('[data-logo="claude"]')).toBeTruthy();
+    expect(within(claude).getAllByRole("option", { name: /Opus \(latest\)/ })).toHaveLength(1);
+    fireEvent.keyDown(document.activeElement || document.body, { key: "Escape" });
+
+    const account = await screen.findByRole("combobox", { name: "Account" });
+    expect(account.textContent).toContain("me@home.dev");
+    fireEvent.click(account);
+    fireEvent.click(await screen.findByRole("option", { name: /me@work\.dev/ }));
+    await waitFor(() =>
+      expect(screen.getByRole("combobox", { name: "Account" }).textContent).toContain("me@work.dev")
+    );
   });
 });
 
@@ -599,5 +613,134 @@ describe("agent avatar on the General tab (spec 43)", () => {
     fireEvent.click(buttons[1] as HTMLElement);
     expect(await screen.findByRole("dialog", { name: "Agent avatar" })).toBeTruthy();
     expect(screen.getByRole("button", { name: "Reset to default" })).toBeTruthy();
+  });
+});
+
+/* Spec 76 (REQ-MES-005, REQ-MES-006): Antigravity lists base models with
+   their effort levels; the effort control sits beside the model picker. */
+const AGY_ROUTER: RouterOverview = {
+  ...ROUTER,
+  choices: [
+    ...ROUTER.choices,
+    {
+      value: "antigravity/gemini-4-neon",
+      label: "Gemini 4 Neon",
+      group: "Antigravity",
+      efforts: ["low", "medium", "high", "xhigh"],
+      default_effort: "high",
+    },
+    {
+      value: "antigravity/gpt-oss-120b",
+      label: "GPT-OSS 120B",
+      group: "Antigravity",
+      efforts: ["medium"],
+      default_effort: "medium",
+    },
+  ],
+};
+
+function mockAgyAgent(model: string, effort: string): void {
+  vi.mocked(listAgents).mockResolvedValue({
+    agents: [baseAgent({ model, provider: "", reasoning_effort: effort })],
+  });
+  vi.mocked(getConfig).mockResolvedValue({
+    ...configFor(model),
+    settings: {
+      ...configFor(model).settings,
+      agents: { coder: { model, reasoning_effort: effort } },
+    },
+  });
+  vi.mocked(getRouter).mockResolvedValue(AGY_ROUTER);
+  vi.mocked(getModels).mockResolvedValue({ models: [], efforts: [] });
+  vi.mocked(updateAgent).mockResolvedValue({ name: "coder", version: "v2", restart_required: false });
+}
+
+function effortRadios(): string[] {
+  const group = screen.getByRole("radiogroup", { name: "Reasoning effort" });
+  return Array.from(group.querySelectorAll('[role="radio"]')).map((node) => node.textContent || "");
+}
+
+describe("model and effort as two choices (spec 76)", () => {
+  it("shows an Antigravity base model with its levels", async () => {
+    mockAgyAgent("antigravity/gemini-4-neon", "xhigh");
+    render(<AgentDetailPage name="coder" tab="general" />);
+
+    const model = await screen.findByRole("combobox", { name: "Model" });
+    expect(model.textContent).toContain("Gemini 4 Neon");
+    expect(effortRadios()).toEqual(["Default (High)", "Low", "Medium", "High", "Extra high"]);
+    expect(screen.getByRole("radio", { name: "Extra high" }).getAttribute("aria-checked")).toBe("true");
+  });
+
+  it("updates the levels on a model switch and resets a level the new model lacks", async () => {
+    mockAgyAgent("antigravity/gemini-4-neon", "xhigh");
+    render(<AgentDetailPage name="coder" tab="general" />);
+
+    fireEvent.click(await screen.findByRole("combobox", { name: "Model" }));
+    fireEvent.click(await screen.findByRole("option", { name: "GPT-OSS 120B" }));
+    expect(effortRadios()).toEqual(["Default (Medium)", "Medium"]);
+    expect(screen.getByRole("radio", { name: "Default (Medium)" }).getAttribute("aria-checked")).toBe(
+      "true"
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "Save changes" }));
+    await waitFor(() => {
+      expect(vi.mocked(updateAgent)).toHaveBeenCalledWith(
+        "coder",
+        { model: "antigravity/gpt-oss-120b", reasoning_effort: "" },
+        "v1"
+      );
+    });
+  });
+
+  it("keeps a level the new model lists", async () => {
+    mockAgyAgent("antigravity/gemini-4-neon", "medium");
+    render(<AgentDetailPage name="coder" tab="general" />);
+
+    fireEvent.click(await screen.findByRole("combobox", { name: "Model" }));
+    fireEvent.click(await screen.findByRole("option", { name: "GPT-OSS 120B" }));
+    expect(screen.getByRole("radio", { name: "Medium" }).getAttribute("aria-checked")).toBe("true");
+
+    fireEvent.click(screen.getByRole("button", { name: "Save changes" }));
+    await waitFor(() => {
+      expect(vi.mocked(updateAgent)).toHaveBeenCalledWith(
+        "coder",
+        { model: "antigravity/gpt-oss-120b" },
+        "v1"
+      );
+    });
+  });
+
+  it("hides the control for a model without levels", async () => {
+    mockAgyAgent("antigravity/gemini-4-neon", "");
+    render(<AgentDetailPage name="coder" tab="general" />);
+
+    fireEvent.click(await screen.findByRole("combobox", { name: "Model" }));
+    fireEvent.click(await screen.findByRole("option", { name: "GPT-5 mini" }));
+    expect(screen.queryByRole("radiogroup", { name: "Reasoning effort" })).toBeNull();
+  });
+
+  it("shows a saved level the model does not list until it is changed", async () => {
+    mockAgyAgent("antigravity/gpt-oss-120b", "xhigh");
+    render(<AgentDetailPage name="coder" tab="general" />);
+
+    const stale = await screen.findByRole("radio", {
+      name: "Extra high (not offered by this model)",
+    });
+    expect(stale.getAttribute("aria-checked")).toBe("true");
+    fireEvent.click(screen.getByRole("radio", { name: "Medium" }));
+    expect(
+      screen.queryByRole("radio", { name: "Extra high (not offered by this model)" })
+    ).toBeNull();
+  });
+
+  it("keeps a legacy full variant id selected", async () => {
+    mockAgyAgent("antigravity/gemini-4-neon-high", "");
+    render(<AgentDetailPage name="coder" tab="general" />);
+
+    const model = await screen.findByRole("combobox", { name: "Model" });
+    expect(model.textContent).toContain("antigravity/gemini-4-neon-high");
+    expect(screen.queryByLabelText("Custom model id")).toBeNull();
+    expect(screen.queryByRole("radiogroup", { name: "Reasoning effort" })).toBeNull();
+    expect(screen.getByText(/This id fixes the effort at High\. Pick Gemini 4 Neon/)).toBeTruthy();
   });
 });

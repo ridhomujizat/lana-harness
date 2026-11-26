@@ -133,6 +133,12 @@ type Registry struct {
 	// background counts the background-work marks per session (spec 39
 	// revision 5).
 	background map[string]int
+
+	// cooldownMu guards cooldowns: the external runtime accounts that rest
+	// after an early failure, until when (spec 75, REQ-PAF-004). They live in
+	// memory only.
+	cooldownMu sync.Mutex
+	cooldowns  map[string]time.Time
 }
 
 // NewRegistry creates a registry.
@@ -839,9 +845,16 @@ func (r *Registry) parseModelChoice(value string) (string, string, error) {
 	if _, ok := combos[value]; ok {
 		return "", value, nil
 	}
-	// AC-CCT-004: a claude-code address switches the session to Claude Code.
-	if llmcall.IsClaudeCodeAddress(r.llm, value) {
-		if target, _ := llmcall.ParseTarget(value); !llmcall.ValidClaudeCodeModel(target.Model) {
+	// AC-CCT-004: a claude-code address switches the session to Claude Code;
+	// an Antigravity address to Antigravity (spec 74).
+	if llmcall.IsExternalAddress(r.llm, value) {
+		target, _ := llmcall.ParseTarget(value)
+		runtime, _ := llmcall.ExternalRuntime(r.llm, target.Provider)
+		valid := llmcall.ValidClaudeCodeModel(target.Model)
+		if runtime == llmcall.Antigravity {
+			valid = llmcall.ValidAntigravityModel(target.Model)
+		}
+		if !valid {
 			return "", "", fmt.Errorf("%w: %s", ErrUnknownProvider, value)
 		}
 		return "", value, nil

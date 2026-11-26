@@ -16,6 +16,8 @@ import { CreateAgentDialog } from "../agents";
 import { Alert, SettingsRestartBanner, StatusLine, markSettingsSaved } from "../settings-pages";
 import { ACCOUNTS_TERMS_NOTE, useClaudeAccounts } from "./claude-code";
 import { LoginCommand, PlanWindows, UsageProbeError, accountWindows, planLabel } from "./limits";
+import { AccountOrderList, POOL_TERMS_NOTE } from "./account-order";
+import type { OrderItem } from "./account-order";
 import { RefreshControl, claudeLimitsStale, claudeUpdatedAt } from "./limits-refresh";
 import { TestResult, usedByList, usedByText } from "./models";
 import type { TestState } from "./models";
@@ -215,27 +217,7 @@ function LabelEditor({
   );
 }
 
-function AccountRow({
-  account,
-  row,
-  windows,
-  limit,
-  usage,
-  busy,
-  flow,
-  highlighted,
-  renaming,
-  onToggle,
-  onScheduled,
-  onSignIn,
-  onCancelSignIn,
-  onDismissFlow,
-  onAskSignOut,
-  onAskRemove,
-  onRename,
-  onSaveLabel,
-  onCancelRename,
-}: {
+interface AccountRowProps {
   account: ClaudeAccount;
   row: ProviderRow | undefined;
   windows: routerApi.PlanWindow[];
@@ -246,6 +228,8 @@ function AccountRow({
   flow: SignInFlow | undefined;
   highlighted: boolean;
   renaming: boolean;
+  /* The row starts open (a list of one, a new account). */
+  open: boolean;
   onToggle: (enabled: boolean) => void;
   onScheduled: (allowed: boolean) => void;
   onSignIn: () => void;
@@ -256,146 +240,174 @@ function AccountRow({
   onRename: () => void;
   onSaveLabel: (label: string) => void;
   onCancelRename: () => void;
-}) {
+}
+
+/* Spec 77 revision 4: one account as a row of the accounts list. The row
+   line has the logo, name, email, plan, state, the usage bar, and Sign in;
+   sign-in progress shows under it; the windows, facts, switches, Sign out,
+   and Remove open under the row. */
+function accountItem(props: AccountRowProps): OrderItem {
+  const { account, row, windows, limit, usage, busy, flow, highlighted, renaming } = props;
   const enabled = !(row && row.disabled);
   const users = account.agents.map((name) => "agents." + name).concat(account.combos.map((name) => "combos." + name));
   const folder = account.config_dir || (row ? row.config_dir || "" : "");
   const display = accountDisplayName(account);
   const running = Boolean(flow && flow.phase === "running");
-  return (
-    <li
-      className={"rt-acct" + (enabled ? "" : " is-off") + (highlighted ? " is-new" : "")}
-      aria-label={"Account " + account.name}
-    >
-      <div className="rt-acct-head">
-        <ProviderLogo logo="claude" name="Claude Code" size={32} />
-        <div className="rt-acct-id">
-          {renaming ? (
-            <LabelEditor account={account} busy={busy} onSave={onSaveLabel} onCancel={onCancelRename} />
-          ) : (
-            <span className="rt-acct-name">
-              <span className="trunc" title={display}>
-                {display}
-              </span>
-              {account.builtin ? <Badge>Built in</Badge> : null}
-              {account.builtin ? null : (
-                <IconButton icon="pencil" size="xs" label={"Rename " + account.name} disabled={busy} onClick={onRename} />
-              )}
-            </span>
-          )}
-          <span className="rt-acct-sub">
-            <span className="mono">{account.name}</span>
-            {account.email && display !== account.email ? <span className="trunc"> · {account.email}</span> : null}
-            {!account.email && !account.logged_in ? <span> · Not signed in yet</span> : null}
-            {!account.email && account.logged_in ? <span> · Email not reported</span> : null}
-          </span>
-        </div>
-        <div className="rt-acct-state">
-          {account.plan ? <Badge tone="violet">{planLabel(account.plan)}</Badge> : null}
-          {account.logged_in ? (
-            <Badge tone="green" dot>
-              Signed in
-            </Badge>
-          ) : (
-            <Badge tone="amber" dot>
-              Not signed in
-            </Badge>
-          )}
-        </div>
-        <div className="rt-acct-acts">
-          {!account.logged_in && !running ? (
-            <Button size="sm" variant="primary" icon="log-in" disabled={busy} onClick={onSignIn}>
-              {SIGN_IN_BUTTON}
-            </Button>
+  return {
+    id: account.name,
+    label: display,
+    rowLabel: "Account " + account.name,
+    rowClass: (enabled ? "" : "is-off") + (highlighted ? " is-new" : ""),
+    windows,
+    coolingUntil: account.cooling_until || null,
+    pool: account.pool !== false,
+    open: props.open,
+    lead: <ProviderLogo logo="claude" name="Claude Code" size={32} />,
+    name: renaming ? (
+      <LabelEditor account={account} busy={busy} onSave={props.onSaveLabel} onCancel={props.onCancelRename} />
+    ) : (
+      <span className="rt-acct-name">
+        <span className="trunc" title={display}>
+          {display}
+        </span>
+        {account.builtin ? <Badge>Built in</Badge> : null}
+        {account.builtin ? null : (
+          <IconButton icon="pencil" size="xs" label={"Rename " + account.name} disabled={busy} onClick={props.onRename} />
+        )}
+      </span>
+    ),
+    sub: (
+      <>
+        <span className="rt-acct-sub">
+          <span className="mono">{account.name}</span>
+          {account.email && display !== account.email ? <span className="trunc"> · {account.email}</span> : null}
+          {!account.email && !account.logged_in ? <span> · Not signed in yet</span> : null}
+          {!account.email && account.logged_in ? <span> · Email not reported</span> : null}
+        </span>
+        {account.plan ? <Badge tone="violet">{planLabel(account.plan)}</Badge> : null}
+        {account.logged_in ? (
+          <Badge tone="green" dot>
+            Signed in
+          </Badge>
+        ) : (
+          <Badge tone="amber" dot>
+            Not signed in
+          </Badge>
+        )}
+        {enabled ? null : <Badge tone="gray">Off</Badge>}
+      </>
+    ),
+    rowActions:
+      !account.logged_in && !running ? (
+        <Button size="sm" variant="primary" icon="log-in" className="rt-acct-signin" disabled={busy} onClick={props.onSignIn}>
+          {SIGN_IN_BUTTON}
+        </Button>
+      ) : null,
+    below:
+      flow || !account.logged_in || account.error ? (
+        <>
+          {flow && flow.phase === "succeeded" ? (
+            <p className="rt-signin-ok" role="status">
+              <Ic name="circle-check" size={14} /> {signedInText(account)}
+            </p>
           ) : null}
+          {flow ? (
+            <SignInCard flow={flow} onCancel={props.onCancelSignIn} onRetry={props.onSignIn} onDismiss={props.onDismissFlow} />
+          ) : null}
+          {!account.logged_in && !flow ? (
+            <details className="rt-signin-alt rt-acct-alt">
+              <summary>Sign in from a terminal instead</summary>
+              <LoginCommand command={account.login_command} />
+            </details>
+          ) : null}
+          {account.error ? (
+            <p className="rt-limit-err" role="status">
+              <Ic name="circle-alert" size={12} />
+              <span>{account.error}</span>
+            </p>
+          ) : null}
+        </>
+      ) : null,
+    details: (
+      <>
+        <div className="rt-acct-body">
+          <div className="rt-acct-windows">
+            {/* The windows show as bars on the row (spec 77); here only the
+                note while none has been reported. */}
+            {windows.length === 0 ? <PlanWindows windows={windows} /> : null}
+            <UsageProbeError limit={limit} />
+          </div>
+          <dl className="rt-facts rt-acct-facts">
+            <dt>Last 24 h</dt>
+            <dd className="num">{usageText(usage)}</dd>
+            <dt>Runs</dt>
+            <dd className="num">
+              {count(account.running)} running · {count(account.queued)} queued
+            </dd>
+            <dt>Version</dt>
+            <dd className="num">
+              {account.version || "Unknown"}
+              {account.version && !account.version_ok ? (
+                <span className="rt-warn">
+                  <Ic name="triangle-alert" size={12} /> Too old. Update Claude Code.
+                </span>
+              ) : null}
+            </dd>
+            <dt>Used by</dt>
+            <dd>
+              <UsedBy usedBy={users} />
+            </dd>
+            {folder ? (
+              <>
+                <dt>Folder</dt>
+                <dd className="mono trunc" title={folder}>
+                  {folder}
+                </dd>
+              </>
+            ) : null}
+          </dl>
+        </div>
+        <div className="rt-acct-settings">
+          <label className="rt-acct-sched">
+            <Toggle
+              aria-label={"Use " + account.name}
+              checked={enabled}
+              disabled={busy || !row}
+              onChange={props.onToggle}
+            />
+            <span>
+              <b>Use this account</b>
+              <span className="hint">Off: the router skips it.</span>
+            </span>
+          </label>
+          <label className="rt-acct-sched">
+            <Toggle
+              aria-label={"Allow scheduled runs for " + account.name}
+              checked={Boolean(row && row.allow_scheduled)}
+              disabled={busy || !row}
+              onChange={props.onScheduled}
+            />
+            <span>
+              <b>Allow scheduled runs</b>
+              <span className="hint">Workflows and the calendar may start turns on this account.</span>
+            </span>
+          </label>
+        </div>
+        <div className="rt-acct-more-acts">
           {account.logged_in ? (
-            <Button size="sm" variant="ghost" icon="log-out" disabled={busy || running} onClick={onAskSignOut}>
+            <Button size="sm" variant="secondary" icon="log-out" disabled={busy || running} onClick={props.onAskSignOut}>
               Sign out
             </Button>
           ) : null}
-          <label className="rt-conn-toggle">
-            <Toggle aria-label={"Use " + account.name} checked={enabled} disabled={busy || !row} onChange={onToggle} />
-            <span className="hint">{enabled ? "On" : "Off"}</span>
-          </label>
           {account.builtin ? null : (
-            <IconButton icon="trash-2" size="sm" label={"Remove " + account.name} disabled={busy} onClick={onAskRemove} />
+            <Button size="sm" variant="ghost" icon="trash-2" className="rt-acct-remove" disabled={busy} onClick={props.onAskRemove} aria-label={"Remove " + account.name}>
+              Remove
+            </Button>
           )}
         </div>
-      </div>
-
-      {flow && flow.phase === "succeeded" ? (
-        <p className="rt-signin-ok" role="status">
-          <Ic name="circle-check" size={14} /> {signedInText(account)}
-        </p>
-      ) : null}
-      {flow ? (
-        <SignInCard flow={flow} onCancel={onCancelSignIn} onRetry={onSignIn} onDismiss={onDismissFlow} />
-      ) : null}
-      {!account.logged_in && !flow ? (
-        <details className="rt-signin-alt rt-acct-alt">
-          <summary>Sign in from a terminal instead</summary>
-          <LoginCommand command={account.login_command} />
-        </details>
-      ) : null}
-
-      <div className="rt-acct-body">
-        <div className="rt-acct-windows">
-          <PlanWindows windows={windows} />
-          <UsageProbeError limit={limit} />
-        </div>
-        <dl className="rt-facts rt-acct-facts">
-          <dt>Last 24 h</dt>
-          <dd className="num">{usageText(usage)}</dd>
-          <dt>Runs</dt>
-          <dd className="num">
-            {count(account.running)} running · {count(account.queued)} queued
-          </dd>
-          <dt>Version</dt>
-          <dd className="num">
-            {account.version || "Unknown"}
-            {account.version && !account.version_ok ? (
-              <span className="rt-warn">
-                <Ic name="triangle-alert" size={12} /> Too old. Update Claude Code.
-              </span>
-            ) : null}
-          </dd>
-          <dt>Used by</dt>
-          <dd>
-            <UsedBy usedBy={users} />
-          </dd>
-          {folder ? (
-            <>
-              <dt>Folder</dt>
-              <dd className="mono trunc" title={folder}>
-                {folder}
-              </dd>
-            </>
-          ) : null}
-        </dl>
-      </div>
-
-      <div className="rt-acct-foot">
-        <label className="rt-acct-sched">
-          <Toggle
-            aria-label={"Allow scheduled runs for " + account.name}
-            checked={Boolean(row && row.allow_scheduled)}
-            disabled={busy || !row}
-            onChange={onScheduled}
-          />
-          <span>
-            <b>Allow scheduled runs</b>
-            <span className="hint">Workflows and the calendar may start turns on this account.</span>
-          </span>
-        </label>
-        {account.error ? (
-          <p className="rt-limit-err" role="status">
-            <Ic name="circle-alert" size={12} />
-            <span>{account.error}</span>
-          </p>
-        ) : null}
-      </div>
-    </li>
-  );
+      </>
+    ),
+  };
 }
 
 /* ------------------------------------------------------------------ */
@@ -1025,6 +1037,53 @@ export function ClaudeCodeDetail() {
     }
   }
 
+  /* Spec 75 (REQ-PAF-006): the pool order, saved on every move. */
+  async function saveOrder(order: string[], unpooled: string[]) {
+    const result = await routerApi.savePoolOrder("claude-code", order, unpooled, version || undefined);
+    markSettingsSaved();
+    if (result.version) {
+      setVersion(result.version);
+    }
+    void reloadStatus();
+  }
+
+  /* Spec 77 revision 4: one list of the accounts, in pool order, each row
+     with its handle, state, and settings. */
+  const orderItems: OrderItem[] = accounts.map((account) =>
+    accountItem({
+      account,
+      row: rowOf(account.name),
+      windows: accountWindows(account, limitOf(account.name)),
+      limit: limitOf(account.name),
+      usage: usage.find((entry) => entry.provider === account.name),
+      busy: busyRow === account.name,
+      flow: flows[account.name],
+      highlighted: highlight === account.name,
+      renaming: renaming === account.name,
+      open: accounts.length === 1 || highlight === account.name,
+      onToggle: (enabled) =>
+        void save(
+          account,
+          { disabled: !enabled },
+          enabled ? account.name + " is on." : account.name + " is off. The router skips it."
+        ),
+      onScheduled: (allowed) =>
+        void save(
+          account,
+          { allow_scheduled: allowed },
+          allowed ? "Scheduled runs may use " + account.name + "." : "Scheduled runs no longer use " + account.name + "."
+        ),
+      onSignIn: () => void signIn(account),
+      onCancelSignIn: () => void cancelSignIn(account.name),
+      onDismissFlow: () => setFlow(account.name, null),
+      onAskSignOut: () => setConfirm({ kind: "sign-out", account }),
+      onAskRemove: () => setConfirm({ kind: "remove", account }),
+      onRename: () => setRenaming(account.name),
+      onSaveLabel: (label) => void saveLabel(account, label),
+      onCancelRename: () => setRenaming(""),
+    })
+  );
+
   async function saveLabel(account: ClaudeAccount, label: string) {
     setBusyRow(account.name);
     clearNotes();
@@ -1120,48 +1179,17 @@ export function ClaudeCodeDetail() {
           <EmptyState size="sm" icon="user-plus" text="No Claude Code account yet. Add one to use your Claude plan." />
         ) : null}
         {accounts.length > 0 ? (
-          <ul className="rt-accts">
-            {accounts.map((account) => (
-              <AccountRow
-                key={account.name}
-                account={account}
-                row={rowOf(account.name)}
-                windows={accountWindows(account, limitOf(account.name))}
-                limit={limitOf(account.name)}
-                usage={usage.find((entry) => entry.provider === account.name)}
-                busy={busyRow === account.name}
-                flow={flows[account.name]}
-                highlighted={highlight === account.name}
-                renaming={renaming === account.name}
-                onToggle={(enabled) =>
-                  void save(
-                    account,
-                    { disabled: !enabled },
-                    enabled ? account.name + " is on." : account.name + " is off. The router skips it."
-                  )
-                }
-                onScheduled={(allowed) =>
-                  void save(
-                    account,
-                    { allow_scheduled: allowed },
-                    allowed
-                      ? "Scheduled runs may use " + account.name + "."
-                      : "Scheduled runs no longer use " + account.name + "."
-                  )
-                }
-                onSignIn={() => void signIn(account)}
-                onCancelSignIn={() => void cancelSignIn(account.name)}
-                onDismissFlow={() => setFlow(account.name, null)}
-                onAskSignOut={() => setConfirm({ kind: "sign-out", account })}
-                onAskRemove={() => setConfirm({ kind: "remove", account })}
-                onRename={() => setRenaming(account.name)}
-                onSaveLabel={(label) => void saveLabel(account, label)}
-                onCancelRename={() => setRenaming("")}
-              />
-            ))}
-          </ul>
+          <AccountOrderList
+            label="Claude Code accounts"
+            items={orderItems}
+            sortable={accounts.length > 1}
+            onSave={saveOrder}
+          />
         ) : null}
         <p className="hint rt-conn-note">{ACCOUNTS_TERMS_NOTE}</p>
+        {accounts.length > 1 && status && status.pool_warning ? (
+          <p className="hint rt-conn-note">{POOL_TERMS_NOTE}</p>
+        ) : null}
       </Panel>
 
       <ClaudeModelsPanel

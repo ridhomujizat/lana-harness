@@ -40,8 +40,9 @@ func fakeClaudeLog(t *testing.T, logPath, kind string) []map[string]any {
 //   - AC-CCT-006: --append-system-prompt holds the persona and memory;
 //   - AC-CCT-007: Claude calls mcp__lana__memory_write over the loopback MCP
 //     host; the memory has the fact and the log shows the lana tool call;
-//   - AC-CCT-009: memory capture after the Claude turn calls the background
-//     model with source memory_capture;
+//   - AC-CCT-009 (kept by spec 78 REQ-RPR-009, ToolBackgroundChain): memory
+//     capture after the Claude turn calls the background model with source
+//     memory_capture;
 //   - AC-CCT-005: a combo whose Claude Code target is not logged in falls back
 //     to DeepSeek in the same turn, with the attempt and both call records;
 //   - AC-CCT-010: a workflow run of the combo agent without allow_scheduled is

@@ -1850,7 +1850,14 @@ func TestPatchSessionReasoningEffort(t *testing.T) {
 		t.Fatalf("cleared effort = %q, want empty", cleared.ReasoningEffort)
 	}
 
-	// An unknown value is rejected with the endpoint's error style.
-	rr = serveAuth(s, sessionTestRequest(http.MethodPatch, "/v1/sessions/"+info.ID, `{"reasoning_effort":"turbo"}`, cookie, csrf))
+	// Spec 76: a model's own level name is accepted.
+	rr = serveAuth(s, sessionTestRequest(http.MethodPatch, "/v1/sessions/"+info.ID, `{"reasoning_effort":"xhigh"}`, cookie, csrf))
+	if rr.Code != http.StatusOK {
+		t.Fatalf("xhigh status = %d, body = %q", rr.Code, rr.Body.String())
+	}
+
+	// A value that is not one token is rejected with the endpoint's error
+	// style.
+	rr = serveAuth(s, sessionTestRequest(http.MethodPatch, "/v1/sessions/"+info.ID, `{"reasoning_effort":"turbo mode"}`, cookie, csrf))
 	assertAuthError(t, rr, http.StatusBadRequest, "invalid_request")
 }

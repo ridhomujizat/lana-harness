@@ -4,6 +4,7 @@ import (
 	"context"
 	"net/http"
 	"os"
+	"reflect"
 	"strings"
 	"testing"
 )
@@ -63,7 +64,7 @@ func TestRouterClaudeCodeChoices(t *testing.T) {
 			}
 			continue
 		}
-		if len(claude) != 3 || claude[0] != (routerChoiceJSON{Value: "claude-code/opus", Label: "Claude Code · Opus (latest)", Group: "Claude Code"}) ||
+		if len(claude) != 3 || !reflect.DeepEqual(claude[0], routerChoiceJSON{Value: "claude-code/opus", Label: "Claude Code · Opus (latest)", Group: "Claude Code"}) ||
 			claude[1].Label != "Claude Code · Opus 5.5" || claude[2].Label != "Claude Code · my-model" {
 			t.Fatalf("claude choices = %+v", claude)
 		}

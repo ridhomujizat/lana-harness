@@ -354,6 +354,26 @@ function learnedLine(event: SessionEvent): string {
     .join(" ");
 }
 
+/* One muted line per learned note: clipped to a single line so a long
+   memory does not take over the chat; a click shows the whole note. */
+function LearnedLine({ text }: { text: string }) {
+  const [open, setOpen] = useState(false);
+  return (
+    <button
+      type="button"
+      className={"room-learned" + (open ? " is-open" : "")}
+      aria-expanded={open}
+      title={open ? undefined : text}
+      onClick={() => setOpen((v) => !v)}
+    >
+      <BookIcon />
+      <span className="room-learned-text">
+        <span className="room-learned-label">Learned</span> {text}
+      </span>
+    </button>
+  );
+}
+
 function BookIcon() {
   return (
     <svg
@@ -1522,10 +1542,7 @@ export function RoomView({ room, initialDraft, variant = "page" }: RoomViewProps
         );
       case "learned":
         return (
-          <div className="room-learned" key={node.key}>
-            <BookIcon />
-            <span className="room-learned-text">{"Learned: " + node.learnedText}</span>
-          </div>
+          <LearnedLine key={node.key} text={node.learnedText} />
         );
       case "user":
         return (

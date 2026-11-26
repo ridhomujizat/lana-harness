@@ -27,7 +27,10 @@ import {
 } from "./agent-common";
 import type { AgentLike, Permission } from "./agent-common";
 import { AgentOverview } from "./agent-overview";
-import { CLAUDE_EFFORTS, ClaudeCodeNote, choiceOptions } from "./agent-runtime";
+import { ClaudeCodeNote, choiceOptions } from "./agent-runtime";
+import { EffortControl } from "./effort-control";
+import { choiceLevels, cleanEfforts, effortChoice, effortName, keptEffort, variantOf } from "./effort";
+import type { EffortLevels } from "./effort";
 import {
   CLAUDE_CODE_HREF,
   ClaudeCodeBadge,
@@ -65,7 +68,21 @@ import {
 import { AgentAvatar, AgentAvatarStack } from "./agent-avatar";
 import { GenerateAvatarButton } from "./avatar-dialog";
 import type { AvatarSavedResult } from "./avatar-dialog";
-import type { SelectOption } from "../ui/gr8r";
+import { ModelPicker } from "./model-picker";
+import type { ModelOption } from "./model-picker";
+import {
+  accountOptions,
+  mergeAccountChoices,
+  modelAccounts,
+  useAntigravityAccounts,
+  withAccount,
+} from "./model-accounts";
+
+/* "claude-work" of "claude-work/opus". */
+function addressAccountOf(value: string): string {
+  const slash = value.indexOf("/");
+  return slash > 0 ? value.slice(0, slash) : "";
+}
 
 /* REQ-WEB-047: the agent detail header, the seven-tab bar, and the General
    tab. The other tabs show a placeholder until their slices land (T-030). */
@@ -262,13 +279,6 @@ function issueMessage(details: unknown[], key: string): string {
     }
   }
   return "";
-}
-
-/* The Thinking option text carries the effort description of REQ-MDL-020. */
-function effortLabel(effort: CatalogEffort): string {
-  const value = String(effort.value || "");
-  const label = value ? value.charAt(0).toUpperCase() + value.slice(1) : "";
-  return effort.description ? label + " — " + effort.description : label;
 }
 
 /* POST /v1/sessions accepts "" (use the agent's model) or "<provider>:<model>". */
@@ -675,6 +685,7 @@ export function AgentDetailPage({ name, tab }: AgentDetailPageProps) {
   /* A legacy runtime = "claude-code" file is rewritten on the next save. */
   const [legacyRuntime, setLegacyRuntime] = useState(false);
   const { accounts } = useClaudeAccounts();
+  const agyAccounts = useAntigravityAccounts();
   const tabsRef = useRef<HTMLDivElement | null>(null);
   const pendingTabFocus = useRef(false);
 
@@ -787,7 +798,11 @@ export function AgentDetailPage({ name, tab }: AgentDetailPageProps) {
     ? ""
     : claudeTargetAccount(formModel, choices, page ? page.combos : null, claudeNames);
   const isClaudeForm = claudeAccount !== "";
-  const knownChoice = choices.some((choice) => choice.value === formModel);
+  /* REQ-MES-005: a full variant address saved before the base models
+     (antigravity/gemini-4-neon-high) stays selected under its own id. */
+  const variant = legacy ? null : variantOf(formModel, choices);
+  const knownChoice =
+    choices.some((choice) => choice.value === formModel) || variant !== null;
   const isCombo = choices.some(
     (choice) => choice.group === "Combos" && choice.value === formModel
   );
@@ -847,6 +862,34 @@ export function AgentDetailPage({ name, tab }: AgentDetailPageProps) {
     !legacy && (otherModel || (formModel !== "" && !knownChoice))
   );
   const thinkingModel = Boolean(selectedCatalogModel && selectedCatalogModel.thinking);
+  /* Spec 76 (REQ-MES-002): the levels of the picked model come from its
+     router choice (a combo uses its first model); a legacy provider/model
+     pair or a model the router does not list falls back to the catalog's
+     Thinking levels. */
+  const levelChoice =
+    legacy || customModel
+      ? null
+      : effortChoice(formModel, choices, page ? page.combos : null);
+  const effortLevels: EffortLevels | null =
+    levelChoice && (Array.isArray(levelChoice.efforts) || isClaudeForm)
+      ? choiceLevels(levelChoice, isClaudeForm)
+      : variant
+        ? null
+        : thinkingModel
+          ? {
+              efforts: cleanEfforts(efforts.map((effort) => effort.value)),
+              default_effort:
+                selectedCatalogModel && selectedCatalogModel.default_effort
+                  ? selectedCatalogModel.default_effort
+                  : "",
+            }
+          : null;
+  const effortDescriptions: Record<string, string> = {};
+  for (const effort of efforts) {
+    if (effort.description) {
+      effortDescriptions[effort.value] = effort.description;
+    }
+  }
   const legacyReplacement =
     selectedCatalogModel && selectedCatalogModel.legacy
       ? selectedCatalogModel.replacement
@@ -925,18 +968,21 @@ export function AgentDetailPage({ name, tab }: AgentDetailPageProps) {
       setForm({ ...form, provider: baseline.provider, model: baseline.model });
       return;
     }
-    /* Claude Code and router models take different effort values, so a
-       switch across them starts from the model's default. */
+    /* Spec 76 (REQ-MES-006): a model switch keeps the chosen level when the
+       new model lists it, else goes back to the model's default. Going back
+       to the saved model restores the saved level. A choice from a daemon
+       that reports no levels keeps the value.
+       API-CCT-002: provider is only cleared for a legacy provider/model
+       pair; a Claude Code pick writes the model address alone. */
+    const nextChoice = effortChoice(value, choices, page ? page.combos : null);
     const nextClaude =
       claudeTargetAccount(value, choices, page ? page.combos : null, claudeNames) !== "";
     const effort =
       value === baseline.model
         ? baseline.reasoning_effort
-        : nextClaude !== isClaudeForm
-          ? ""
+        : nextChoice && (Array.isArray(nextChoice.efforts) || nextClaude)
+          ? keptEffort(form.reasoning_effort, choiceLevels(nextChoice, nextClaude))
           : form.reasoning_effort;
-    /* API-CCT-002: provider is only cleared for a legacy provider/model
-       pair; a Claude Code pick writes the model address alone. */
     setForm({ ...form, provider: "", model: value, reasoning_effort: effort });
   }
 
@@ -1273,7 +1319,7 @@ export function AgentDetailPage({ name, tab }: AgentDetailPageProps) {
     : form
       ? form.model
       : "";
-  const modelOptions: SelectOption[] = [
+  const modelOptions: ModelOption[] = [
     ...(form && !form.model && !legacy ? [{ value: "", label: "Not set" }] : []),
     ...(legacy && form
       ? [
@@ -1284,21 +1330,32 @@ export function AgentDetailPage({ name, tab }: AgentDetailPageProps) {
           },
         ]
       : []),
-    ...choiceOptions(choices, page ? page.providers : undefined, accounts),
-    { value: OTHER_MODEL, label: "Other…" },
+    ...(variant && form && !customModel
+      ? [{ value: form.model, label: form.model, group: "Current" }]
+      : []),
+    ...choiceOptions(
+      mergeAccountChoices(choices, formModel, page ? page.providers : null, accounts),
+      page ? page.providers : undefined,
+      accounts,
+      true
+    ),
+    { value: OTHER_MODEL, label: "Other…", sticky: true },
   ];
+  /* Spec 77 revision 6: the account the picked Claude Code or Antigravity
+     model runs on, when more than one account offers it. */
+  const modelFamily =
+    legacy || customModel
+      ? null
+      : modelAccounts(formModel, choices, page ? page.providers : null, accounts);
+  const accountChoices =
+    modelFamily && modelFamily.accounts.length > 1
+      ? accountOptions(modelFamily, accounts, agyAccounts)
+      : null;
   const modelValue = legacy
     ? LEGACY_MODEL
     : customModel
       ? OTHER_MODEL
       : formModel;
-  const thinkingOptions = [
-    { value: "", label: "Model default" },
-    ...efforts.map((effort) => ({
-      value: effort.value,
-      label: effortLabel(effort),
-    })),
-  ];
 
   const tabBar = (
     <div className="agent-detail-tabbar" ref={tabsRef}>
@@ -1615,7 +1672,7 @@ export function AgentDetailPage({ name, tab }: AgentDetailPageProps) {
                   </div>
                 </div>
                 <div className="agent-ctl">
-                  <Select
+                  <ModelPicker
                     id="agent-model-select"
                     aria-label="Model"
                     value={modelValue}
@@ -1649,26 +1706,72 @@ export function AgentDetailPage({ name, tab }: AgentDetailPageProps) {
                 </div>
               </div>
 
-              {isClaudeForm ? (
-                <>
-                  <div className="srow">
-                    <div className="agent-srow-text">
-                      <label className="t" htmlFor="agent-claude-effort">
-                        Reasoning effort
-                      </label>
-                      <div className="d">Passed to Claude Code as --effort.</div>
-                    </div>
-                    <div className="agent-ctl">
-                      <Select
-                        id="agent-claude-effort"
-                        aria-label="Reasoning effort"
-                        value={form.reasoning_effort}
-                        disabled={saving}
-                        options={CLAUDE_EFFORTS}
-                        onChange={(value) => updateField("reasoning_effort", value)}
-                      />
+              {accountChoices ? (
+                <div className="srow">
+                  <div className="agent-srow-text">
+                    <label className="t" htmlFor="agent-model-account">
+                      Account
+                    </label>
+                    <div className="d">
+                      {modelFamily && modelFamily.family === "antigravity"
+                        ? "The Antigravity account the model runs on."
+                        : "The Claude Code account the model runs on."}
                     </div>
                   </div>
+                  <div className="agent-ctl">
+                    <Select
+                      id="agent-model-account"
+                      aria-label="Account"
+                      value={addressAccountOf(formModel)}
+                      disabled={saving}
+                      options={accountChoices}
+                      onChange={(account) => pickModel(withAccount(formModel, account))}
+                    />
+                  </div>
+                </div>
+              ) : null}
+
+              {effortLevels ? (
+                <div className="srow">
+                  <div className="agent-srow-text">
+                    <span className="t">Reasoning effort</span>
+                    <div className="d">
+                      {isClaudeForm
+                        ? "Passed to Claude Code as --effort."
+                        : "How much the model deliberates."}
+                    </div>
+                  </div>
+                  <div className="agent-ctl">
+                    <EffortControl
+                      id="agent-effort"
+                      levels={effortLevels}
+                      value={form.reasoning_effort}
+                      disabled={saving}
+                      descriptions={effortDescriptions}
+                      onChange={(value) => updateField("reasoning_effort", value)}
+                    />
+                  </div>
+                </div>
+              ) : variant ? (
+                <div className="srow">
+                  <div className="agent-srow-text">
+                    <span className="t">Reasoning effort</span>
+                    <div className="d">Set by the model id.</div>
+                  </div>
+                  <div className="agent-ctl">
+                    <span className="hint">
+                      {"This id fixes the effort at " +
+                        effortName(variant.level) +
+                        ". Pick " +
+                        (variant.base.label || variant.base.value) +
+                        " to choose the effort here."}
+                    </span>
+                  </div>
+                </div>
+              ) : null}
+
+              {isClaudeForm ? (
+                <>
                   <div className="srow">
                     <div className="agent-srow-text">
                       <span className="t">Scheduled runs</span>
@@ -1685,29 +1788,6 @@ export function AgentDetailPage({ name, tab }: AgentDetailPageProps) {
                     </div>
                   </div>
                 </>
-              ) : null}
-
-              {!isClaudeForm && thinkingModel ? (
-                <div className="srow">
-                  <div className="agent-srow-text">
-                    <label className="t" htmlFor="agent-thinking">
-                      Thinking
-                    </label>
-                    <div className="d">How much the model deliberates.</div>
-                  </div>
-                  <div className="agent-ctl">
-                    <Select
-                      id="agent-thinking"
-                      aria-label="Thinking"
-                      value={form.reasoning_effort}
-                      disabled={saving}
-                      options={thinkingOptions}
-                      onChange={(value) =>
-                        updateField("reasoning_effort", value)
-                      }
-                    />
-                  </div>
-                </div>
               ) : null}
 
               {legacyReplacement ? (

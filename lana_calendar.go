@@ -238,8 +238,8 @@ func (a calendarActions) AgentExists(name string) bool {
 // queued in its inbox. It blocks until the turn ends.
 func (a calendarActions) AgentPrompt(ctx context.Context, agentName, prompt, title string) (string, error) {
 	rt := a.rt
-	// REQ-CCR-007, AC-CCR-008: a Claude Agent runs on a schedule only with
-	// allow_scheduled = true.
+	// REQ-CCR-007, AC-CCR-008, REQ-AGY-008: Claude Code and Antigravity run
+	// on a schedule only with allow_scheduled = true.
 	if err := rt.scheduledRunAllowed(agentName, ""); err != nil {
 		return "", err
 	}
@@ -247,7 +247,8 @@ func (a calendarActions) AgentPrompt(ctx context.Context, agentName, prompt, tit
 	if err != nil {
 		return "", err
 	}
-	// REQ-CCT-008: the item's turn skips Claude Code unless allow_scheduled.
+	// REQ-CCT-008, REQ-AGY-008: the item's turn skips Claude Code and
+	// Antigravity unless allow_scheduled.
 	// A message queued behind a running turn is not marked.
 	defer rt.registry.MarkScheduled(session.ID)()
 	text := calendarPromptText(title, prompt)

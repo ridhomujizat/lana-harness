@@ -108,6 +108,10 @@ func (r *Router) claudeCodeModels(account string) []ModelInfo {
 		}
 		info.Source = source
 		info.Address = account + "/" + id
+		// Spec 76 REQ-MES-002: Claude Code's --effort levels, whatever the
+		// model.
+		info.Efforts = models.ClaudeCodeEfforts()
+		info.DefaultEffort = models.ClaudeCodeEffortDefault
 		info.Name = ClaudeCodeLabelPrefix + label
 		out = append(out, info)
 	}

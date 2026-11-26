@@ -2,7 +2,13 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import type { ReactNode } from "react";
 import * as routerApi from "../../api/router";
-import type { ClaudeAgentStatus, ListProvidersResponse, ProviderRow, RouterChoice } from "../../api/router";
+import type {
+  AntigravityStatus,
+  ClaudeAgentStatus,
+  ListProvidersResponse,
+  ProviderRow,
+  RouterChoice,
+} from "../../api/router";
 import { Badge, Button, Skeleton } from "../../ui/gr8r";
 import { AgentAvatarStack, agentFallbackColor } from "../agent-avatar";
 import type { BadgeTone } from "../../ui/gr8r";
@@ -10,12 +16,14 @@ import { Ic } from "../../ui/icons";
 import { Alert, SettingsRestartBanner, StatusLine } from "../settings-pages";
 import { ConnectionDialog } from "./connection-dialog";
 import {
+  ANTIGRAVITY_ID,
   CLAUDE_CODE_ID,
-  CLAUDE_CODE_KIND,
   PROVIDER_PRESETS,
   cardIdFor,
+  isSubscriptionKind,
   presetFor,
   providerHref,
+  rememberAntigravityAccounts,
   rememberClaudeAccounts,
 } from "./presets";
 import type { ProviderPreset } from "./presets";
@@ -241,6 +249,29 @@ export function claudeStatus(
   };
 }
 
+/* Antigravity's card status (spec 74 API-AGY-030): installed, too old, or
+   how many accounts and how many are signed in. */
+export function antigravityStatus(
+  status: AntigravityStatus | null,
+  failed: boolean
+): { label: string; tone: BadgeTone } {
+  if (!status) {
+    return failed ? { label: "Status unavailable", tone: "gray" } : { label: "Checking…", tone: "gray" };
+  }
+  if (!status.installed) {
+    return { label: "Not installed", tone: "gray" };
+  }
+  if (!status.version_ok) {
+    return { label: "Update agy", tone: "amber" };
+  }
+  const total = status.accounts.length;
+  const signedIn = status.accounts.filter((account) => account.signed_in).length;
+  return {
+    label: total + (total === 1 ? " account" : " accounts") + " · " + signedIn + " signed in",
+    tone: signedIn === 0 ? "amber" : "green",
+  };
+}
+
 /* The model Test All sends for a connection: the first model the router lists
    for it, else the preset's test model. */
 function testAddress(row: ProviderRow, preset: ProviderPreset | undefined, choices: RouterChoice[]): string {
@@ -265,6 +296,8 @@ export function RouterProviders() {
   const [message, setMessage] = useState("");
   const [claude, setClaude] = useState<ClaudeAgentStatus | null>(null);
   const [claudeFailed, setClaudeFailed] = useState(false);
+  const [agy, setAgy] = useState<AntigravityStatus | null>(null);
+  const [agyFailed, setAgyFailed] = useState(false);
   const [adding, setAdding] = useState(false);
   const [tests, setTests] = useState<Record<string, CardTest>>({});
   const [testing, setTesting] = useState("");
@@ -311,6 +344,19 @@ export function RouterProviders() {
       .catch(() => {
         if (alive) {
           setClaudeFailed(true);
+        }
+      });
+    Promise.resolve()
+      .then(() => routerApi.getAntigravity())
+      .then((value) => {
+        if (alive && value) {
+          rememberAntigravityAccounts(value.accounts.map((account) => account.name));
+          setAgy(value);
+        }
+      })
+      .catch(() => {
+        if (alive) {
+          setAgyFailed(true);
         }
       });
     return () => {
@@ -386,10 +432,11 @@ export function RouterProviders() {
 
   const apiCards = PROVIDER_PRESETS.map((preset) => ({ id: preset.id, preset, rows: byCard[preset.id] || [] }));
   const customCards: TestCard[] = providers
-    .filter((row) => row.kind !== CLAUDE_CODE_KIND && !presetFor(row))
+    .filter((row) => !isSubscriptionKind(row.kind) && !presetFor(row))
     .map((row) => ({ id: row.name, rows: [row] }));
   const claudeState = claudeStatus(claude, claudeFailed);
   const claudeEmail = claude ? (claude.accounts.find((account) => account.email) || { email: "" }).email : "";
+  const agyState = antigravityStatus(agy, agyFailed);
   const canAdd = Boolean(data && data.version);
 
   return (
@@ -418,6 +465,16 @@ export function RouterProviders() {
               </Badge>
             }
             extra={claudeEmail}
+          />
+          <ProviderCard
+            id={ANTIGRAVITY_ID}
+            label="Antigravity"
+            logo="antigravity"
+            status={
+              <Badge tone={agyState.tone} dot={agyState.tone !== "gray"}>
+                {agyState.label}
+              </Badge>
+            }
           />
         </div>
       </section>

@@ -18,6 +18,7 @@ import (
 	"github.com/ridhomujizat/lana-harness/internal/agenthome"
 	"github.com/ridhomujizat/lana-harness/internal/id"
 	"github.com/ridhomujizat/lana-harness/internal/llmcall"
+	"github.com/ridhomujizat/lana-harness/internal/models"
 	"github.com/ridhomujizat/lana-harness/internal/projectctx"
 )
 
@@ -161,16 +162,19 @@ type resolvedAgent struct {
 	provider string
 	model    string
 	// fullChain is the primary followed by the combo's other models or the
-	// agent's fallback entries (REQ-RTR-003), Claude Code targets included.
+	// agent's fallback entries (REQ-RTR-003), external runtime targets
+	// included.
 	fullChain []core.LLMTarget
-	// chain is fullChain without its Claude Code targets: the targets lana's
-	// own loop calls (ADR 0020).
+	// chain is fullChain without its external runtime targets (Claude Code,
+	// Antigravity): the targets lana's own loop calls (ADR 0020, ADR 0022).
 	chain []core.LLMTarget
 	// cfg is the agent's config, legacy runtime key mapped (API-CCT-002).
 	cfg core.AgentConfig
-	// claudeEffort is the reasoning effort of a Claude Code turn: the
-	// session's, else the agent's, without the catalog default.
-	claudeEffort string
+	// runtimeEffort is the reasoning effort of an external runtime turn
+	// (Claude Code, Antigravity): the session's, else the agent's, without
+	// the catalog default. The runtime keeps it only when the model lists it
+	// (spec 76 REQ-MES-003).
+	runtimeEffort string
 	// requested is the combo or address the agent asked for, recorded by
 	// the router.
 	requested  string
@@ -259,19 +263,13 @@ func (rn *Runner) resolve(ctx context.Context) (resolvedAgent, error) {
 		return resolvedAgent{}, fmt.Errorf("agent %s: %w", cfgName, err)
 	}
 	requested := llmcall.Requested(provider, model)
-	// ADR 0020: Claude Code targets run in the Claude Code runtime, never in
-	// lana's loop; runTurn dispatches them.
+	// ADR 0020, ADR 0022: external runtime targets run in their runtime,
+	// never in lana's loop; runTurn dispatches them.
 	fullChain := targets
-	targets = llmcall.WithoutClaudeCode(rn.reg.llm, fullChain)
-	// Spec 39 revision 5: a background-work session (a workflow guardian's
-	// structured call) runs on the background chain, never in Claude Code.
-	if rn.reg.isBackground(rn.sessionID) {
-		background, backgroundRequested, err := llmcall.BackgroundChain(rn.reg.llm, fullChain, requested)
-		if err != nil {
-			return resolvedAgent{}, fmt.Errorf("agent %s: %w", cfgName, err)
-		}
-		fullChain, targets, requested = background, background, backgroundRequested
-	}
+	targets = llmcall.WithoutExternal(rn.reg.llm, fullChain)
+	// Spec 78 REQ-RPR-009: a background-work session (a workflow guardian's
+	// structured call) runs on the agent's own chain like any turn, in Claude
+	// Code or Antigravity when the chain starts there.
 	workspace := info.Workspace
 	if workspace == "" {
 		workspace = cfg.Workspace
@@ -289,16 +287,14 @@ func (rn *Runner) resolve(ctx context.Context) (resolvedAgent, error) {
 	// REQ-TFB-008 item 6: max_tokens is opt-in; 0 means the provider default.
 	maxTokens := cfg.MaxTokens
 	// REQ-MDL-001: the session's reasoning_effort wins, else the agent's, else
-	// the catalog default for the resolved model, else the provider default ("").
+	// the catalog's sent default for the resolved model (DefaultEffort, the
+	// DeepSeek thinking models), else the provider default (""). A display-only
+	// default (spec 76 DisplayDefault) is never sent.
 	effort := cfg.ReasoningEffort
 	if hasSelection && selection.ReasoningEffort != "" {
 		effort = selection.ReasoningEffort
 	}
-	// "off" has no --effort value, so a Claude Code turn leaves it out.
-	claudeEffort := effort
-	if claudeEffort == "off" {
-		claudeEffort = ""
-	}
+	runtimeEffort := effort
 	// The effort default and the vision flag come from the first target.
 	known, knownOK := llmcall.Lookup(targets)
 	if effort == "" && knownOK {
@@ -352,7 +348,7 @@ func (rn *Runner) resolve(ctx context.Context) (resolvedAgent, error) {
 		fullChain:       fullChain,
 		chain:           targets,
 		cfg:             cfg,
-		claudeEffort:    claudeEffort,
+		runtimeEffort:   runtimeEffort,
 		requested:       requested,
 		promptFile:      cfg.PromptFile,
 		channel:         info.Channel,
@@ -892,25 +888,30 @@ func removedHeading(text string) string {
 	return text
 }
 
-// scheduledClaudeMessage is the turn error of a scheduled run whose chain has
-// only Claude Code targets on an agent without allow_scheduled (REQ-CCT-008).
-func scheduledClaudeMessage(agent string) string {
-	return fmt.Sprintf("claude-code is not allowed for scheduled runs of agent '%s'", agent)
+// scheduledExternalMessage is the turn error of a scheduled run whose chain
+// has only external runtime targets on an agent without allow_scheduled
+// (REQ-CCT-008, REQ-AGY-008).
+func scheduledExternalMessage(runtime, agent string) string {
+	return fmt.Sprintf("%s is not allowed for scheduled runs of agent '%s'", runtime, agent)
 }
 
-// allowScheduled reports whether a scheduled run may use the Claude Code
-// target (REQ-CCT-008, REQ-CCT-010): the account's allow_scheduled or the
-// agent's legacy key.
+// allowScheduled reports whether a scheduled run may use the external target
+// (REQ-CCT-008, REQ-CCT-010, REQ-AGY-008): a Claude Code account's
+// allow_scheduled or the agent's legacy key; an Antigravity account's
+// allow_scheduled.
 func allowScheduled(llm core.LLMRegistry, target core.LLMTarget, cfg core.AgentConfig) bool {
-	account, _ := llmcall.ClaudeCodeAccount(llm, target.Provider)
-	return account.AllowScheduled || cfg.AllowScheduled
+	if account, ok := llmcall.ClaudeCodeAccount(llm, target.Provider); ok {
+		return account.AllowScheduled || cfg.AllowScheduled
+	}
+	account, _ := llmcall.AntigravityAccount(llm, target.Provider)
+	return account.AllowScheduled
 }
 
 // runTurn picks the engine of one turn (REQ-CCT-003): when the first
-// available target of the chain is a Claude Code address, the turn runs in
-// the Claude Code runtime; otherwise, or after a Claude Code failure before
-// any output, it runs in lana's own loop with the rest of the chain
-// (REQ-CCT-004).
+// available target of the chain is an external runtime address (Claude Code
+// or Antigravity), the turn runs in that runtime; otherwise, or after a
+// runtime failure before any output, it runs in lana's own loop with the rest
+// of the chain (REQ-CCT-004, REQ-AGY-008).
 func (rn *Runner) runTurn(ctx context.Context, initial inboxItem, turnID, continueReason string) TurnResult {
 	// Group rooms: everyone talks, @mentions route (owner, 2026-11-11).
 	if continueReason == "" {
@@ -919,13 +920,15 @@ func (rn *Runner) runTurn(ctx context.Context, initial inboxItem, turnID, contin
 		}
 	}
 	resolved, err := rn.resolve(ctx)
-	if err == nil && len(resolved.fullChain) > 0 && llmcall.IsClaudeCode(rn.reg.llm, resolved.fullChain[0]) {
-		// REQ-CCT-008: a scheduled run uses Claude Code only with
-		// allow_scheduled (the account's or the agent's); else the next
-		// target outside Claude Code runs.
-		if rn.reg.isScheduled(rn.sessionID) && !allowScheduled(rn.reg.llm, resolved.fullChain[0], resolved.cfg) {
+	if err == nil && len(resolved.fullChain) > 0 && llmcall.IsExternal(rn.reg.llm, resolved.fullChain[0]) {
+		// REQ-CCT-008, REQ-AGY-008: a scheduled run uses an external runtime
+		// only with allow_scheduled (the account's, or the agent's for Claude
+		// Code); else the next target outside the external runtimes runs.
+		head := resolved.fullChain[0]
+		if rn.reg.isScheduled(rn.sessionID) && !poolAllowsScheduled(rn.reg.llm, head, resolved.cfg) {
 			if len(resolved.chain) == 0 {
-				return rn.failTurn(ctx, turnID, &core.ProviderError{Class: "client", Message: scheduledClaudeMessage(resolved.name)})
+				runtime, _ := llmcall.ExternalRuntime(rn.reg.llm, head.Provider)
+				return rn.failTurn(ctx, turnID, &core.ProviderError{Class: "client", Message: scheduledExternalMessage(runtime, resolved.name)})
 			}
 		} else {
 			result, fallback := rn.runExternalTurn(ctx, initial, turnID, continueReason, resolved)
@@ -1186,7 +1189,7 @@ func (rn *Runner) runNativeTurn(ctx context.Context, initial inboxItem, turnID, 
 		}
 		if len(resolved.chain) == 0 {
 			// ADR 0020: lana's loop cannot call Claude Code targets.
-			runErr = &core.ProviderError{Class: "client", Message: fmt.Sprintf("agent %s has no model for lana's own loop: its chain has only claude-code targets", resolved.name)}
+			runErr = &core.ProviderError{Class: "client", Message: fmt.Sprintf("agent %s has no model for lana's own loop: its chain has only external runtime targets", resolved.name)}
 			reason = "error"
 			goto finished
 		}
@@ -1365,7 +1368,7 @@ func (rn *Runner) runNativeTurn(ctx context.Context, initial inboxItem, turnID, 
 			}
 		}
 		step := steps + 1
-		if _, err := events.Append(writeCtx, core.EventDraft{Kind: core.KindStepStart, TurnID: turnID, Payload: core.StepStart{V: core.PayloadVersion, Step: step, Provider: resolved.provider, Model: resolved.model}}); err != nil {
+		if _, err := events.Append(writeCtx, core.EventDraft{Kind: core.KindStepStart, TurnID: turnID, Payload: core.StepStart{V: core.PayloadVersion, Step: step, Provider: resolved.provider, Model: resolved.model, Effort: models.EffortFor(resolved.model, resolved.reasoningEffort, nil)}}); err != nil {
 			runErr = runtimeError(err)
 			reason = "error"
 			goto finished
@@ -1668,7 +1671,7 @@ func (rn *Runner) runNativeTurn(ctx context.Context, initial inboxItem, turnID, 
 				}
 			}
 		}
-		if _, err := events.Append(writeCtx, core.EventDraft{Kind: core.KindStepEnd, TurnID: turnID, Payload: core.StepEnd{V: core.PayloadVersion, Step: step, Provider: served.Provider, Model: served.Model, Usage: usage}}); err != nil {
+		if _, err := events.Append(writeCtx, core.EventDraft{Kind: core.KindStepEnd, TurnID: turnID, Payload: core.StepEnd{V: core.PayloadVersion, Step: step, Provider: served.Provider, Model: served.Model, Usage: usage, Effort: models.EffortFor(served.Model, resolved.reasoningEffort, nil)}}); err != nil {
 			runErr = runtimeError(err)
 			reason = "error"
 			goto finished

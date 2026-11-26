@@ -132,6 +132,9 @@ func TestTurnReasoningEffort(t *testing.T) {
 		{"agent value wins", "deepseek-flash", "low", "low"},
 		{"agent off is kept", "deepseek-flash", "off", "off"},
 		{"catalog default", "deepseek-flash", "", "high"},
+		// Spec 76: a display-only default (OpenAI, Anthropic) is not sent.
+		{"display default not sent openai", "gpt-5", "", ""},
+		{"display default not sent anthropic", "claude-opus-5-5", "", ""},
 		{"unknown model has no default", "custom-model", "", ""},
 	}
 	for _, tc := range cases {
@@ -275,5 +278,48 @@ func TestTurnSignedThinkingKeepsOrder(t *testing.T) {
 	}
 	if !reflect.DeepEqual(sent, want) {
 		t.Fatalf("assistant content sent back=%+v", sent)
+	}
+}
+
+// Spec 76 REQ-MES-003: the step events record the effort the model gets: a
+// level the catalog model lists as is, any other its default.
+func TestTurnStepEffort(t *testing.T) {
+	cases := []struct {
+		model, effort, want string
+	}{
+		{"deepseek-flash", "max", "max"},
+		{"deepseek-flash", "xhigh", "high"},
+		{"gpt-4.1", "high", ""},
+		{"custom-model", "medium", "medium"},
+		{"deepseek-flash", "", "high"},
+		{"gpt-5", "", ""},
+	}
+	for _, tc := range cases {
+		t.Run(tc.model+"/"+tc.effort, func(t *testing.T) {
+			h := newHarness(t, mock.Script{Responses: []mock.Response{textResponse("ok")}}, map[string]core.AgentConfig{
+				"assistant": {Provider: "mock", Model: tc.model, ReasoningEffort: tc.effort},
+			})
+			if result := h.run(t, "hi"); result.StopReason != "end_turn" {
+				t.Fatalf("result=%+v", result)
+			}
+			starts, ends := 0, 0
+			for _, e := range h.events(t) {
+				switch e.Kind {
+				case core.KindStepStart:
+					starts++
+					if got := payloadOf[core.StepStart](t, e).Effort; got != tc.want {
+						t.Fatalf("step/start effort = %q, want %q", got, tc.want)
+					}
+				case core.KindStepEnd:
+					ends++
+					if got := payloadOf[core.StepEnd](t, e).Effort; got != tc.want {
+						t.Fatalf("step/end effort = %q, want %q", got, tc.want)
+					}
+				}
+			}
+			if starts != 1 || ends != 1 {
+				t.Fatalf("steps = %d/%d", starts, ends)
+			}
+		})
 	}
 }

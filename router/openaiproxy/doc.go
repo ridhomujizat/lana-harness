@@ -3,7 +3,9 @@
 // (streaming and non-streaming, tools, images, reasoning_effort) and GET
 // {prefix}/models. The request "model" is a combo name or a "provider/model"
 // address, so proxy calls get the router's retry, fallback, cooldown, and call
-// records (source "proxy").
+// records (source "proxy"). Claude Code and Antigravity account models are
+// served too when the router has a RuntimeStreamer (spec 78): text only, each
+// call one headless run of the account's official CLI.
 //
 // The handler routes on the path left after its prefix. Mount it either with
 // http.StripPrefix or with WithPrefix, not both. Lana's web server mounts it at

@@ -52,6 +52,14 @@ func (s *snapshot) resolve(address string) ([]Target, error) {
 		}
 		return []Target{target}, nil
 	}
+	if ok && s.isAntigravity(target.Provider) && address[len(target.Provider)] == '/' {
+		// ADR 0022, REQ-AGY-001: an Antigravity account; the agent runs it in
+		// the Antigravity runtime.
+		if err := antigravityTarget(target); err != nil {
+			return nil, err
+		}
+		return []Target{target}, nil
+	}
 	if !ok || s.providers[target.Provider] == nil {
 		return nil, fmt.Errorf("%w: %q", ErrUnknownAddress, address)
 	}

@@ -1061,7 +1061,7 @@ func (ex *runExec) diagnose(ctx context.Context, node Node, row *NodeRun, lastEr
 	dctx, cancel := context.WithTimeout(ctx, ex.e.opts.DiagnoseTimeout)
 	defer cancel()
 	// A failure decision is machine-readable: lana background work on the
-	// guardian's background chain (spec 39 revision 5).
+	// guardian's own chain (spec 78 REQ-RPR-009).
 	res, err := ex.e.deps.RunAgent(dctx, AgentRequest{
 		WorkflowID: ex.wf.ID, RunID: ex.run.ID, NodeID: node.ID,
 		Agent: ex.wf.Guardian, Prompt: prompt, Background: true,

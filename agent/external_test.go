@@ -184,7 +184,8 @@ func TestExternalTurnEvents(t *testing.T) {
 			}
 		case core.KindStepStart:
 			step := payloadOf[core.StepStart](t, event)
-			if step.Provider != "claude-code" || step.Model != "claude-haiku-5-5" {
+			// Spec 76 REQ-MES-003: the step records the --effort sent.
+			if step.Provider != "claude-code" || step.Model != "claude-haiku-5-5" || step.Effort != "high" {
 				t.Fatalf("step/start = %+v", step)
 			}
 		case core.KindToolCall:
@@ -563,9 +564,11 @@ func ownerText(t *testing.T, turn core.RuntimeTurn) string {
 }
 
 // isInjectedInputBlock reports whether a runtime input text block is one lana
-// injected: the <context> block or a reply quote.
+// injected: the <context> block, a reply quote, or the conversation block of
+// a new runtime session (REQ-PAF-002).
 func isInjectedInputBlock(text string) bool {
-	return strings.HasPrefix(text, "<context>") || strings.HasPrefix(text, replyQuoteBlockPrefix)
+	return strings.HasPrefix(text, "<context>") || strings.HasPrefix(text, replyQuoteBlockPrefix) ||
+		strings.HasPrefix(text, "Conversation so far")
 }
 
 // replyQuoteBlockPrefix opens the injected block of a reply.

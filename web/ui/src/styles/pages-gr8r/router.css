@@ -358,7 +358,6 @@
   margin-top: 8px;
   padding: 10px 12px;
   border: 1px solid var(--border);
-  border-left: 3px solid var(--accent);
   border-radius: var(--r);
   background: var(--sunken);
 }
@@ -439,7 +438,6 @@
   padding-right: 12px;
   border-radius: var(--r);
   background: var(--accent-soft, var(--sunken));
-  box-shadow: inset 3px 0 0 var(--accent);
 }
 .rt-acct-sub { color: var(--text-3, var(--text-2)); font-size: var(--fs-xs); min-width: 0; }
 .rt-acct-sub .mono { font-size: var(--fs-xs); }
@@ -801,3 +799,213 @@
   .rt-section-h .rt-refresh { margin-left: auto; }
   .rt-toolbar .rt-refresh { justify-content: flex-end; }
 }
+
+/* Spec 75 (REQ-PAF-006): the account order of a subscription pool and the
+   key order of an API provider. The drop line is a pseudo-element, so the
+   rows do not move under the pointer while dragging. */
+.rt-order { display: flex; flex-direction: column; gap: 8px; min-width: 0; }
+.rt-order-hint { margin: 0; }
+.rt-order-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; min-width: 0; }
+.rt-order-row {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 8px 0;
+  border-top: 1px solid var(--divider);
+  min-width: 0;
+}
+.rt-order-line {
+  display: flex;
+  align-items: center;
+  gap: 8px 12px;
+  min-width: 0;
+}
+.rt-order-line > .rt-order-id { flex: 1 1 auto; }
+.rt-order-lead { display: inline-flex; flex: none; }
+.rt-order-list > .rt-order-row:first-child { border-top: 0; }
+.rt-order-row.is-dragging { opacity: 0.45; }
+.rt-order-row.is-unpooled .rt-order-id,
+.rt-order-row.is-unpooled .rt-order-bar { opacity: 0.6; }
+.rt-order-row.is-drop-before::before,
+.rt-order-row.is-drop-after::after,
+.rt-order-divider.is-drop-before::before,
+.rt-order-divider.is-drop-after::after {
+  content: "";
+  position: absolute;
+  left: 0;
+  right: 0;
+  height: 2px;
+  border-radius: 2px;
+  background: var(--accent);
+  pointer-events: none;
+}
+.rt-order-row.is-drop-before::before, .rt-order-divider.is-drop-before::before { top: -1px; }
+.rt-order-row.is-drop-after::after, .rt-order-divider.is-drop-after::after { bottom: -1px; }
+.rt-order-grip {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  min-width: 32px;
+  padding: 0;
+  border: 0;
+  border-radius: var(--r);
+  background: transparent;
+  color: var(--text-3, var(--text-2));
+  cursor: grab;
+  touch-action: none;
+}
+.rt-order-grip:hover:not(:disabled) { background: var(--sunken); color: var(--text); }
+.rt-order-grip:active:not(:disabled) { cursor: grabbing; }
+.rt-order-grip:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+.rt-order-grip:disabled { cursor: default; opacity: 0.5; }
+.rt-order-id { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.rt-order-name { display: flex; align-items: center; gap: 6px; min-width: 0; font-weight: 500; }
+.rt-order-sub {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 8px;
+  min-width: 0;
+  color: var(--text-2);
+  font-size: var(--fs-xs);
+}
+.rt-order-rest { display: inline-flex; align-items: center; gap: 4px; color: var(--amber, var(--text-2)); }
+.rt-order-bar { display: inline-flex; align-items: center; gap: 8px; width: 140px; min-width: 0; }
+.rt-order-bar .prog { flex: 1 1 auto; min-width: 0; }
+.rt-order-bar-t { color: var(--text-2); font-size: var(--fs-xs); white-space: nowrap; }
+.rt-order-acts { display: inline-flex; flex: none; align-items: center; justify-content: flex-end; gap: 6px; min-width: 0; margin-left: auto; }
+.rt-order-pool { display: inline-flex; align-items: center; gap: 8px; cursor: pointer; white-space: normal; min-width: 0; }
+.rt-order-divider {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 0 6px;
+  color: var(--text-3, var(--text-2));
+  font-size: var(--fs-xs);
+  font-weight: 500;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+.rt-order-divider::after { content: ""; flex: 1 1 auto; height: 1px; background: var(--divider); }
+.rt-order-divider.is-drop-after::after { flex: none; }
+.rt-order-note { display: flex; align-items: center; gap: 6px; margin: 0; color: var(--green, var(--text-2)); font-size: var(--fs-sm); }
+.rt-order-note.is-error { color: var(--red, var(--text)); }
+.rt-order-panel .rt-conn-note, .rt-keys-panel .rt-conn-note { margin-top: 12px; }
+.rt-keys-add { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-top: 12px; }
+.rt-keys-add .input { width: 16rem; max-width: 100%; min-width: 0; }
+.rt-keys-add .hint { flex: 1 1 220px; min-width: 0; }
+
+/* Spec 74: the Antigravity page. */
+.rt-agy-install {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  margin: 0 0 16px;
+  padding: 12px 14px;
+  border: 1px solid var(--border);
+  border-radius: var(--r);
+  background: var(--sunken);
+}
+.rt-agy-install > .i { flex: none; margin-top: 2px; }
+.rt-agy-install p { margin: 4px 0 0; }
+.rt-acct > .rt-agy-builtin { margin: 0 0 0 44px; }
+.rt-agy-builtin code { font-size: var(--fs-xs); }
+.rt-agy-open { align-self: flex-start; white-space: normal; min-width: 0; }
+.rt-agy-code-form { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; min-width: 0; }
+.rt-agy-code-form .input { flex: 1 1 200px; min-width: 0; max-width: 420px; }
+.rt-agy-folder { display: flex; align-items: flex-start; gap: 10px; margin-top: 12px; cursor: pointer; }
+.rt-agy-folder b { display: block; font-weight: 500; }
+.rt-agy-folder .hint { display: block; overflow-wrap: anywhere; }
+
+/* Spec 77 revision 4: the merged accounts list. A rich row (logo, name
+   line, state badges) is roomier than a key row; sign-in progress sits under
+   the name, and the settings open in a sunken panel under the row. */
+.rt-order-row.has-lead { padding: 12px 0; }
+.rt-order-row.has-lead .rt-order-name { font-weight: 600; }
+.rt-order-row .rt-acct-name { min-width: 0; }
+.rt-order-row .rt-order-sub .rt-acct-sub {
+  display: inline-block;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  vertical-align: middle;
+}
+.rt-order-row.is-off .rt-order-id,
+.rt-order-row.is-off .rt-order-bar,
+.rt-order-row.is-off .rt-order-lead { opacity: 0.6; }
+.rt-order-row.is-new {
+  margin: 0 -12px;
+  padding-left: 12px;
+  padding-right: 12px;
+  border-radius: var(--r);
+  background: var(--accent-soft, var(--sunken));
+}
+.rt-order-below,
+.rt-order-more { display: flex; flex-direction: column; gap: 10px; min-width: 0; }
+.rt-order-row.is-sortable > .rt-order-below,
+.rt-order-row.is-sortable > .rt-order-more,
+.rt-order-row.has-lead > .rt-order-below,
+.rt-order-row.has-lead > .rt-order-more { margin-left: 44px; }
+.rt-order-row.is-sortable.has-lead > .rt-order-below,
+.rt-order-row.is-sortable.has-lead > .rt-order-more { margin-left: 88px; }
+.rt-order-below > p { margin: 0; }
+.rt-order-more {
+  gap: 14px;
+  padding: 14px 16px;
+  border: 1px solid var(--divider);
+  border-radius: var(--r);
+  background: var(--sunken);
+}
+.rt-order-more .rt-acct-body { padding-left: 0; }
+.rt-acct-settings {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px 28px;
+  padding-top: 12px;
+  border-top: 1px solid var(--divider);
+}
+.rt-acct-settings .rt-acct-sched { flex: 1 1 220px; min-width: 0; }
+.rt-acct-more-acts { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+.rt-acct-more-acts .rt-acct-remove { margin-left: auto; color: var(--red, var(--text-2)); }
+.rt-order-more-btn .i { transition: transform var(--dur, 140ms) var(--ease, ease); }
+.rt-order-more-btn.is-open .i { transform: rotate(180deg); }
+.rt-acct-signin { white-space: normal; min-width: 0; }
+
+@media (max-width: 640px) {
+  .rt-order-line { flex-wrap: wrap; }
+  .rt-order-line > .rt-order-id { flex: 1 1 calc(100% - 96px); }
+  .rt-order-bar { order: 5; flex: 1 1 100%; width: auto; }
+  .rt-order-acts { order: 6; flex: 1 1 100%; justify-content: flex-start; flex-wrap: wrap; margin-left: 0; }
+  .rt-order-acts .rt-order-more-btn { margin-left: auto; }
+  .rt-order-row.is-sortable > .rt-order-below,
+  .rt-order-row.is-sortable > .rt-order-more,
+  .rt-order-row.has-lead > .rt-order-below,
+  .rt-order-row.has-lead > .rt-order-more,
+  .rt-order-row.is-sortable.has-lead > .rt-order-below,
+  .rt-order-row.is-sortable.has-lead > .rt-order-more { margin-left: 0; }
+  .rt-order-more { padding: 12px; }
+  .rt-acct > .rt-agy-builtin { margin-left: 0; }
+}
+
+/* Spec 77: every reported plan window under the account name, as in the
+   Workbench accounts popup: label, bar, share used, time to reset. */
+.rt-order-usage {
+  display: grid;
+  grid-template-columns: max-content minmax(60px, 1fr) 3.2em max-content;
+  align-items: center;
+  gap: 4px 10px;
+  margin-top: 8px;
+  max-width: 440px;
+}
+.rt-order-use { display: contents; }
+.rt-order-use-l { color: var(--text-2); font-size: var(--fs-xs); white-space: nowrap; max-width: 14em; overflow: hidden; text-overflow: ellipsis; }
+.rt-order-use .prog { min-width: 0; }
+.rt-order-use-p { color: var(--text); font-size: var(--fs-xs); text-align: right; }
+.rt-order-use-r { color: var(--text-3, var(--text-2)); font-size: var(--fs-xs); white-space: nowrap; }
+.rt-order-row.is-unpooled .rt-order-usage,
+.rt-order-row.is-off .rt-order-usage { opacity: 0.6; }

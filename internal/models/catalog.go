@@ -32,8 +32,17 @@ type Model struct {
 	// Thinking is the thinking format the model uses ("deepseek", "openai",
 	// "anthropic", or "" for a model without thinking).
 	Thinking string
-	// DefaultEffort is the effort used when the agent sets none.
+	// DefaultEffort is the effort sent when the agent sets none (REQ-MDL-001):
+	// lana fills it into the request. Only the models that had it before spec
+	// 76 (DeepSeek thinking) set it.
 	DefaultEffort string
+	// DisplayDefault is the provider's own default level, shown in the picker
+	// ("Default (High)") but never sent for an empty effort: the provider
+	// applies it itself (spec 76 REQ-MES-002). Empty when DefaultEffort is set.
+	DisplayDefault string
+	// Efforts are the reasoning_effort levels the model supports, in order
+	// (spec 76 REQ-MES-002); nil when the model has no effort control.
+	Efforts []string
 	// Vision marks models that accept image input (REQ-ATT-003).
 	Vision bool
 	// Price is nil when the price is unknown; cost is then shown as "—",
@@ -49,6 +58,28 @@ func price(input, cachedInput, output float64) *Price {
 	return &Price{Input: input, CachedInput: cachedInput, Output: output}
 }
 
+// Effort levels per model family (spec 76 REQ-MES-002, revision
+// 2026-11-26): each model's own level names, in order. A model not listed
+// here has no effort control in the picker and an adapter sends nothing for
+// it.
+var (
+	// DeepSeek V4 thinking: thinking off, or reasoning_effort high or max
+	// (the levels Command Code's model registry lists for these models).
+	deepseekThinkingEfforts = []string{"off", "high", "max"}
+	// DeepSeek V4.1 flash line: low as well.
+	deepseek41Efforts = []string{"off", "low", "high", "max"}
+	// OpenAI GPT-5 reasoning_effort values; the API default is medium.
+	gpt5Efforts = []string{"minimal", "low", "medium", "high"}
+	// OpenAI GPT-5.1 reasoning_effort values; the API default is none.
+	gpt51Efforts = []string{"none", "low", "medium", "high"}
+	// Claude adaptive effort (output_config.effort) on the models with xhigh
+	// (Opus 4.7 and later, Sonnet 5 and later, Haiku 5.5, Fable). Haiku 4.5
+	// takes no effort; lana maps these levels to budget_tokens there.
+	claudeEfforts = []string{"low", "medium", "high", "xhigh", "max"}
+	// Claude Opus 4.6 and Sonnet 4.6: no xhigh (it arrived with Opus 4.7).
+	claude46Efforts = []string{"low", "medium", "high", "max"}
+)
+
 // catalog is keyed by model ID.
 var catalog = map[string]Model{
 	// DeepSeek. The prices of the current DeepSeek models are not in the
@@ -63,6 +94,7 @@ var catalog = map[string]Model{
 		Thinking:      "deepseek",
 		DefaultEffort: "high",
 		Vision:        true,
+		Efforts:       deepseekThinkingEfforts,
 	},
 	"deepseek-v4-pro": {
 		ID:            "deepseek-v4-pro",
@@ -73,6 +105,7 @@ var catalog = map[string]Model{
 		Kind:          "deepseek",
 		Thinking:      "deepseek",
 		DefaultEffort: "high",
+		Efforts:       deepseekThinkingEfforts,
 	},
 	"deepseek-v4-flash": {
 		ID:            "deepseek-v4-flash",
@@ -84,6 +117,7 @@ var catalog = map[string]Model{
 		Thinking:      "deepseek",
 		DefaultEffort: "high",
 		Vision:        true,
+		Efforts:       deepseekThinkingEfforts,
 	},
 	// REQ-MDL-010: the V4.1 flash line. The catalog carries their facts so a
 	// provider list is not needed for them; they are lookup-only, like the
@@ -98,6 +132,7 @@ var catalog = map[string]Model{
 		Thinking:      "deepseek",
 		DefaultEffort: "high",
 		Vision:        true,
+		Efforts:       deepseek41Efforts,
 	},
 	"deepseek-v4.1-flash-fast": {
 		ID:            "deepseek-v4.1-flash-fast",
@@ -109,6 +144,7 @@ var catalog = map[string]Model{
 		Thinking:      "deepseek",
 		DefaultEffort: "high",
 		Vision:        true,
+		Efforts:       deepseek41Efforts,
 	},
 	"deepseek-v4.1-flash-ultrafast": {
 		ID:            "deepseek-v4.1-flash-ultrafast",
@@ -120,6 +156,7 @@ var catalog = map[string]Model{
 		Thinking:      "deepseek",
 		DefaultEffort: "high",
 		Vision:        true,
+		Efforts:       deepseek41Efforts,
 	},
 	"deepseek-chat": {
 		ID:            "deepseek-chat",
@@ -142,52 +179,61 @@ var catalog = map[string]Model{
 		DefaultEffort: "high",
 		Legacy:        true,
 		Replacement:   "deepseek-flash",
+		Efforts:       deepseekThinkingEfforts,
 	},
 
 	// OpenAI.
 	"gpt-5.1": {
-		ID:            "gpt-5.1",
-		Name:          "GPT-5.1",
-		Description:   "OpenAI GPT-5.1 reasoning model.",
-		ContextWindow: 400000,
-		MaxOutput:     128000,
-		Kind:          "openai",
-		Thinking:      "openai",
-		Vision:        true,
-		Price:         price(1.25, 0.125, 10),
+		ID:             "gpt-5.1",
+		Name:           "GPT-5.1",
+		Description:    "OpenAI GPT-5.1 reasoning model.",
+		ContextWindow:  400000,
+		MaxOutput:      128000,
+		Kind:           "openai",
+		Thinking:       "openai",
+		Vision:         true,
+		Price:          price(1.25, 0.125, 10),
+		DisplayDefault: "none",
+		Efforts:        gpt51Efforts,
 	},
 	"gpt-5": {
-		ID:            "gpt-5",
-		Name:          "GPT-5",
-		Description:   "OpenAI GPT-5 reasoning model.",
-		ContextWindow: 400000,
-		MaxOutput:     128000,
-		Kind:          "openai",
-		Thinking:      "openai",
-		Vision:        true,
-		Price:         price(1.25, 0.125, 10),
+		ID:             "gpt-5",
+		Name:           "GPT-5",
+		Description:    "OpenAI GPT-5 reasoning model.",
+		ContextWindow:  400000,
+		MaxOutput:      128000,
+		Kind:           "openai",
+		Thinking:       "openai",
+		Vision:         true,
+		Price:          price(1.25, 0.125, 10),
+		DisplayDefault: "medium",
+		Efforts:        gpt5Efforts,
 	},
 	"gpt-5-mini": {
-		ID:            "gpt-5-mini",
-		Name:          "GPT-5 mini",
-		Description:   "Faster, cheaper GPT-5 for well-defined tasks.",
-		ContextWindow: 400000,
-		MaxOutput:     128000,
-		Kind:          "openai",
-		Thinking:      "openai",
-		Vision:        true,
-		Price:         price(0.25, 0.025, 2),
+		ID:             "gpt-5-mini",
+		Name:           "GPT-5 mini",
+		Description:    "Faster, cheaper GPT-5 for well-defined tasks.",
+		ContextWindow:  400000,
+		MaxOutput:      128000,
+		Kind:           "openai",
+		Thinking:       "openai",
+		Vision:         true,
+		Price:          price(0.25, 0.025, 2),
+		DisplayDefault: "medium",
+		Efforts:        gpt5Efforts,
 	},
 	"gpt-5-nano": {
-		ID:            "gpt-5-nano",
-		Name:          "GPT-5 nano",
-		Description:   "Fastest, cheapest GPT-5 for simple tasks.",
-		ContextWindow: 400000,
-		MaxOutput:     128000,
-		Kind:          "openai",
-		Thinking:      "openai",
-		Vision:        true,
-		Price:         price(0.05, 0.005, 0.4),
+		ID:             "gpt-5-nano",
+		Name:           "GPT-5 nano",
+		Description:    "Fastest, cheapest GPT-5 for simple tasks.",
+		ContextWindow:  400000,
+		MaxOutput:      128000,
+		Kind:           "openai",
+		Thinking:       "openai",
+		Vision:         true,
+		Price:          price(0.05, 0.005, 0.4),
+		DisplayDefault: "medium",
+		Efforts:        gpt5Efforts,
 	},
 	"gpt-4.1": {
 		ID:            "gpt-4.1",
@@ -231,125 +277,147 @@ var catalog = map[string]Model{
 	// Anthropic (claude-api skill, models table cached 2026-10-06). Cached
 	// input is the cache-read price.
 	"claude-fable-5-1": {
-		ID:            "claude-fable-5-1",
-		Name:          "Claude Fable 5.1",
-		Description:   "Anthropic's most capable model; thinking is always on.",
-		ContextWindow: 1000000,
-		MaxOutput:     128000,
-		Kind:          "anthropic",
-		Thinking:      "anthropic",
-		Vision:        true,
-		Price:         price(10, 0.25, 50),
+		ID:             "claude-fable-5-1",
+		Name:           "Claude Fable 5.1",
+		Description:    "Anthropic's most capable model; thinking is always on.",
+		ContextWindow:  1000000,
+		MaxOutput:      128000,
+		Kind:           "anthropic",
+		Thinking:       "anthropic",
+		Vision:         true,
+		Price:          price(10, 0.25, 50),
+		DisplayDefault: "high",
+		Efforts:        claudeEfforts,
 	},
 	"claude-fable-5": {
-		ID:            "claude-fable-5",
-		Name:          "Claude Fable 5",
-		Description:   "Previous Fable release; thinking is always on.",
-		ContextWindow: 1000000,
-		MaxOutput:     128000,
-		Kind:          "anthropic",
-		Thinking:      "anthropic",
-		Vision:        true,
-		Price:         price(10, 1, 50),
+		ID:             "claude-fable-5",
+		Name:           "Claude Fable 5",
+		Description:    "Previous Fable release; thinking is always on.",
+		ContextWindow:  1000000,
+		MaxOutput:      128000,
+		Kind:           "anthropic",
+		Thinking:       "anthropic",
+		Vision:         true,
+		Price:          price(10, 1, 50),
+		DisplayDefault: "high",
+		Efforts:        claudeEfforts,
 	},
 	"claude-opus-5-5": {
-		ID:            "claude-opus-5-5",
-		Name:          "Claude Opus 5.5",
-		Description:   "The current Opus for long-running agentic coding; thinking is always on.",
-		ContextWindow: 1000000,
-		MaxOutput:     128000,
-		Kind:          "anthropic",
-		Thinking:      "anthropic",
-		Vision:        true,
-		Price:         price(4, 0.2, 20),
+		ID:             "claude-opus-5-5",
+		Name:           "Claude Opus 5.5",
+		Description:    "The current Opus for long-running agentic coding; thinking is always on.",
+		ContextWindow:  1000000,
+		MaxOutput:      128000,
+		Kind:           "anthropic",
+		Thinking:       "anthropic",
+		Vision:         true,
+		Price:          price(4, 0.2, 20),
+		DisplayDefault: "medium",
+		Efforts:        claudeEfforts,
 	},
 	"claude-opus-5": {
-		ID:            "claude-opus-5",
-		Name:          "Claude Opus 5",
-		Description:   "Previous Opus with adaptive thinking.",
-		ContextWindow: 1000000,
-		MaxOutput:     128000,
-		Kind:          "anthropic",
-		Thinking:      "anthropic",
-		Vision:        true,
-		Price:         price(5, 0.5, 25),
+		ID:             "claude-opus-5",
+		Name:           "Claude Opus 5",
+		Description:    "Previous Opus with adaptive thinking.",
+		ContextWindow:  1000000,
+		MaxOutput:      128000,
+		Kind:           "anthropic",
+		Thinking:       "anthropic",
+		Vision:         true,
+		Price:          price(5, 0.5, 25),
+		DisplayDefault: "high",
+		Efforts:        claudeEfforts,
 	},
 	"claude-opus-4-8": {
-		ID:            "claude-opus-4-8",
-		Name:          "Claude Opus 4.8",
-		Description:   "Opus 4 series model with adaptive thinking.",
-		ContextWindow: 1000000,
-		MaxOutput:     128000,
-		Kind:          "anthropic",
-		Thinking:      "anthropic",
-		Vision:        true,
-		Price:         price(5, 0.5, 25),
+		ID:             "claude-opus-4-8",
+		Name:           "Claude Opus 4.8",
+		Description:    "Opus 4 series model with adaptive thinking.",
+		ContextWindow:  1000000,
+		MaxOutput:      128000,
+		Kind:           "anthropic",
+		Thinking:       "anthropic",
+		Vision:         true,
+		Price:          price(5, 0.5, 25),
+		DisplayDefault: "high",
+		Efforts:        claudeEfforts,
 	},
 	"claude-opus-4-7": {
-		ID:            "claude-opus-4-7",
-		Name:          "Claude Opus 4.7",
-		Description:   "Opus 4 series model with adaptive thinking.",
-		ContextWindow: 1000000,
-		MaxOutput:     128000,
-		Kind:          "anthropic",
-		Thinking:      "anthropic",
-		Vision:        true,
-		Price:         price(5, 0.5, 25),
+		ID:             "claude-opus-4-7",
+		Name:           "Claude Opus 4.7",
+		Description:    "Opus 4 series model with adaptive thinking.",
+		ContextWindow:  1000000,
+		MaxOutput:      128000,
+		Kind:           "anthropic",
+		Thinking:       "anthropic",
+		Vision:         true,
+		Price:          price(5, 0.5, 25),
+		DisplayDefault: "high",
+		Efforts:        claudeEfforts,
 	},
 	"claude-opus-4-6": {
-		ID:            "claude-opus-4-6",
-		Name:          "Claude Opus 4.6",
-		Description:   "Older Opus with adaptive thinking.",
-		ContextWindow: 1000000,
-		MaxOutput:     128000,
-		Kind:          "anthropic",
-		Thinking:      "anthropic",
-		Vision:        true,
-		Price:         price(5, 0.5, 25),
+		ID:             "claude-opus-4-6",
+		Name:           "Claude Opus 4.6",
+		Description:    "Older Opus with adaptive thinking.",
+		ContextWindow:  1000000,
+		MaxOutput:      128000,
+		Kind:           "anthropic",
+		Thinking:       "anthropic",
+		Vision:         true,
+		Price:          price(5, 0.5, 25),
+		DisplayDefault: "high",
+		Efforts:        claude46Efforts,
 	},
 	"claude-sonnet-5-5": {
-		ID:            "claude-sonnet-5-5",
-		Name:          "Claude Sonnet 5.5",
-		Description:   "The current Sonnet: speed and capability for everyday coding and agents.",
-		ContextWindow: 1000000,
-		MaxOutput:     128000,
-		Kind:          "anthropic",
-		Thinking:      "anthropic",
-		Vision:        true,
-		Price:         price(2, 0.2, 10),
+		ID:             "claude-sonnet-5-5",
+		Name:           "Claude Sonnet 5.5",
+		Description:    "The current Sonnet: speed and capability for everyday coding and agents.",
+		ContextWindow:  1000000,
+		MaxOutput:      128000,
+		Kind:           "anthropic",
+		Thinking:       "anthropic",
+		Vision:         true,
+		Price:          price(2, 0.2, 10),
+		DisplayDefault: "high",
+		Efforts:        claudeEfforts,
 	},
 	"claude-sonnet-5": {
-		ID:            "claude-sonnet-5",
-		Name:          "Claude Sonnet 5",
-		Description:   "Previous Sonnet with adaptive thinking.",
-		ContextWindow: 1000000,
-		MaxOutput:     128000,
-		Kind:          "anthropic",
-		Thinking:      "anthropic",
-		Vision:        true,
-		Price:         price(2, 0.2, 10),
+		ID:             "claude-sonnet-5",
+		Name:           "Claude Sonnet 5",
+		Description:    "Previous Sonnet with adaptive thinking.",
+		ContextWindow:  1000000,
+		MaxOutput:      128000,
+		Kind:           "anthropic",
+		Thinking:       "anthropic",
+		Vision:         true,
+		Price:          price(2, 0.2, 10),
+		DisplayDefault: "high",
+		Efforts:        claudeEfforts,
 	},
 	"claude-sonnet-4-6": {
-		ID:            "claude-sonnet-4-6",
-		Name:          "Claude Sonnet 4.6",
-		Description:   "Previous-generation Sonnet with adaptive thinking.",
-		ContextWindow: 1000000,
-		MaxOutput:     128000,
-		Kind:          "anthropic",
-		Thinking:      "anthropic",
-		Vision:        true,
-		Price:         price(3, 0.3, 15),
+		ID:             "claude-sonnet-4-6",
+		Name:           "Claude Sonnet 4.6",
+		Description:    "Previous-generation Sonnet with adaptive thinking.",
+		ContextWindow:  1000000,
+		MaxOutput:      128000,
+		Kind:           "anthropic",
+		Thinking:       "anthropic",
+		Vision:         true,
+		Price:          price(3, 0.3, 15),
+		DisplayDefault: "high",
+		Efforts:        claude46Efforts,
 	},
 	"claude-haiku-5-5": {
-		ID:            "claude-haiku-5-5",
-		Name:          "Claude Haiku 5.5",
-		Description:   "The current Haiku: fast and low-cost. The price is for prompts up to 100K tokens.",
-		ContextWindow: 1000000,
-		MaxOutput:     128000,
-		Kind:          "anthropic",
-		Thinking:      "anthropic",
-		Vision:        true,
-		Price:         price(0.1, 0.01, 0.5),
+		ID:             "claude-haiku-5-5",
+		Name:           "Claude Haiku 5.5",
+		Description:    "The current Haiku: fast and low-cost. The price is for prompts up to 100K tokens.",
+		ContextWindow:  1000000,
+		MaxOutput:      128000,
+		Kind:           "anthropic",
+		Thinking:       "anthropic",
+		Vision:         true,
+		Price:          price(0.1, 0.01, 0.5),
+		DisplayDefault: "medium",
+		Efforts:        claudeEfforts,
 	},
 	"claude-haiku-4-5": {
 		ID:            "claude-haiku-4-5",
@@ -361,6 +429,7 @@ var catalog = map[string]Model{
 		Thinking:      "anthropic",
 		Vision:        true,
 		Price:         price(1, 0.1, 5),
+		Efforts:       claudeEfforts,
 	},
 }
 
@@ -402,20 +471,8 @@ func lookupFallback(address string) (Model, bool) {
 // registered fallback (REQ-MDL-010); without one, unknown returns false and
 // callers keep their current defaults.
 func Lookup(model string) (Model, bool) {
-	for candidate := model; candidate != ""; {
-		if entry, ok := catalog[candidate]; ok {
-			return entry, true
-		}
-		if strings.HasPrefix(candidate, "claude-") && strings.Contains(candidate, ".") {
-			if entry, ok := catalog[strings.ReplaceAll(candidate, ".", "-")]; ok {
-				return entry, true
-			}
-		}
-		_, rest, ok := strings.Cut(candidate, "/")
-		if !ok {
-			break
-		}
-		candidate = rest
+	if entry, ok := lookupStatic(model); ok {
+		return entry, true
 	}
 	return lookupFallback(model)
 }

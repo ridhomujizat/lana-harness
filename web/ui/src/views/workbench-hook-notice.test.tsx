@@ -27,7 +27,7 @@ describe("AgentHookNotice", () => {
   it("asks when the hooks are not installed and the owner was never asked", async () => {
     vi.mocked(getAgentHook).mockResolvedValue(hookState({}));
     render(<AgentHookNotice />);
-    expect(await screen.findByText("Connect Claude Code to the Workbench")).toBeTruthy();
+    expect(await screen.findByText("Connect Claude Code and Antigravity to the Workbench")).toBeTruthy();
   });
 
   it("stays hidden once installed, declined, or with nothing to install", async () => {

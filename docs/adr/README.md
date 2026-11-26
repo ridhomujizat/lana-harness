@@ -33,8 +33,10 @@ If you are a new engineer, read the ADR index below before diving into code or a
 | [0017](0017-agent-teams-as-roster-over-subagents.md) | Model agent teams as a roster of agents over subagent child sessions | Accepted | 2026-10-30 |
 | [0018](0018-claude-code-as-external-agent-runtime.md) | Run Claude Code as an external agent runtime over headless stream-json | Accepted | 2026-11-08 |
 | [0019](0019-llm-router-as-embeddable-core.md) | Route all LLM calls through an embeddable router package | Accepted | 2026-11-08 |
-| [0020](0020-claude-code-as-router-target-with-lana-context.md) | Offer Claude Code as a router target that runs with lana's context and tools | Accepted | 2026-11-08 |
+| [0020](0020-claude-code-as-router-target-with-lana-context.md) | Offer Claude Code as a router target that runs with lana's context and tools | Accepted; superseded in part by 0023 | 2026-11-08 |
 | [0021](0021-embedded-js-sandbox-for-workflow-scripts.md) | Run guardian-written workflow scripts in an embedded JavaScript sandbox | Accepted | 2026-11-08 |
+| [0022](0022-antigravity-as-router-target-through-agy-acp.md) | Offer Antigravity as a router target that runs through the official `agy acp` | Proposed; superseded in part by 0023 | 2026-11-25 |
+| [0023](0023-claude-code-and-antigravity-through-the-router-endpoint.md) | Serve Claude Code and Antigravity models through the router as headless CLI calls | Accepted | 2026-11-26 |
 
 ## How to add an ADR
 

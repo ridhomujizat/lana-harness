@@ -29,6 +29,9 @@ func TestMain(m *testing.M) {
 	if fakeClaudeDir != "" {
 		_ = os.RemoveAll(fakeClaudeDir)
 	}
+	if fakeAgyDir != "" {
+		_ = os.RemoveAll(fakeAgyDir)
+	}
 	os.Exit(code)
 }
 

@@ -17,9 +17,11 @@ import (
 	"net/http"
 	"net/url"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/ridhomujizat/lana-harness/core"
+	"github.com/ridhomujizat/lana-harness/internal/models"
 	"github.com/ridhomujizat/lana-harness/router"
 )
 
@@ -75,6 +77,12 @@ type Adapter struct {
 	secrets    core.Secrets
 	client     *http.Client
 	streamIdle time.Duration
+
+	// effortsMu guards efforts: the reasoning effort levels each model of the
+	// last ListModels answer lists (spec 76 REQ-MES-002); a model listed
+	// without levels maps to an empty slice.
+	effortsMu sync.Mutex
+	efforts   map[string][]string
 }
 
 // NewAdapter creates an adapter. httpClient may be nil; the adapter then
@@ -141,6 +149,7 @@ func NewAdapter(name string, cfg Config, secrets core.Secrets, httpClient *http.
 // Stream sends the request to /alpha/generate and returns an event iterator.
 func (a *Adapter) Stream(ctx context.Context, req core.ChatRequest) (core.ChatStream, error) {
 	env := buildEnvelope(req, time.Now())
+	env.Params.ReasoningEffort = a.effortFor(req.Model, req.ReasoningEffort)
 	body, err := json.Marshal(env)
 	if err != nil {
 		return nil, err
@@ -162,10 +171,16 @@ func (a *Adapter) Stream(ctx context.Context, req core.ChatRequest) (core.ChatSt
 	return a.readStream(ctx, resp.Body), nil
 }
 
-// ListModels returns the models of GET {base}/provider/v1/models
-// (REQ-RTR-013). The list is public; the key is sent when one is set.
+// modelsPath is the model list the official CLI reads: the client view
+// carries each model's reasoningEfforts and marks hidden models.
+const modelsPath = "/provider/v1/models?view=client"
+
+// ListModels returns the models of GET {base}/provider/v1/models?view=client
+// (REQ-RTR-013), without the hidden ones, with each model's reasoning effort
+// levels (spec 76 REQ-MES-002). The list is public; the key is sent when one
+// is set. The levels are kept for Stream.
 func (a *Adapter) ListModels(ctx context.Context) ([]router.ModelInfo, error) {
-	req, key, err := a.newRequest(ctx, http.MethodGet, "/provider/v1/models", nil)
+	req, key, err := a.newRequest(ctx, http.MethodGet, modelsPath, nil)
 	if err != nil {
 		return nil, err
 	}
@@ -179,22 +194,54 @@ func (a *Adapter) ListModels(ctx context.Context) ([]router.ModelInfo, error) {
 	defer func() { _ = resp.Body.Close() }()
 	var payload struct {
 		Data []struct {
-			ID            string `json:"id"`
-			Name          string `json:"name"`
-			ContextLength int    `json:"context_length"`
+			ID               string   `json:"id"`
+			Name             string   `json:"name"`
+			ContextLength    int      `json:"context_length"`
+			Hidden           bool     `json:"hidden"`
+			ReasoningEfforts []string `json:"reasoningEfforts"`
 		} `json:"data"`
 	}
 	if err := json.NewDecoder(io.LimitReader(resp.Body, 8<<20)).Decode(&payload); err != nil {
 		return nil, &core.ProviderError{Class: "server", Message: "invalid models response"}
 	}
 	out := make([]router.ModelInfo, 0, len(payload.Data))
+	efforts := make(map[string][]string, len(payload.Data))
 	for _, m := range payload.Data {
 		if m.ID == "" {
 			continue
 		}
-		out = append(out, router.ModelInfo{ID: m.ID, Name: m.Name, ContextWindow: m.ContextLength})
+		levels := wireLevels(m.ReasoningEfforts)
+		efforts[m.ID] = levels
+		if m.Hidden {
+			continue
+		}
+		info := router.ModelInfo{ID: m.ID, Name: m.Name, ContextWindow: m.ContextLength}
+		if len(levels) > 0 {
+			info.Efforts = levels
+		}
+		out = append(out, info)
 	}
+	a.effortsMu.Lock()
+	a.efforts = efforts
+	a.effortsMu.Unlock()
 	return out, nil
+}
+
+// effortFor returns the reasoning_effort a request for model sends (spec 76
+// REQ-MES-003): a level the model lists as is, else nothing (the model's
+// default). "off" is lana's switch and is always sent (REQ-KBG-001). Before
+// the model list was read, any level the wire takes is sent.
+func (a *Adapter) effortFor(model, effort string) string {
+	if effort == "" || effort == "off" {
+		return effort
+	}
+	a.effortsMu.Lock()
+	levels, known := a.efforts[model]
+	a.effortsMu.Unlock()
+	if known {
+		return models.PickEffort(effort, levels, "")
+	}
+	return models.PickEffort(effort, wireEfforts, "")
 }
 
 // newRequest builds a request with the CLI identity headers, the provider

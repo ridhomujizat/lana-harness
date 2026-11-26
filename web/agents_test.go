@@ -771,7 +771,8 @@ func TestAgentsReasoningEffort(t *testing.T) {
 		return rr.Code, rr.Body.Bytes()
 	}
 
-	for _, value := range []string{"off", "low", "high", "max", ""} {
+	// Spec 76 REQ-MES-001: any model's own level name is saved.
+	for _, value := range []string{"off", "low", "medium", "high", "xhigh", "max", "minimal", ""} {
 		code, body := save(t, value)
 		if code != http.StatusOK {
 			t.Fatalf("reasoning_effort=%q status = %d, body = %q", value, code, body)
@@ -787,7 +788,7 @@ func TestAgentsReasoningEffort(t *testing.T) {
 		}
 	}
 
-	code, body := save(t, "turbo")
+	code, body := save(t, "turbo mode")
 	if code != http.StatusUnprocessableEntity {
 		t.Fatalf("invalid reasoning_effort status = %d, body = %q", code, body)
 	}

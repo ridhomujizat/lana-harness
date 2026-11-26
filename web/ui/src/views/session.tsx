@@ -18,9 +18,14 @@ import { getModels } from "../api/models";
 import { COMBOS_GROUP, getRouter } from "../api/router";
 import { groupClaudeChoices, useClaudeAccounts } from "./router/claude-code";
 import { CLAUDE_CODE_GROUP } from "./router/presets";
-import { ProviderLogo } from "./router/provider-logo";
-import type { RouterChoice } from "../api/router";
+import type { RouterChoice, RouterProvider } from "../api/router";
+import { choiceOptions } from "./agent-runtime";
+import { AGENT_DEFAULT_GROUP, CURRENT_GROUP, ModelPickerPanel } from "./model-picker";
+import type { ModelOption } from "./model-picker";
 import type { CatalogEffort, CatalogModel } from "../api/models";
+import { choiceLevels, cleanEfforts, effortName, keptEffort } from "./effort";
+import type { EffortLevels } from "./effort";
+import { NOT_OFFERED, defaultEffortLabel } from "./effort-control";
 import { answerApproval } from "../api/approvals";
 import { useSessionPresence } from "../lib/session-presence";
 import type {
@@ -73,6 +78,7 @@ import {
   Input,
   Menu,
   Modal,
+  Popover,
 } from "../ui/gr8r";
 import { ApprovalCard, approvalResultWords } from "./approval";
 import type { ApprovalItem } from "./approval";
@@ -257,11 +263,6 @@ function shortModel(value: string): string {
   return parts.length > 1 ? parts.slice(1).join(":") : text;
 }
 
-/* The chip and menu label of one reasoning effort: "low" -> "Low". */
-function effortName(value: string): string {
-  const text = String(value || "");
-  return text ? text.charAt(0).toUpperCase() + text.slice(1) : "";
-}
 
 function turnCountText(count: unknown): string {
   const value = Number(count) || 0;
@@ -396,7 +397,9 @@ function ModelMenuContent({
   provider,
   models,
   choices,
+  routerOptions,
   onPick,
+  onEscape,
 }: {
   current: string;
   agentModel: string;
@@ -405,11 +408,14 @@ function ModelMenuContent({
   /* Spec 37 (REQ-RTR-018): the router choices, combos first. When they are
      known they replace the one-provider catalog list. */
   choices: RouterChoice[];
+  /* The same choices as model picker options, with provider logos. */
+  routerOptions: ModelOption[];
   onPick: (value: string) => void;
+  onEscape: () => void;
 }) {
   const routed = choices.length > 0;
   const [custom, setCustom] = useState("");
-  const options: { value: string; label: string; meta: string }[] = [];
+  const options: ModelOption[] = [];
   const currentId = shortModel(current);
   const currentInCatalog = routed
     ? choices.some((choice) => choice.value === current)
@@ -418,15 +424,31 @@ function ModelMenuContent({
     options.push({
       value: current,
       label: shortModel(current),
-      meta: "Current model",
+      group: CURRENT_GROUP,
+      meta: current,
     });
   }
   if (agentModel && agentModel !== current) {
     options.push({
       value: agentModel,
       label: shortModel(agentModel),
-      meta: "Agent default",
+      group: AGENT_DEFAULT_GROUP,
+      meta: agentModel,
     });
+  }
+  if (routed) {
+    options.push(...routerOptions);
+  } else {
+    for (const model of models) {
+      const value = provider ? provider + ":" + model.id : model.id;
+      options.push({
+        value,
+        label: model.name,
+        group: provider || "Models",
+        meta: value,
+        tag: model.legacy ? "Legacy" : undefined,
+      });
+    }
   }
 
   function submitCustom(event: FormEvent<HTMLFormElement>) {
@@ -438,152 +460,56 @@ function ModelMenuContent({
   }
 
   return (
-    <>
-      <p className="mh">Model</p>
-      {options.length === 0 && models.length === 0 ? (
-        <p className="mi-empty">No model is set yet.</p>
-      ) : null}
-      {options.map((option) => (
-        <button
-          key={option.value}
-          type="button"
-          role="menuitemradio"
-          className="mi"
-          aria-checked={option.value === current}
-          onClick={() => onPick(option.value)}
-        >
-          <span className="mi-text">
-            <span className="mi-name">{option.label}</span>
-            <span className="mi-meta">
-              {option.meta + " · " + option.value}
-            </span>
-          </span>
-          {option.value === current ? (
-            <span className="ck">
-              <Ic name="check" size={14} />
-            </span>
-          ) : null}
-        </button>
-      ))}
-      {routed ? <RouterChoiceItems choices={choices} current={current} onPick={onPick} /> : null}
-      {(routed ? [] : models).map((model) => {
-        const value = provider ? provider + ":" + model.id : model.id;
-        return (
-          <button
-            key={"catalog-" + model.id}
-            type="button"
-            role="menuitemradio"
-            className="mi"
-            aria-checked={value === current}
-            onClick={() => onPick(value)}
-          >
-            <span className="mi-text">
-              <span className="mi-name">
-                {model.name}
-                {model.legacy ? <span className="tag">Legacy</span> : null}
-              </span>
-              <span className="mi-meta">{value}</span>
-            </span>
-            {value === current ? (
-              <span className="ck">
-                <Ic name="check" size={14} />
-              </span>
-            ) : null}
-          </button>
-        );
-      })}
-      <form className="mi-custom" onSubmit={submitCustom}>
-        <Input
-          type="text"
-          className="mi-custom-input"
-          aria-label={routed ? "Custom model: a combo, provider/model, or provider:model" : "Custom model as provider:model"}
-          placeholder={routed ? "combo or provider/model" : "provider:model"}
-          value={custom}
-          onChange={(event) => setCustom(event.target.value)}
-        />
-        <Button type="submit" size="sm" disabled={!custom.trim()}>
-          Set
-        </Button>
-      </form>
-    </>
-  );
-}
-
-/* The router choices grouped as the agent picker shows them: combos, then
-   each provider's models under its name. */
-function RouterChoiceItems({
-  choices,
-  current,
-  onPick,
-}: {
-  choices: RouterChoice[];
-  current: string;
-  onPick: (value: string) => void;
-}) {
-  const groups: string[] = [];
-  if (choices.some((choice) => choice.group === COMBOS_GROUP)) {
-    groups.push(COMBOS_GROUP);
-  }
-  for (const choice of choices) {
-    if (!groups.includes(choice.group)) {
-      groups.push(choice.group);
-    }
-  }
-  return (
-    <>
-      {groups.map((group) => (
-        <div key={group} role="group" aria-label={group}>
-          <p className="mh" aria-hidden="true">
-            {group === CLAUDE_CODE_GROUP || group.startsWith(CLAUDE_CODE_GROUP + " · ") ? (
-              <span className="mh-logo">
-                <ProviderLogo logo="claude" name="Claude Code" size={14} />
-                {group}
-              </span>
-            ) : (
-              group
-            )}
-          </p>
-          {choices
-            .filter((choice) => choice.group === group)
-            .map((choice) => (
-              <button
-                key={choice.value}
-                type="button"
-                role="menuitemradio"
-                className="mi"
-                aria-checked={choice.value === current}
-                onClick={() => onPick(choice.value)}
-              >
-                <span className="mi-text">
-                  <span className="mi-name">{choice.label || choice.value}</span>
-                  {choice.label && choice.label !== choice.value ? (
-                    <span className="mi-meta">{choice.value}</span>
-                  ) : null}
-                </span>
-                {choice.value === current ? (
-                  <span className="ck">
-                    <Ic name="check" size={14} />
-                  </span>
-                ) : null}
-              </button>
-            ))}
-        </div>
-      ))}
-    </>
+    <ModelPickerPanel
+      options={options}
+      value={current}
+      onPick={onPick}
+      onEscape={onEscape}
+      footer={
+        <>
+          {options.length === 0 ? <p className="mi-empty">No model is set yet.</p> : null}
+          <form className="mi-custom" onSubmit={submitCustom}>
+            <Input
+              type="text"
+              className="mi-custom-input"
+              aria-label={routed ? "Custom model: a combo, provider/model, or provider:model" : "Custom model as provider:model"}
+              placeholder={routed ? "combo or provider/model" : "provider:model"}
+              value={custom}
+              onChange={(event) => setCustom(event.target.value)}
+            />
+            <Button type="submit" size="sm" disabled={!custom.trim()}>
+              Set
+            </Button>
+          </form>
+        </>
+      }
+    />
   );
 }
 
 /* The Thinking menu of REQ-MDL-001: "Model default" clears the session effort,
-   the four efforts set it with their description from /v1/models. */
+   each level the model supports (spec 76, REQ-MES-002) sets it, with its
+   description from /v1/models when the catalog has one. A saved level the
+   model does not offer stays checked with the level it uses (REQ-MES-003). */
 function ThinkingMenuContent({
   current,
-  efforts,
+  levels,
+  descriptions,
   onPick,
 }: {
   current: string;
-  efforts: CatalogEffort[];
+  levels: EffortLevels;
+  descriptions: CatalogEffort[];
   onPick: (value: string) => void;
 }) {
+  const efforts = levels.efforts.map((value) => {
+    const known = descriptions.find((effort) => effort.value === value);
+    return { value, description: known ? known.description : "" };
+  });
+  const stale = current !== "" && !levels.efforts.includes(current);
+  if (stale) {
+    efforts.push({ value: current, description: "Not offered by this model." });
+  }
   return (
     <>
       <p className="mh">Thinking</p>
@@ -596,7 +522,11 @@ function ThinkingMenuContent({
       >
         <span className="mi-text">
           <span className="mi-name">Model default</span>
-          <span className="mi-meta">Use the model's own effort.</span>
+          <span className="mi-meta">
+            {levels.default_effort
+              ? "Use the model's own effort: " + effortName(levels.default_effort) + "."
+              : "Use the model's own effort."}
+          </span>
         </span>
         {current === "" ? (
           <span className="ck">
@@ -733,7 +663,9 @@ interface ComposerProps {
   onStop: () => void;
   onCancelReply: () => void;
   onAgent: (name: string) => void;
-  onModel: (value: string) => void;
+  /* resetEffort: the new model does not list the session effort, so the
+     model change clears it (spec 76, REQ-MES-006). */
+  onModel: (value: string, resetEffort?: boolean) => void;
   onEffort: (value: string) => void;
   onPolicy: (value: string, confirmTrust: boolean) => Promise<boolean>;
   /* The Background tab docked on top of the composer shell. */
@@ -781,6 +713,7 @@ function Composer({
     efforts: CatalogEffort[];
   }>({ provider: "", models: [], efforts: [] });
   const [choices, setChoices] = useState<RouterChoice[]>([]);
+  const [routerProviders, setRouterProviders] = useState<RouterProvider[]>([]);
   const plusRef = useRef<HTMLSpanElement>(null);
   const modelRef = useRef<HTMLSpanElement>(null);
   const thinkingRef = useRef<HTMLSpanElement>(null);
@@ -823,6 +756,10 @@ function Composer({
     () => groupClaudeChoices(choices, null, claudeAccounts),
     [choices, claudeAccounts]
   );
+  const routerOptions = useMemo(
+    () => choiceOptions(choices, routerProviders, claudeAccounts),
+    [choices, routerProviders, claudeAccounts]
+  );
 
   /* Spec 37: the session model menu offers the router choices. */
   useEffect(() => {
@@ -831,6 +768,7 @@ function Composer({
       .then((data) => {
         if (!cancelled) {
           setChoices(Array.isArray(data.choices) ? data.choices : []);
+          setRouterProviders(Array.isArray(data.providers) ? data.providers : []);
         }
       })
       .catch(() => {});
@@ -904,10 +842,38 @@ function Composer({
       : shortModel(modelValue);
   const currentEntry =
     catalog.find((entry) => entry.id === catalogId) || null;
-  const thinksModel = Boolean(!teamSession && currentEntry && currentEntry.thinking);
+  /* Spec 76 (REQ-MES-002): the levels come from the model's router choice; a
+     model the router does not list falls back to the catalog's Thinking
+     levels. */
+  const levelChoice = menuChoices.find((choice) => choice.value === modelValue) || null;
+  const claudeChoice = Boolean(
+    levelChoice &&
+      (levelChoice.group === CLAUDE_CODE_GROUP ||
+        levelChoice.group.startsWith(CLAUDE_CODE_GROUP + " · "))
+  );
+  const effortLevels: EffortLevels | null =
+    levelChoice && (Array.isArray(levelChoice.efforts) || claudeChoice)
+      ? choiceLevels(levelChoice, claudeChoice)
+      : currentEntry && currentEntry.thinking
+        ? {
+            efforts: cleanEfforts(efforts.map((effort) => effort.value)),
+            default_effort: currentEntry.default_effort || "",
+          }
+        : null;
+  const thinksModel = Boolean(
+    !teamSession && effortLevels && effortLevels.efforts.length > 0
+  );
   const effortLabel = reasoningEffort
-    ? "Thinking: " + effortName(reasoningEffort)
+    ? "Thinking: " +
+      effortName(reasoningEffort) +
+      (effortLevels && !effortLevels.efforts.includes(reasoningEffort)
+        ? " " + NOT_OFFERED
+        : "")
     : "Thinking: Model default";
+  const effortTitle =
+    !reasoningEffort && effortLevels
+      ? "Thinking: " + defaultEffortLabel(effortLevels.default_effort)
+      : effortLabel;
 
   /* The Gr8r buttons do not forward refs, so the trigger refs point at their
      wrapper spans; focus the button inside. */
@@ -940,7 +906,21 @@ function Composer({
   function pickModel(value: string) {
     setMenu("");
     focusIn(modelRef);
-    onModel(value);
+    /* Spec 76 (REQ-MES-006): keep the session effort when the new model lists
+       it, else go back to the model's default. A model whose levels are not
+       known keeps it. */
+    const next = menuChoices.find((choice) => choice.value === value) || null;
+    const nextClaude = Boolean(
+      next &&
+        (next.group === CLAUDE_CODE_GROUP || next.group.startsWith(CLAUDE_CODE_GROUP + " · "))
+    );
+    const reset = Boolean(
+      reasoningEffort &&
+        next &&
+        (Array.isArray(next.efforts) || nextClaude) &&
+        keptEffort(reasoningEffort, choiceLevels(next, nextClaude)) === ""
+    );
+    onModel(value, reset);
   }
 
   function pickEffort(value: string) {
@@ -1131,7 +1111,7 @@ function Composer({
                     variant="ghost"
                     iconRight="chevron-down"
                     aria-label={"Model: " + (modelValue || "not set")}
-                    aria-haspopup="menu"
+                    aria-haspopup="dialog"
                     aria-expanded={menu === "model"}
                     title={modelValue || "No model set"}
                     disabled={busySession}
@@ -1139,10 +1119,12 @@ function Composer({
                   >
                     {shortModel(modelValue) || "Model"}
                   </Button>
-                  <Menu
+                  <Popover
                     anchorRef={modelRef}
                     open={menu === "model"}
                     onClose={() => closeMenu("model")}
+                    role="dialog"
+                    className="mp-pop"
                   >
                     <ModelMenuContent
                       current={modelValue}
@@ -1150,9 +1132,11 @@ function Composer({
                       provider={modelProvider}
                       models={catalog}
                       choices={menuChoices}
+                      routerOptions={routerOptions}
                       onPick={pickModel}
+                      onEscape={() => closeMenu("model")}
                     />
-                  </Menu>
+                  </Popover>
                 </>
               )}
             </span>
@@ -1166,7 +1150,7 @@ function Composer({
                   aria-label={effortLabel}
                   aria-haspopup="menu"
                   aria-expanded={menu === "thinking"}
-                  title={effortLabel}
+                  title={effortTitle}
                   disabled={busySession}
                   onClick={() => setMenu(menu === "thinking" ? "" : "thinking")}
                 >
@@ -1177,11 +1161,14 @@ function Composer({
                   open={menu === "thinking"}
                   onClose={() => closeMenu("thinking")}
                 >
-                  <ThinkingMenuContent
-                    current={reasoningEffort}
-                    efforts={efforts}
-                    onPick={pickEffort}
-                  />
+                  {effortLevels ? (
+                    <ThinkingMenuContent
+                      current={reasoningEffort}
+                      levels={effortLevels}
+                      descriptions={efforts}
+                      onPick={pickEffort}
+                    />
+                  ) : null}
                 </Menu>
               </span>
             ) : null}
@@ -2391,7 +2378,7 @@ export function SessionPage({ id, view }: SessionPageProps) {
   );
 
   const changeModel = useCallback(
-    (value: string) => {
+    (value: string, resetEffort?: boolean) => {
       /* A team session never changes one model: each agent uses its own. */
       const currentAgent = agents.find(
         (entry) => entry.name === (detail && detail.agent)
@@ -2399,7 +2386,11 @@ export function SessionPage({ id, view }: SessionPageProps) {
       if ((detail && detail.team) || isTeam(currentAgent || null)) {
         return Promise.resolve(false);
       }
-      return patch({ model: value }, "Model changed to " + value + ".");
+      return patch(
+        resetEffort ? { model: value, reasoning_effort: "" } : { model: value },
+        "Model changed to " + value + "." +
+          (resetEffort ? " Thinking reset to the model default." : "")
+      );
     },
     [agents, detail, patch]
   );

@@ -26,8 +26,9 @@ import {
 import type { ButtonProps, SelectOption } from "../ui/gr8r";
 import { AgentAvatar } from "./agent-avatar";
 import { choiceOptions } from "./agent-runtime";
+import { ModelPicker } from "./model-picker";
+import type { ModelOption } from "./model-picker";
 import { PixelSprite } from "./pixel-sprite";
-import { claudeAccountNames, claudeTargetAccount } from "./router/claude-code";
 
 /* Spec 62: the avatar dialog. The owner shapes the agent's pixel character:
    Randomize, pick each part, recolor, or ask a model to pick parts from a
@@ -147,21 +148,11 @@ function itemOptions(items: CatalogItem[] | undefined, current: string): SelectO
   return list;
 }
 
-/* The router choices a generation may use: never a Claude Code model, nor a
-   combo that starts on one (the API answers invalid_model). */
-function modelOptions(
-  choices: RouterChoice[],
-  providers: RouterProvider[],
-  combos: Parameters<typeof claudeTargetAccount>[2]
-): SelectOption[] {
-  const names = claudeAccountNames(choices, providers);
-  const allowed = choices.filter(
-    (choice) => claudeTargetAccount(choice.value, choices, combos, names) === ""
-  );
-  return [
-    { value: BACKGROUND_MODEL, label: "Background model" },
-    ...choiceOptions(allowed, providers),
-  ];
+/* The router choices a generation may use: every combo and model, Claude
+   Code and Antigravity models included (spec 78 REQ-RPR-008: the router runs
+   them through their CLI). */
+function modelOptions(choices: RouterChoice[], providers: RouterProvider[]): ModelOption[] {
+  return [{ value: BACKGROUND_MODEL, label: "Background model" }, ...choiceOptions(choices, providers)];
 }
 
 export interface AvatarSavedResult {
@@ -206,7 +197,7 @@ export function AvatarDialog({
   const [catalog, setCatalog] = useState<AvatarCatalog | null>(null);
   const [prompt, setPrompt] = useState("");
   const [model, setModel] = useState(BACKGROUND_MODEL);
-  const [options, setOptions] = useState<SelectOption[]>([
+  const [options, setOptions] = useState<ModelOption[]>([
     { value: BACKGROUND_MODEL, label: "Background model" },
   ]);
   const [busy, setBusy] = useState<"" | "random" | "render" | "ai" | "save" | "delete">("");
@@ -229,7 +220,7 @@ export function AvatarDialog({
     getRouter()
       .then((router) => {
         if (alive.current && router) {
-          const next = modelOptions(router.choices, router.providers, router.combos);
+          const next = modelOptions(router.choices, router.providers);
           setOptions(next);
           setModel(defaultDrawModel(next, storedModel()));
         }
@@ -655,7 +646,7 @@ export function AvatarDialog({
               onChange={(event) => setPrompt(event.target.value)}
             />
             <div className="avatar-dialog-ai-row">
-              <Select
+              <ModelPicker
                 id="avatar-model"
                 size="sm"
                 aria-label="Model"

@@ -11,18 +11,20 @@ import (
 )
 
 // chatRequest is the OpenAI Chat Completions request subset of API-RTR-015.
-// Unknown fields are ignored; tool_choice is ignored.
+// Unknown fields are ignored. tool_choice is read only for Claude Code and
+// Antigravity targets (spec 78 REQ-RPR-003); API providers ignore it.
 type chatRequest struct {
-	Model               string         `json:"model"`
-	Messages            []chatMessage  `json:"messages"`
-	Tools               []chatTool     `json:"tools"`
-	MaxTokens           *int           `json:"max_tokens"`
-	MaxCompletionTokens *int           `json:"max_completion_tokens"`
-	Temperature         *float64       `json:"temperature"`
-	ReasoningEffort     string         `json:"reasoning_effort"`
-	Stream              bool           `json:"stream"`
-	StreamOptions       *streamOptions `json:"stream_options"`
-	N                   *int           `json:"n"`
+	Model               string          `json:"model"`
+	Messages            []chatMessage   `json:"messages"`
+	Tools               []chatTool      `json:"tools"`
+	ToolChoice          json.RawMessage `json:"tool_choice"`
+	MaxTokens           *int            `json:"max_tokens"`
+	MaxCompletionTokens *int            `json:"max_completion_tokens"`
+	Temperature         *float64        `json:"temperature"`
+	ReasoningEffort     string          `json:"reasoning_effort"`
+	Stream              bool            `json:"stream"`
+	StreamOptions       *streamOptions  `json:"stream_options"`
+	N                   *int            `json:"n"`
 }
 
 type streamOptions struct {
@@ -75,14 +77,17 @@ type toolFunction struct {
 // emptySchema is the input schema of a function tool without parameters.
 var emptySchema = json.RawMessage(`{"type":"object","properties":{}}`)
 
-// effortMap maps OpenAI reasoning_effort values to core efforts.
+// effortMap maps OpenAI reasoning_effort values to core efforts. Spec 76: a
+// level is the model's own name, so the values pass through as they are (a
+// target model that does not list one uses its default); "none" is lana's
+// "off" switch, which every adapter turns into its own off setting.
 var effortMap = map[string]string{
 	"none":    "off",
-	"minimal": "low",
+	"minimal": "minimal",
 	"low":     "low",
-	"medium":  "high",
+	"medium":  "medium",
 	"high":    "high",
-	"xhigh":   "max",
+	"xhigh":   "xhigh",
 }
 
 // toChatRequest translates an OpenAI request into a core.ChatRequest. Model
@@ -104,6 +109,7 @@ func toChatRequest(in *chatRequest) (core.ChatRequest, error) {
 		return out, badRequest("invalid_value", "'max_tokens' must not be negative.")
 	}
 	out.Temperature = in.Temperature
+	out.ToolChoice = toolChoice(in.ToolChoice)
 	if in.ReasoningEffort != "" {
 		effort, ok := effortMap[in.ReasoningEffort]
 		if !ok {
@@ -174,6 +180,20 @@ func toChatRequest(in *chatRequest) (core.ChatRequest, error) {
 		return out, badRequest("invalid_value", "'messages' must contain a user, assistant, or tool message.")
 	}
 	return out, nil
+}
+
+// toolChoice reads tool_choice: "none", "auto", "required", or "function"
+// for an object naming a function; "" when it is missing or null.
+func toolChoice(raw json.RawMessage) string {
+	trimmed := bytes.TrimSpace(raw)
+	if len(trimmed) == 0 || string(trimmed) == "null" {
+		return ""
+	}
+	var s string
+	if json.Unmarshal(trimmed, &s) == nil {
+		return s
+	}
+	return "function"
 }
 
 // parseContent reads content as a string or an array of parts. null and a

@@ -183,12 +183,41 @@ type ProviderConfig struct {
 	// Label is the account's display name in the dashboard (REQ-CCT-012),
 	// at most 60 characters. "" shows the account's e-mail, else its name.
 	Label string `toml:"label"`
+
+	// Home is the account's own HOME, the agy account folder (REQ-AGY-001).
+	// "" means $LANA_HOME/antigravity/<name>. It applies to kind
+	// "antigravity" only.
+	Home string `toml:"home" json:"home"`
+
+	// The keys below belong to spec 75 (account failover inside a provider).
+
+	// Priority orders the accounts of a subscription pool (REQ-PAF-001),
+	// lower first, for kind "claude-code" and "antigravity" accounts and the
+	// built-in [providers.claude-code] / [providers.antigravity] tables. It is
+	// a pointer so an unset priority (nil) differs from 0: nil means the
+	// default, 0 for the built-in account and 100 for the others.
+	Priority *int `toml:"priority"`
+	// Pool is false to keep the account out of pooled addresses
+	// (REQ-PAF-001); nil means true.
+	Pool *bool `toml:"pool"`
+	// APIKeyEnvs are the backup API keys of an API provider (REQ-PAF-005):
+	// secret names tried in order after APIKeyEnv.
+	APIKeyEnvs []string `toml:"api_key_envs"`
 }
+
+// InPool reports whether the account may be used by a pooled address: Pool
+// is unset or true (REQ-PAF-001).
+func (pc ProviderConfig) InPool() bool { return pc.Pool == nil || *pc.Pool }
 
 // ClaudeCodeKind is the provider kind of a Claude Code account
 // (REQ-CCT-010): [providers.<name>] kind = "claude-code". Its targets run in
 // the Claude Code runtime, never through the router.
 const ClaudeCodeKind = "claude-code"
+
+// AntigravityKind is the provider kind of an Antigravity account
+// (REQ-AGY-001): [providers.<name>] kind = "antigravity". Its targets run in
+// the Antigravity runtime, never through the router.
+const AntigravityKind = "antigravity"
 
 type AgentConfig struct {
 	Provider   string   `toml:"provider"`
@@ -218,8 +247,9 @@ type AgentConfig struct {
 	// turns. 0 means the provider default (REQ-TFB-008 item 6).
 	MaxTokens     int `toml:"max_tokens"`
 	ContextWindow int `toml:"context_window"`
-	// ReasoningEffort is "off", "low", "high", or "max"; "" uses the model's
-	// catalog default (REQ-MDL-001).
+	// ReasoningEffort is the model's own level name ("low", "xhigh",
+	// "minimal", …; one token) or "off"; "" uses the model's catalog default
+	// (REQ-MDL-001, spec 76 REQ-MES-001).
 	ReasoningEffort string `toml:"reasoning_effort"`
 	// CompactionHeadroom, CompactionThreshold, and CompactionRetain tune the
 	// context pressure policy (REQ-LTC-011). Zero means the default is used.

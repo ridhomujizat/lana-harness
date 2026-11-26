@@ -2,7 +2,6 @@ package web
 
 import (
 	"bytes"
-	"context"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -57,26 +56,6 @@ func (d providerDocument) claudeAccounts() map[string]bool {
 	return out
 }
 
-// claudeAccountsOf is claudeAccounts of raw config.toml; a parse failure
-// leaves only the built-in account.
-func claudeAccountsOf(raw []byte) map[string]bool {
-	document, err := parseProviderDocument(raw)
-	if err != nil {
-		return map[string]bool{core.ClaudeCodeProvider: true}
-	}
-	return document.claudeAccounts()
-}
-
-// claudeAccountSet returns the Claude Code accounts of the stored config.
-func (s *Server) claudeAccountSet(ctx context.Context) map[string]bool {
-	if s.configStore != nil {
-		if file, err := s.configStore.ConfigFile(ctx); err == nil && file.Exists {
-			return claudeAccountsOf(file.Raw)
-		}
-	}
-	return map[string]bool{core.ClaudeCodeProvider: true}
-}
-
 // isClaudeAccountModel reports whether model is a "<account>/<model>" address
 // of one of accounts.
 func isClaudeAccountModel(model string, accounts map[string]bool) bool {
@@ -101,6 +80,7 @@ func renderClaudeAccountTable(name string, record providerRecord) string {
 		b.WriteString("disabled = true\n")
 	}
 	writeProviderString(&b, "label", record.Label)
+	writeProviderPool(&b, record)
 	return b.String()
 }
 
@@ -205,6 +185,8 @@ func (s *Server) putClaudeAccount(w http.ResponseWriter, r *http.Request, store 
 		record = providerRecord{
 			ConfigDir: stored.ConfigDir, Binary: stored.Binary, Auth: stored.Auth, APIKeyEnv: stored.APIKeyEnv,
 			AllowScheduled: stored.AllowScheduled, Disabled: stored.Disabled, Label: stored.Label,
+			// Spec 75: a save keeps the account's pool settings.
+			Priority: stored.Priority, Pool: stored.Pool,
 		}
 	}
 	record.Kind = core.ClaudeCodeKind
@@ -245,6 +227,12 @@ func (s *Server) putClaudeAccount(w http.ResponseWriter, r *http.Request, store 
 			writeProviderIssue(w, path+".config_dir", "cannot create the account folder: "+err.Error())
 			return
 		}
+		// Spec 77 REQ-WRA-001: the account shares history, projects and the
+		// user settings with the default Claude Code folder, and REQ-WRA-012:
+		// an account that never signed in gets the default's .claude.json
+		// without its login keys, before the sign-in command is shown. A
+		// failure is only logged; the save goes on.
+		s.shareClaudeAccount(name, dir)
 	}
 	configChanged := !bytes.Equal(candidate, file.Raw)
 	restartRequired := !isLiveStore(store)

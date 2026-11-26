@@ -20,22 +20,3 @@ requires = ["pipx"]
 
 [uninstall]
 command = "uv tool uninstall claude-swap || pipx uninstall claude-swap"
-
-# The Workbench "Claude accounts" plugin (spec 56) reads these.
-[[commands]]
-name = "list"
-description = "List the Claude Code accounts with their 5-hour, weekly and per-model usage"
-args = ["list", "--json"]
-risk = "read"
-timeout_secs = 60
-output = "json"
-
-[[commands]]
-name = "switch"
-description = "Make an account the default login of plain `claude`"
-args = ["switch", "{{account}}"]
-risk = "admin"
-timeout_secs = 60
-
-[commands.input]
-account = { type = "string", description = "Account number or email", required = true }

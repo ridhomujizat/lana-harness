@@ -26,10 +26,11 @@ func errorKey(t *testing.T, err error, key string) bool {
 	return findError(errs, key) != nil
 }
 
-// REQ-MDL-001: reasoning_effort accepts off, low, high, max, or empty, and
-// rejects every other value.
+// REQ-MDL-001, spec 76 REQ-MES-001 (revision 2026-11-26): reasoning_effort
+// accepts empty or any model's own level name (one token), and rejects
+// everything else.
 func TestAgentReasoningEffortValidation(t *testing.T) {
-	accepted := []string{"", "off", "low", "high", "max"}
+	accepted := []string{"", "off", "low", "medium", "high", "xhigh", "max", "minimal", "none", "HIGH"}
 	for _, value := range accepted {
 		t.Run("accept "+value, func(t *testing.T) {
 			table := "[agents.coder]\nreasoning_effort = \"" + value + "\"\n"
@@ -38,7 +39,7 @@ func TestAgentReasoningEffortValidation(t *testing.T) {
 			}
 		})
 	}
-	rejected := []string{"medium", "HIGH", "Low", "none", "on"}
+	rejected := []string{"two words", "-x", "a/b", " high", "a_very_long_effort_name_x"}
 	for _, value := range rejected {
 		t.Run("reject "+value, func(t *testing.T) {
 			table := "[agents.coder]\nreasoning_effort = \"" + value + "\"\n"

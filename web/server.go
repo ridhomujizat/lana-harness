@@ -315,6 +315,7 @@ func New(cfg Config) (*Server, error) {
 	s.registerRouterRoutes()
 	s.registerWorkbenchRoutes()
 	s.registerWorkbenchAgentHookRoutes()
+	s.registerWorkbenchClaudeAccountRoutes()
 	s.handler = s.remoteGate(s.securityHeaders(s.compress(s.mux)))
 	return s, nil
 }

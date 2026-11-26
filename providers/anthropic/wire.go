@@ -71,7 +71,11 @@ func buildRequestBody(req core.ChatRequest) ([]byte, error) {
 			maxTokens = maxOutput
 		}
 	}
-	plan := planThinking(req.Model, req.ReasoningEffort, maxTokens, maxOutput)
+	// Spec 76 REQ-MES-003: a level the catalog model does not list falls
+	// back to its default (xhigh on Opus 4.6 sends high); "off" keeps its
+	// per-model handling; a model the catalog does not know keeps the
+	// requested value.
+	plan := planThinking(req.Model, models.EffortFor(req.Model, req.ReasoningEffort, nil), maxTokens, maxOutput)
 	out := wireRequest{
 		Model:        req.Model,
 		MaxTokens:    plan.maxTokens,

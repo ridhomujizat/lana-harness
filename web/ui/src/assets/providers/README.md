@@ -8,6 +8,9 @@ Brand logos of the model providers shown on the Router pages.
   copied unchanged.
 - License: MIT, see `LICENSE` in this folder (copied from the lobe-icons
   repository).
+- Exception: `commandcode.svg` is Command Code's own mask icon
+  (`https://commandcode.ai/favicon/2024/safari-pinned-tab.svg`, fetched
+  2026-11-26), reduced to its path with `fill="currentColor"`.
 
 The logos are trademarks of their owners and are used here only to name the
 provider. Monochrome files use `currentColor` and follow the theme; the

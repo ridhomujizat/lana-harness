@@ -112,7 +112,6 @@ func (h *handler) chatCompletions(w http.ResponseWriter, req *http.Request, keyI
 		writeError(w, http.StatusBadRequest, "invalid_request_error", "invalid_value", err.Error())
 		return
 	}
-
 	id := newCompletionID()
 	meta := router.CallMeta{Source: "proxy", Agent: "proxy:" + keyID, TurnID: id, Requested: in.Model}
 	ctx := req.Context()

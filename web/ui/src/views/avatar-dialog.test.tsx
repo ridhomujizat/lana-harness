@@ -70,6 +70,7 @@ const ROUTER: RouterOverview = {
   choices: [
     { value: "openai/gpt-5-mini", label: "gpt-5-mini", group: "openai" },
     { value: "claude-code/sonnet", label: "Sonnet", group: "Claude Code" },
+    { value: "antigravity/gemini-4-neon", label: "Gemini 4 Neon", group: "Antigravity" },
   ],
 };
 
@@ -302,7 +303,7 @@ describe("AvatarDialog", () => {
     expect(alert.textContent).toContain("model offline");
   });
 
-  it("lists router models without Claude Code", async () => {
+  it("lists router models with Claude Code and Antigravity", async () => {
     render(<AvatarDialog name="lana" color="brand" avatar={null} onClose={vi.fn()} />);
     expect(screen.getByText("No avatar yet. Randomize or generate one to start.")).toBeTruthy();
     await waitFor(() => expect(getRouter).toHaveBeenCalled());
@@ -310,7 +311,8 @@ describe("AvatarDialog", () => {
     expect(picker.textContent).toContain("Background model");
     fireEvent.click(picker);
     await waitFor(() => expect(screen.getByText("gpt-5-mini")).toBeTruthy());
-    expect(screen.queryByText("Sonnet")).toBeNull();
+    expect(screen.getByText("Sonnet")).toBeTruthy();
+    expect(screen.getByText("Gemini 4 Neon")).toBeTruthy();
   });
 
   it("starts drawings on the last pick, else a Claude Sonnet choice", () => {

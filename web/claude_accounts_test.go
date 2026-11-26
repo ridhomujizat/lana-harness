@@ -4,6 +4,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 )
@@ -173,7 +174,7 @@ reasoning_effort = "xhigh"
 			claude = append(claude, choice)
 		}
 	}
-	if len(claude) != 4 || claude[3] != (routerChoiceJSON{Value: "claude-work/opus", Label: "Claude Code (claude-work) · Opus (latest)", Group: "Claude Code"}) {
+	if len(claude) != 4 || !reflect.DeepEqual(claude[3], routerChoiceJSON{Value: "claude-work/opus", Label: "Claude Code (claude-work) · Opus (latest)", Group: "Claude Code"}) {
 		t.Fatalf("claude choices = %+v", claude)
 	}
 

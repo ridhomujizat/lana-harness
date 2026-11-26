@@ -208,8 +208,8 @@ func TestOwnerTitleAndFixed(t *testing.T) {
 }
 
 // REQ-TTL-001, REQ-TTL-002: the pass uses the background chain through the
-// router with source "title", low max tokens, and reasoning off, skipping
-// Claude Code targets.
+// router with source "title", low max tokens, and reasoning off. Spec 78
+// REQ-RPR-009: the chain keeps its Claude Code targets.
 func TestTurnEndedUsesBackgroundChain(t *testing.T) {
 	store := memstore.New()
 	router := &fakeRouter{text: `"Deploy lana to the VPS."`}
@@ -222,7 +222,7 @@ func TestTurnEndedUsesBackgroundChain(t *testing.T) {
 		t.Fatalf("title = %q source = %q", info.Title, info.TitleSource)
 	}
 	calls, chain, req, meta := router.snapshot()
-	if calls != 1 || len(chain) != 1 || chain[0].Provider != "ds" {
+	if calls != 1 || len(chain) != 2 || chain[0].Provider != "claude-code" || chain[1].Provider != "ds" {
 		t.Fatalf("calls=%d chain=%v", calls, chain)
 	}
 	if meta.Source != "title" || meta.SessionID != id || meta.Agent != "assistant" || meta.Requested != "combo" {
@@ -236,28 +236,21 @@ func TestTurnEndedUsesBackgroundChain(t *testing.T) {
 	}
 }
 
-// REQ-CCT-007, REQ-TTL-004: an agent with only Claude Code and no
-// background model gets the fallback title without a model call.
-func TestClaudeCodeOnlyFallsBack(t *testing.T) {
+// Spec 78 REQ-RPR-009 (superseding REQ-CCT-007): an agent with only Claude
+// Code gets its title from its Claude Code model through the router, with
+// or without a background model.
+func TestClaudeCodeOnlyUsesItsModel(t *testing.T) {
 	store := memstore.New()
-	router := &fakeRouter{text: "never"}
+	router := &fakeRouter{text: "Meeting follow-ups"}
 	svc := newService(store, router, map[string]core.AgentConfig{"assistant": {Model: "claude-code/opus"}})
 	id := newSession(t, store, "Summarize the meeting notes from Monday and list the follow-ups", "Here they are.")
 	svc.TurnEnded(core.TitleRequest{SessionID: id, AgentName: "assistant"})
 	info := waitTitle(t, store, svc, id)
-	if info.Title != "Summarize the meeting notes from Monday and list…" || info.TitleSource != core.TitleSourceAuto {
+	if info.Title != "Meeting follow-ups" || info.TitleSource != core.TitleSourceAuto {
 		t.Fatalf("title = %q source = %q", info.Title, info.TitleSource)
 	}
-	if calls, _, _, _ := router.snapshot(); calls != 0 {
-		t.Fatalf("model called %d times", calls)
-	}
-	// With a background model the same agent gets a generated title.
-	router.background = "ds/chat"
-	if _, err := svc.Regenerate(id, "assistant"); err != nil {
-		t.Fatal(err)
-	}
 	calls, chain, _, meta := router.snapshot()
-	if calls != 1 || chain[0].Provider != "ds" || meta.Source != "title" {
+	if calls != 1 || len(chain) != 1 || chain[0].Provider != "claude-code" || meta.Source != "title" {
 		t.Fatalf("calls=%d chain=%v meta=%+v", calls, chain, meta)
 	}
 }

@@ -214,8 +214,8 @@ func (s *Service) generate(ctx context.Context, req core.TitleRequest, owner, re
 
 // chain returns the background chain of the pass (REQ-TTL-002): the turn's
 // chain when the request carries it, else the agent's configured model with
-// the session's model selection applied, without Claude Code targets, else
-// [router] background_model.
+// the session's model selection applied, Claude Code and Antigravity targets
+// included (spec 78 REQ-RPR-009), else [router] background_model.
 func (s *Service) chain(req core.TitleRequest, selection core.ModelSelection) ([]core.LLMTarget, string, error) {
 	if len(req.Targets) > 0 {
 		requested := req.Requested

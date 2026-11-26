@@ -363,3 +363,15 @@ func TestSetupStateClaudeCodeCombo(t *testing.T) {
 		t.Fatalf("status = %+v, want not needed", status)
 	}
 }
+
+// An agent on the built-in Antigravity account needs no provider table.
+func TestSetupStateAntigravityAgent(t *testing.T) {
+	raw := "[agents.default]\nmodel = \"antigravity/gemini-3.8-flash-low\"\n"
+	status, err := setupStateFromFile(ConfigFile{Exists: true, Raw: []byte(raw)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if status.Needed {
+		t.Fatalf("status = %+v, want not needed", status)
+	}
+}

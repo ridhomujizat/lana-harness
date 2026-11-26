@@ -75,7 +75,7 @@ binary = "`+bin+`"
 	}
 
 	resp, data = webDo(t, http.MethodGet, ts.URL+"/v1/router", "", cookie, "")
-	if resp.StatusCode != http.StatusOK || !strings.Contains(string(data), `{"value":"claude-code/opus","label":"Claude Code · Opus (latest)","group":"Claude Code"}`) {
+	if resp.StatusCode != http.StatusOK || !strings.Contains(string(data), `{"value":"claude-code/opus","label":"Claude Code · Opus (latest)","group":"Claude Code","efforts":["low","medium","high","xhigh","max"],"default_effort":"xhigh"}`) {
 		t.Fatalf("overview = %d %s", resp.StatusCode, data)
 	}
 }

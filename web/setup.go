@@ -297,16 +297,20 @@ func setupStateFromFile(file ConfigFile) (SetupStatus, error) {
 	return status, nil
 }
 
-// setupUsesClaudeCode reports whether an agent or combo uses the built-in
-// Claude Code account, which needs no provider table (API-CCT-001).
+// setupUsesClaudeCode reports whether an agent or combo uses a built-in
+// subscription account, Claude Code or Antigravity, which needs no provider
+// table (API-CCT-001, API-AGY-001).
 func setupUsesClaudeCode(document setupConfigDocument) bool {
-	prefix := core.ClaudeCodeProvider + "/"
+	builtin := func(model string) bool {
+		return strings.HasPrefix(model, core.ClaudeCodeProvider+"/") ||
+			strings.HasPrefix(model, core.AntigravityProvider+"/")
+	}
 	for _, raw := range document.Agents {
 		agent, _ := raw.(map[string]any)
 		if runtime, _ := agent["runtime"].(string); runtime == core.ClaudeCodeProvider {
 			return true
 		}
-		if model, _ := agent["model"].(string); strings.HasPrefix(model, prefix) {
+		if model, _ := agent["model"].(string); builtin(model) {
 			return true
 		}
 	}
@@ -314,7 +318,7 @@ func setupUsesClaudeCode(document setupConfigDocument) bool {
 		combo, _ := raw.(map[string]any)
 		list, _ := combo["models"].([]any)
 		for _, item := range list {
-			if model, _ := item.(string); strings.HasPrefix(model, prefix) {
+			if model, _ := item.(string); builtin(model) {
 				return true
 			}
 		}

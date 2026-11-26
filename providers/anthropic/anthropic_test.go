@@ -264,6 +264,9 @@ func TestHTTPErrors(t *testing.T) {
 		{"too large", 413, `{"type":"error","error":{"type":"request_too_large","message":"Request exceeds the maximum allowed number of bytes."}}`, "", "context_length", 0},
 		{"prompt too long", 400, `{"type":"error","error":{"type":"invalid_request_error","message":"prompt is too long: 1000001 tokens > 1000000 maximum"}}`, "", "context_length", 0},
 		{"bad request", 400, `{"type":"error","error":{"type":"invalid_request_error","message":"messages: roles must alternate"}}`, "", "client", 0},
+		// spec 75: an exhausted credit balance is quota.
+		{"payment required", 402, `{"type":"error","error":{"type":"billing_error","message":"payment required"}}`, "", core.ErrorClassQuota, 0},
+		{"credit too low", 400, `{"type":"error","error":{"type":"invalid_request_error","message":"Your credit balance is too low to access the Anthropic API."}}`, "", core.ErrorClassQuota, 0},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -436,6 +439,7 @@ func TestStreamErrorClasses(t *testing.T) {
 		"request_too_large":     "context_length",
 		"invalid_request_error": "client",
 		"something_new":         "server",
+		"billing_error":         core.ErrorClassQuota,
 	}
 	for errType, class := range cases {
 		if got := classifyStreamError(errType, "m", "").Class; got != class {
@@ -444,5 +448,8 @@ func TestStreamErrorClasses(t *testing.T) {
 	}
 	if got := classifyStreamError("invalid_request_error", "prompt is too long", "").Class; got != "context_length" {
 		t.Fatalf("prompt too long class=%s", got)
+	}
+	if got := classifyStreamError("invalid_request_error", "Your credit balance is too low", "").Class; got != core.ErrorClassQuota {
+		t.Fatalf("credit too low class=%s", got)
 	}
 }

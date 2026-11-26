@@ -193,10 +193,14 @@ func (s *Server) handleWorkbenchCreate(w http.ResponseWriter, r *http.Request) {
 	sess, err := backend.Create(r.Context(), workbench.CreateOptions{
 		Command: body.Command,
 		Dir:     expandWorkbenchDir(body.Dir),
-		Cols:    body.Cols,
-		Rows:    body.Rows,
-		Title:   body.Title,
-		Labels:  body.Labels,
+		// Spec 77 REQ-WRA-005: a terminal runs `claude` on the Workbench
+		// default account. The core stores Env with the session, so a restore
+		// keeps it.
+		Env:    s.workbenchClaudeEnv(r.Context()),
+		Cols:   body.Cols,
+		Rows:   body.Rows,
+		Title:  body.Title,
+		Labels: body.Labels,
 	})
 	if err != nil {
 		s.writeWorkbenchError(w, "workbench create", err)

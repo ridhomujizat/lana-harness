@@ -26,6 +26,16 @@
 //	                             "error" an error result, "noresult" exits 1
 //	                             with a stderr line, "hang" waits until killed
 //
+//	FAKECLAUDE_PROMPT_FIXTURE    JSONL lines a router prompt run (spec 78:
+//	                             -p without --input-format) prints; the
+//	                             default answers "Hello from fake" with
+//	                             usage. fakeclaude_prompt.jsonl in
+//	                             CLAUDE_CONFIG_DIR wins. Directives:
+//	                             {"fake":"sleep","ms":100}, {"fake":"hang"},
+//	                             {"fake":"exit","code":1,"stderr":"text"}
+//
+// A prompt run logs a line with kind "prompt": argv, env, cwd, the stdin
+// text, and the number of entries in cwd at start.
 // `-p /usage` logs a line with kind "usage" (argv, env, cwd, and whether
 // stdin was at EOF).
 // `auth login` and `auth logout` log a line with kind "auth", and
@@ -64,6 +74,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -232,6 +243,10 @@ func main() {
 	}
 	if len(args) >= 2 && args[0] == "-p" && args[1] == "/usage" {
 		usageCommand(args)
+		return
+	}
+	if len(args) >= 1 && args[0] == "-p" && !hasArg(args, "--input-format") {
+		promptCommand(args)
 		return
 	}
 	cwd, _ := os.Getwd()
@@ -568,4 +583,74 @@ func usageCommand(args []string) {
 		"content": []any{map[string]any{"type": "text", "text": text}}}})
 	outJSON(map[string]any{"type": "result", "subtype": "success", "is_error": isError, "num_turns": 0,
 		"result": text, "usage": map[string]any{"input_tokens": in, "output_tokens": outTokens}})
+}
+
+// hasArg reports whether argv holds flag.
+func hasArg(args []string, flag string) bool {
+	for _, a := range args {
+		if a == flag {
+			return true
+		}
+	}
+	return false
+}
+
+// defaultPrompt is the answer of a prompt run without a fixture.
+var defaultPrompt = []string{
+	`{"type":"system","subtype":"init","session_id":"00000000-0000-4000-8000-000000000001","model":"claude-sonnet-5-5","tools":[]}`,
+	`{"type":"stream_event","event":{"type":"content_block_delta","delta":{"type":"thinking_delta","thinking":"secret thoughts"}}}`,
+	`{"type":"stream_event","event":{"type":"content_block_delta","delta":{"type":"text_delta","text":"Hello"}}}`,
+	`{"type":"stream_event","event":{"type":"content_block_delta","delta":{"type":"text_delta","text":" from fake"}}}`,
+	`{"type":"assistant","message":{"model":"claude-sonnet-5-5","content":[{"type":"text","text":"Hello from fake"}]}}`,
+	`{"type":"result","subtype":"success","is_error":false,"result":"Hello from fake","usage":{"input_tokens":10,"output_tokens":4,"cache_creation_input_tokens":1,"cache_read_input_tokens":3}}`,
+}
+
+// promptCommand fakes a router prompt run (spec 78): it reads the whole
+// stdin, logs it, and prints the prompt fixture.
+func promptCommand(args []string) {
+	cwd, _ := os.Getwd()
+	stdin, _ := io.ReadAll(os.Stdin)
+	entries, _ := os.ReadDir(cwd)
+	logLine(map[string]any{"kind": "prompt", "argv": args, "env": os.Environ(), "cwd": cwd, "stdin": string(stdin), "cwd_entries": len(entries)})
+	lines := defaultPrompt
+	path := os.Getenv("FAKECLAUDE_PROMPT_FIXTURE")
+	if p, ok := accountFile("fakeclaude_prompt.jsonl"); ok {
+		path = p
+	}
+	if path != "" {
+		data, err := os.ReadFile(path)
+		if err != nil {
+			fmt.Fprintln(os.Stderr, "fakeclaude: "+err.Error())
+			os.Exit(2)
+		}
+		lines = nil
+		for _, line := range strings.Split(string(data), "\n") {
+			if strings.TrimSpace(line) != "" {
+				lines = append(lines, line)
+			}
+		}
+	}
+	for _, line := range lines {
+		var d struct {
+			Fake   string `json:"fake"`
+			MS     int    `json:"ms"`
+			Code   int    `json:"code"`
+			Stderr string `json:"stderr"`
+		}
+		if json.Unmarshal([]byte(line), &d) == nil && d.Fake != "" {
+			switch d.Fake {
+			case "sleep":
+				time.Sleep(time.Duration(d.MS) * time.Millisecond)
+			case "hang":
+				time.Sleep(time.Hour)
+			case "exit":
+				if d.Stderr != "" {
+					fmt.Fprintln(os.Stderr, d.Stderr)
+				}
+				os.Exit(d.Code)
+			}
+			continue
+		}
+		out(line)
+	}
 }

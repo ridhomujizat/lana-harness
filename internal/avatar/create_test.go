@@ -101,27 +101,38 @@ func TestCreateLocalWithoutLLM(t *testing.T) {
 	}
 }
 
-// REQ-PXA-007: an agent with only a background-less Claude Code config still
-// draws locally.
-func TestCreateLocalWithoutBackground(t *testing.T) {
+// Spec 78 REQ-RPR-009: an agent with only a Claude Code model draws with it
+// (the router runs its CLI); with no chain at all it draws locally.
+func TestCreateWithAgentClaudeCode(t *testing.T) {
 	r := &fakeRouter{known: map[string]bool{"claude-code": true}}
-	got, err := Create(context.Background(), r, Request{Config: core.AgentConfig{Model: "claude-code/opus"}, Mode: ModeAIParts, Seed: 5})
+	if _, err := Create(context.Background(), r, Request{Config: core.AgentConfig{Model: "claude-code/opus"}, Mode: ModeAIParts, Seed: 5}); err != nil {
+		t.Fatal(err)
+	}
+	if len(r.metas) == 0 || r.metas[0].Requested != "claude-code/opus" {
+		t.Fatalf("Create did not call the agent's model: %+v", r.metas)
+	}
+	r = &fakeRouter{known: map[string]bool{"claude-code": true}}
+	got, err := Create(context.Background(), r, Request{Mode: ModeAIParts, Seed: 5})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got.Source != SourceLocal {
-		t.Fatalf("Create = %+v", got)
-	}
-	if len(r.metas) != 0 {
-		t.Fatalf("Create called the model without a background target: %+v", r.metas)
+	if got.Source != SourceLocal || len(r.metas) != 0 {
+		t.Fatalf("Create = %+v metas %+v", got, r.metas)
 	}
 }
 
-// REQ-PXA-007: a requested Claude Code model is refused.
-func TestCreateRefusesClaudeCode(t *testing.T) {
-	r := &fakeRouter{known: map[string]bool{"claude-code": true, "deepseek": true}}
-	if _, err := Create(context.Background(), r, Request{Model: "claude-code/sonnet", Mode: ModeAIParts, Seed: 3}); !errors.Is(err, ErrClaudeCodeModel) {
-		t.Fatalf("claude-code model: %v", err)
+// Spec 78 REQ-RPR-008: a requested Claude Code or Antigravity model is
+// called through the router like any other (the router runs its CLI); an
+// unknown model is refused.
+func TestCreateExternalModel(t *testing.T) {
+	r := &fakeRouter{known: map[string]bool{"claude-code": true, "antigravity": true, "deepseek": true}}
+	for _, model := range []string{"claude-code/sonnet", "antigravity/gemini-4-neon-high"} {
+		if _, err := Create(context.Background(), r, Request{Model: model, Mode: ModeAIParts, Seed: 3}); errors.Is(err, ErrUnknownModel) {
+			t.Fatalf("%s: %v", model, err)
+		}
+	}
+	if len(r.metas) < 2 {
+		t.Fatalf("the external models were not called: %+v", r.metas)
 	}
 	if _, err := Create(context.Background(), r, Request{Model: "nope/x", Mode: ModeAIParts, Seed: 3}); !errors.Is(err, ErrUnknownModel) {
 		t.Fatalf("unknown model: %v", err)

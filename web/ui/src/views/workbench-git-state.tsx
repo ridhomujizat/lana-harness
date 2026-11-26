@@ -196,9 +196,14 @@ export function useWorkbenchGit({
     if (prev.id !== focused || !dir || dir === prev.dir || pinned) return;
      
     setNotice("Following " + (focusedInfo?.short ?? dir.slice(dir.lastIndexOf("/") + 1)));
+  }, [focused, focusedSession?.work_dir, focusedInfo?.short, pinned]);
+  /* The notice clears on its own timer: tied to the effect above, a late
+     focusedInfo load cancelled it and left an invisible notice in the header. */
+  useEffect(() => {
+    if (!notice) return;
     const t = setTimeout(() => setNotice(""), 2500);
     return () => clearTimeout(t);
-  }, [focused, focusedSession?.work_dir, focusedInfo?.short, pinned]);
+  }, [notice]);
 
   const shownPath = panelWorktree(pinned, chosen ?? (rootMode ? undefined : focusedInfo?.worktree), null);
   const shown = infoOfDir(shownPath) ?? (focusedInfo && focusedInfo.worktree === shownPath ? focusedInfo : undefined) ?? inSpace.find((w) => w.info.worktree === shownPath)?.info ?? null;

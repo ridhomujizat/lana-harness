@@ -682,8 +682,8 @@ func (s *Server) handlePatchSession(w http.ResponseWriter, r *http.Request) {
 	if body.ReasoningEffort != nil {
 		effort := strings.TrimSpace(*body.ReasoningEffort)
 		// An empty value clears the session effort (REQ-MDL-001).
-		if effort != "" && !validReasoningEffort(effort) {
-			writeAPIError(w, http.StatusBadRequest, "invalid_request", "reasoning_effort must be one of off, low, high, max")
+		if !validReasoningEffort(effort) {
+			writeAPIError(w, http.StatusBadRequest, "invalid_request", reasoningEffortProblem)
 			return
 		}
 		body.ReasoningEffort = &effort

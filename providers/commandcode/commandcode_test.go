@@ -115,7 +115,8 @@ func TestStreamRequestAndEvents(t *testing.T) {
 	if params["max_tokens"] != float64(maxTokensLimit) {
 		t.Errorf("max_tokens = %v, want clamp %d", params["max_tokens"], maxTokensLimit)
 	}
-	if params["temperature"] != 0.7 || params["reasoning_effort"] != "high" {
+	// Spec 76: a level the wire takes is sent as is (max was high before).
+	if params["temperature"] != 0.7 || params["reasoning_effort"] != "max" {
 		t.Errorf("temperature/effort = %v/%v", params["temperature"], params["reasoning_effort"])
 	}
 	tools := params["tools"].([]any)
@@ -223,6 +224,15 @@ func TestBuildEnvelopeReasoningEffort(t *testing.T) {
 		t.Errorf("off body = %s", data)
 	}
 
+	// Spec 76 REQ-MES-003: a level the wire takes is sent as is; any other
+	// value sends nothing.
+	for effort, want := range map[string]string{"low": "low", "medium": "medium", "high": "high", "xhigh": "xhigh", "max": "max", "minimal": ""} {
+		got := buildEnvelope(core.ChatRequest{Model: "m", ReasoningEffort: effort, Messages: []core.Message{userText("hi")}}, now)
+		if got.Params.ReasoningEffort != want {
+			t.Errorf("effort %s sent %q, want %q", effort, got.Params.ReasoningEffort, want)
+		}
+	}
+
 	none := buildEnvelope(core.ChatRequest{Model: "m", Messages: []core.Message{userText("hi")}}, now)
 	data, _ = json.Marshal(none)
 	if strings.Contains(string(data), "reasoning_effort") {
@@ -310,19 +320,64 @@ func TestStreamHTTPErrorRedactsKey(t *testing.T) {
 
 func TestListModels(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path != "/provider/v1/models" {
+		if r.URL.Path != "/provider/v1/models" || r.URL.Query().Get("view") != "client" {
 			http.NotFound(w, r)
 			return
 		}
-		_, _ = io.WriteString(w, `{"object":"list","data":[{"id":"deepseek/deepseek-v4-pro","name":"DeepSeek V4 Pro","context_length":1000000},{"id":""}]}`)
+		_, _ = io.WriteString(w, `{"object":"list","data":[{"id":"deepseek/deepseek-v4-pro","name":"DeepSeek V4 Pro","context_length":1000000,"reasoningEfforts":["off","high","max"]},{"id":""},{"id":"secret/x","hidden":true,"reasoningEfforts":["low"]},{"id":"moonshotai/Kimi-K2.6","reasoningEfforts":null}]}`)
 	}))
 	defer srv.Close()
 	models, err := newTestAdapter(t, srv.URL).ListModels(context.Background())
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(models) != 1 || models[0].ID != "deepseek/deepseek-v4-pro" || models[0].ContextWindow != 1000000 {
+	if len(models) != 2 || models[0].ID != "deepseek/deepseek-v4-pro" || models[0].ContextWindow != 1000000 ||
+		strings.Join(models[0].Efforts, ",") != "off,high,max" || models[1].Efforts != nil {
 		t.Fatalf("models = %+v", models)
+	}
+}
+
+// Spec 76 REQ-MES-002/003: Command Code's models carry their own effort
+// levels, and Stream sends a listed level as is and no field for any other.
+func TestStreamSendsListedEffort(t *testing.T) {
+	var sent []any
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/provider/v1/models" {
+			_, _ = io.WriteString(w, `{"data":[{"id":"deepseek/deepseek-v4-pro","reasoningEfforts":["off","high","max"]},{"id":"google/gemini-4-neon","reasoningEfforts":["low","medium","high","xhigh"]},{"id":"moonshotai/Kimi-K2.6","reasoningEfforts":null}]}`)
+			return
+		}
+		var body map[string]any
+		_ = json.NewDecoder(r.Body).Decode(&body)
+		params, _ := body["params"].(map[string]any)
+		sent = append(sent, params["reasoning_effort"])
+		_, _ = io.WriteString(w, ndjson(`{"type":"text-delta","text":"ok"}`, `{"type":"finish","finishReason":"stop"}`))
+	}))
+	defer srv.Close()
+	a := newTestAdapter(t, srv.URL)
+	if _, err := a.ListModels(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	cases := []struct {
+		model, effort string
+		want          any
+	}{
+		{"deepseek/deepseek-v4-pro", "max", "max"},
+		{"deepseek/deepseek-v4-pro", "medium", nil},
+		{"google/gemini-4-neon", "xhigh", "xhigh"},
+		{"google/gemini-4-neon", "max", nil},
+		{"moonshotai/Kimi-K2.6", "high", nil},
+		{"moonshotai/Kimi-K2.6", "off", "off"},
+		{"unlisted/model", "medium", "medium"},
+	}
+	for _, tc := range cases {
+		sent = nil
+		req := core.ChatRequest{Model: tc.model, ReasoningEffort: tc.effort, Messages: []core.Message{userText("hi")}}
+		if _, err := collect(t, mustStream(t, a, req)); err != nil {
+			t.Fatal(err)
+		}
+		if len(sent) != 1 || sent[0] != tc.want {
+			t.Errorf("%s/%s sent %v, want %v", tc.model, tc.effort, sent, tc.want)
+		}
 	}
 }
 
@@ -353,5 +408,34 @@ func TestKindRegisteredWithDefaultKeyEnv(t *testing.T) {
 	}
 	if auth != "Bearer "+testKey {
 		t.Errorf("Authorization = %q, want key from CMD_CODE_API_KEY", auth)
+	}
+}
+
+// spec 75: HTTP 402 and an insufficient-balance message are quota.
+func TestQuotaClass(t *testing.T) {
+	for _, tc := range []struct {
+		status  int
+		message string
+		want    string
+	}{
+		{402, "", core.ErrorClassQuota},
+		{400, "Insufficient balance on your account", core.ErrorClassQuota},
+		{429, "quota exceeded", core.ErrorClassQuota},
+		{429, "slow down", "rate_limit"},
+		{401, "insufficient balance", "auth"},
+	} {
+		if got := classOf(tc.status, tc.message); got != tc.want {
+			t.Errorf("classOf(%d, %q) = %s, want %s", tc.status, tc.message, got, tc.want)
+		}
+	}
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusPaymentRequired)
+		_, _ = io.WriteString(w, `{"error":"payment required"}`)
+	}))
+	defer srv.Close()
+	_, err := newTestAdapter(t, srv.URL).Stream(context.Background(), core.ChatRequest{Model: "m"})
+	var pe *core.ProviderError
+	if !errors.As(err, &pe) || pe.Class != core.ErrorClassQuota || pe.Status != 402 {
+		t.Fatalf("err = %v", err)
 	}
 }

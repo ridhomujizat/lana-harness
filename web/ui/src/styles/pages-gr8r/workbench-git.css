@@ -314,6 +314,22 @@
   width: 330px;
 }
 
+/* A narrow panel: under the picker the menu would run past the panel's
+   left edge and be cut off, so it hangs from the panel's right edge instead,
+   below the header, and never wider than the panel. */
+@container wbg-panel (max-width: 560px) {
+  .wbg-panel:not(.wbg-sheet) .wbg-picker-wrap {
+    position: static;
+  }
+
+  .wbg-panel:not(.wbg-sheet) .wbg-picker-menu {
+    top: 44px;
+    right: 8px;
+    width: min(330px, calc(100% - 16px));
+    min-width: 0;
+  }
+}
+
 .wbg-menu-item {
   display: flex;
   align-items: center;
@@ -1944,7 +1960,15 @@ tr.is-target > .wbg-ln {
 }
 
 .wb-page:not(.wb-phone) > .wb-main {
+  flex-basis: 0;
   min-width: 380px;
+}
+
+/* A width saved on a wider window never pushes the panel past the page
+   edge (and its header buttons out of sight): side by side, the terminals
+   give way down to their 380 px first, then the panel narrows. */
+.wb-page:not(.wb-phone) > .wbg-panel:not(.is-max) {
+  flex-shrink: 1;
 }
 
 @container wb-page (max-width: 1180px) {
@@ -2679,6 +2703,10 @@ html[data-shell="macos-app"]:not([data-shell-fullscreen]) .wbg-panel.wbg-sheet.i
 }
 
 .wbr-notice {
+  flex: 0 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
   height: 22px;
   margin-right: 6px;
   padding: 0 9px;
