@@ -3,6 +3,7 @@ import { useEffect, useState } from "react";
 import { errorMessage } from "../api/client";
 import { getAgentHook, setAgentHook, type AgentHookFolder, type AgentHookState } from "../api/workbench";
 import { Button, Skeleton, Toggle } from "../ui/gr8r";
+import { WorkbenchCoreRow } from "./workbench-core";
 
 /* Spec 69 / spec 77 REQ-WRA-009: the Workbench hooks Lana adds to Claude Code
    and Antigravity (SessionStart and the pre-edit hook), so an agent knows it
@@ -36,7 +37,8 @@ export function agentHookSummary(state: AgentHookState): string {
 /* Settings > General > Workbench: the hook switch with the folder count, and
    Install while a folder lacks the hooks (the Workbench notice's action, so
    the owner can install here after dismissing the notice there). A folder
-   that could not be updated is listed under the row. */
+   that could not be updated is listed under the row. The Workbench core row
+   with Restart Workbench follows (spec 84). */
 export function SettingsWorkbenchSection() {
   const [state, setState] = useState<AgentHookState | null>(null);
   const [loadError, setLoadError] = useState("");
@@ -118,6 +120,8 @@ export function SettingsWorkbenchSection() {
     <section className="sblock" aria-labelledby="settings-workbench-title">
       <h2 id="settings-workbench-title">Workbench</h2>
       {body}
+      {/* Spec 84 REQ-WBR-005: the core's version and Restart Workbench. */}
+      <WorkbenchCoreRow />
     </section>
   );
 }

@@ -27,6 +27,7 @@ import {
   SWITCH_SAME_ACCOUNT,
   type AccountActions,
 } from "./workbench-accounts";
+import { SWITCH_CORE_OUTDATED } from "./workbench-core";
 
 /* Spec 77 (REQ-WRA-003/004/005): the Workbench Accounts popup reads the
    Router's Claude Code and Antigravity accounts; no claude-swap. */
@@ -369,6 +370,39 @@ describe("AccountsPanel: Claude Code", () => {
     fireEvent.click(within(row("Work")).getByRole("button", { name: /Open in a new tab/ }));
     expect(a.newTab).toHaveBeenCalledWith(accountLine(work), undefined, "claude-work");
     expect(onClose).toHaveBeenCalledTimes(1);
+  });
+
+  /* Spec 84 REQ-WBR-006: with an outdated core Switch here says to restart
+     the Workbench, and the popup offers the restart. */
+  it("says to restart the Workbench when the core is outdated", async () => {
+    const restartWorkbench = vi.fn();
+    const onClose = vi.fn();
+    render(
+      <AccountsPanel actions={{ ...actions(pane()), coreOutdated: true, restartWorkbench }} onClose={onClose} />,
+    );
+    await screen.findByText("Home");
+    const button = within(row("Work")).getByRole("button", { name: /Switch here/ }) as HTMLButtonElement;
+    expect(button.title).toBe(SWITCH_CORE_OUTDATED);
+    expect(button.disabled).toBe(true);
+    fireEvent.click(button);
+    expect(workbench.switchWorkbenchAccount).not.toHaveBeenCalled();
+
+    fireEvent.click(screen.getByRole("button", { name: /Restart Workbench/ }));
+    expect(onClose).toHaveBeenCalledTimes(1);
+    expect(restartWorkbench).toHaveBeenCalledTimes(1);
+  });
+
+  it("offers Restart Workbench next to New tab after a core_outdated refusal", async () => {
+    vi.mocked(workbench.switchWorkbenchAccount).mockRejectedValueOnce(
+      new ApiError(409, "core_outdated", "Restart the Workbench to switch accounts in place"),
+    );
+    const restartWorkbench = vi.fn();
+    render(<AccountsPanel actions={{ ...actions(pane()), restartWorkbench }} onClose={() => {}} />);
+    await screen.findByText("Home");
+    expect(screen.queryByRole("button", { name: /Restart Workbench/ })).toBeNull();
+    fireEvent.click(within(row("Work")).getByRole("button", { name: /Switch here/ }));
+    fireEvent.click(await within(row("Work")).findByRole("button", { name: /Restart Workbench/ }));
+    expect(restartWorkbench).toHaveBeenCalledTimes(1);
   });
 
   it("switchBlocked gives the reason Switch here is off", () => {

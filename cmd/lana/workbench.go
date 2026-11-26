@@ -34,6 +34,9 @@ func cmdWorkbench(args []string) int {
 	switch args[0] {
 	case "serve":
 		fmt.Fprintf(os.Stderr, "workbench: serving on %s\n", filepath.Join(workbench.Dir(home), "core.sock"))
+		// Spec 84 REQ-WBR-001: the Hello carries this binary's build, so the
+		// daemon can tell a core started by an older Lana.
+		workbench.SetBuild(version, commit)
 		if err := workbench.Serve(context.Background(), home); err != nil {
 			return fail(err, 1)
 		}

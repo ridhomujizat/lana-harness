@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"io"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/ridhomujizat/lana-harness/internal/workbench"
@@ -27,12 +28,84 @@ type workbenchBackend struct {
 	// installs a live one. The Workbench notification watcher uses it to
 	// subscribe to a core the browser started (spec 55 A5).
 	onLive func(*workbench.Client)
+
+	// daemonVersion and daemonCommit are the daemon's build, which a core is
+	// compared with (spec 84 REQ-WBR-002).
+	daemonVersion, daemonCommit string
+	// restarting is set while RestartCore runs (spec 84 REQ-WBR-003).
+	restarting atomic.Bool
+	// restartCore replaces the core; tests swap it.
+	restartCore func(ctx context.Context, home string) (*workbench.Client, error)
 }
 
-var _ web.WorkbenchBackend = (*workbenchBackend)(nil)
+var (
+	_ web.WorkbenchBackend     = (*workbenchBackend)(nil)
+	_ web.WorkbenchCoreControl = (*workbenchBackend)(nil)
+)
 
 func newWorkbenchBackend(home string) *workbenchBackend {
-	return &workbenchBackend{home: home}
+	return &workbenchBackend{
+		home:          home,
+		daemonVersion: version,
+		daemonCommit:  commit,
+		restartCore:   workbench.RestartCore,
+	}
+}
+
+// CoreInfo reports the running core and whether it is older than the daemon
+// (spec 84 REQ-WBR-002). It dials a connection of its own and never starts a
+// core: with none answering, running is false.
+func (b *workbenchBackend) CoreInfo(ctx context.Context) (web.WorkbenchCore, error) {
+	client, err := workbench.Dial(ctx, b.home)
+	if err != nil {
+		return web.NewWorkbenchCore(false, "", "", b.daemonVersion, b.daemonCommit, 0), nil
+	}
+	defer func() { _ = client.Close() }()
+	return b.describe(ctx, client)
+}
+
+// describe reads a core's Hello and its pane count.
+func (b *workbenchBackend) describe(ctx context.Context, client *workbench.Client) (web.WorkbenchCore, error) {
+	h, err := client.Hello(ctx)
+	if err != nil {
+		return web.WorkbenchCore{}, err
+	}
+	list, err := client.List(ctx)
+	if err != nil {
+		return web.WorkbenchCore{}, err
+	}
+	return web.NewWorkbenchCore(true, h.AppVersion, h.Commit, b.daemonVersion, b.daemonCommit, len(list)), nil
+}
+
+// RestartCore stops the core and starts a new one from the daemon's binary
+// (spec 84 REQ-WBR-003). It holds the client lock throughout, so the other
+// Workbench calls wait for the new core instead of starting one of their own;
+// a second restart meanwhile is refused.
+func (b *workbenchBackend) RestartCore(ctx context.Context) (web.WorkbenchCore, error) {
+	if !b.restarting.CompareAndSwap(false, true) {
+		return web.WorkbenchCore{}, web.ErrWorkbenchRestartRunning
+	}
+	defer b.restarting.Store(false)
+
+	b.mu.Lock()
+	old := b.client
+	b.client = nil
+	client, err := b.restartCore(ctx, b.home)
+	if err == nil {
+		b.client = client
+	}
+	hook := b.onLive
+	b.mu.Unlock()
+	if old != nil {
+		_ = old.Close()
+	}
+	if err != nil {
+		return web.WorkbenchCore{}, err
+	}
+	if hook != nil {
+		hook(client)
+	}
+	return b.describe(ctx, client)
 }
 
 // setOnLive installs the hook the backend calls with a live client (spec 55

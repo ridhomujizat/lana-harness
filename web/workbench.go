@@ -144,6 +144,8 @@ func (s *Server) registerWorkbenchRoutes() {
 	s.registerWorkbenchFigcraftRoutes()
 	// The Claude Code chat routes of spec 71 (REQ-WC-040).
 	s.registerWorkbenchChatRoutes()
+	// The core status and restart of spec 84 (REQ-WBR-002, REQ-WBR-003).
+	s.registerWorkbenchCoreRoutes()
 }
 
 // handleWorkbenchList serves the GET of REQ-WB-040.
