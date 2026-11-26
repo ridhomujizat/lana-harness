@@ -118,6 +118,13 @@ type providerJSON struct {
 	// Keys are an API provider's keys in use order (spec 75 REQ-PAF-005):
 	// api_key_env first, then api_key_envs. Secret names only.
 	Keys []providerKeyJSON `json:"keys,omitempty"`
+	// Priority, Pool, and PoolGroup place an API connection in its
+	// connection pool (spec 80 REQ-ACP-004): its priority (default 100),
+	// false only with pool = false, and a group equal for two connections
+	// exactly when they share kind and effective base URL.
+	Priority  *int   `json:"priority,omitempty"`
+	Pool      *bool  `json:"pool,omitempty"`
+	PoolGroup string `json:"pool_group,omitempty"`
 }
 
 // providerKeyJSON is one key of an API provider (spec 75): its secret name,
@@ -194,7 +201,8 @@ type providerRecord struct {
 	// Home is the HOME of an Antigravity account (API-AGY-002).
 	Home string
 	// Priority and Pool are the pool settings of a subscription account
-	// (spec 75 REQ-PAF-001); nil keeps the default.
+	// (spec 75 REQ-PAF-001) or an API connection (spec 80 REQ-ACP-002); nil
+	// keeps the default.
 	Priority *int
 	Pool     *bool
 	// APIKeyEnvs are the backup keys of an API provider (REQ-PAF-005).
@@ -329,6 +337,7 @@ func (s *Server) handleListProviders(w http.ResponseWriter, r *http.Request) {
 		default:
 			// Spec 75: the key pool in use order, secret names only.
 			row.Keys = s.providerKeys(name, record, secretValues)
+			row.Priority, row.Pool, row.PoolGroup = connectionPoolFields(record)
 		}
 		response.Providers = append(response.Providers, row)
 	}
@@ -960,6 +969,8 @@ func renderProviderTable(name string, record providerRecord) string {
 	if record.Disabled {
 		b.WriteString("disabled = true\n")
 	}
+	// Spec 80 (REQ-ACP-002): the connection's place in its pool.
+	writeProviderPool(&b, record)
 	return b.String()
 }
 
@@ -975,8 +986,9 @@ func writeProviderStrings(b *strings.Builder, key string, values []string) {
 	fmt.Fprintf(b, "%s = [%s]\n", key, strings.Join(parts, ", "))
 }
 
-// writeProviderPool writes the pool keys of a subscription account (spec 75):
-// priority when set, and pool = false when it is out of the pool.
+// writeProviderPool writes the pool keys of a subscription account (spec 75)
+// or an API connection (spec 80): priority when set, and pool = false when it
+// is out of the pool.
 func writeProviderPool(b *strings.Builder, record providerRecord) {
 	if record.Priority != nil {
 		fmt.Fprintf(b, "priority = %d\n", *record.Priority)

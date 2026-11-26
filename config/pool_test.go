@@ -71,8 +71,9 @@ func TestPoolConfigRules(t *testing.T) {
 		{"pool type", claude + "pool = \"no\"\n", "providers.cw.pool", "boolean"},
 		{"builtin priority negative", "[providers.antigravity]\nkind = \"antigravity\"\npriority = -5\n", "providers.antigravity.priority", "0 or more"},
 		{"builtin pool type", "[providers.claude-code]\nkind = \"claude-code\"\npool = 1\n", "providers.claude-code.pool", "boolean"},
-		{"priority on api kind", ds + "priority = 1\n", "providers.ds.priority", "allowed only for kind claude-code or antigravity"},
-		{"pool on api kind", ds + "pool = false\n", "providers.ds.pool", "allowed only for kind claude-code or antigravity"},
+		{"priority negative on api kind", ds + "priority = -1\n", "providers.ds.priority", "0 or more"},
+		{"priority type on api kind", ds + "priority = \"1\"\n", "providers.ds.priority", "integer"},
+		{"pool type on api kind", ds + "pool = \"no\"\n", "providers.ds.pool", "boolean"},
 		{"api_key_envs on claude", claude + "api_key_envs = [\"K2\"]\n", "providers.cw.api_key_envs", "not allowed for kind claude-code"},
 		{"api_key_envs on agy", agy + "api_key_envs = [\"K2\"]\n", "providers.agy.api_key_envs", "not allowed for kind antigravity"},
 		{"api_key_envs type", ds + "api_key_envs = \"K2\"\n", "providers.ds.api_key_envs", "array"},
@@ -100,6 +101,23 @@ func TestAPIKeyEnvsAllowedKinds(t *testing.T) {
 			table := "[providers.p]\nkind = \"" + kind + "\"\nbase_url = \"https://example.test/v1\"\napi_key_env = \"K1\"\napi_key_envs = [\"K2\"]\n"
 			if _, err := loadAgentKeys(t, table); err != nil {
 				t.Fatalf("load: %v", err)
+			}
+		})
+	}
+}
+
+// Spec 80 (REQ-ACP-002): every API kind accepts priority and pool.
+func TestAPIConnectionPoolKeysLoad(t *testing.T) {
+	for _, kind := range apiKeyPoolKinds {
+		t.Run(kind, func(t *testing.T) {
+			table := "[providers.p]\nkind = \"" + kind + "\"\nbase_url = \"https://example.test/v1\"\napi_key_env = \"K1\"\npriority = 10\npool = false\n"
+			res, err := loadAgentKeys(t, table)
+			if err != nil {
+				t.Fatalf("load: %v", err)
+			}
+			pc := res.Config.Providers["p"]
+			if pc.Priority == nil || *pc.Priority != 10 || pc.InPool() {
+				t.Fatalf("p = %+v", pc)
 			}
 		})
 	}

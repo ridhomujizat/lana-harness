@@ -14,7 +14,7 @@ import { Alert, SettingsRestartBanner, StatusLine, markSettingsSaved } from "../
 import { ClaudeCodeDetail } from "./claude-code-page";
 import { AntigravityDetail } from "./antigravity-page";
 import { ConnectionDialog } from "./connection-dialog";
-import { AccountOrderList } from "./account-order";
+import { AccountOrderList, POOL_TERMS_NOTE } from "./account-order";
 import { LimitCard } from "./limits";
 import { ProviderModelsPanel } from "./models";
 import { ANTIGRAVITY_ID, CLAUDE_CODE_ID, cardIdFor, presetById } from "./presets";
@@ -322,21 +322,7 @@ export function KeysPanel({
 
 type RowTest = { busy: boolean; ok?: boolean; text?: string };
 
-function ConnectionRow({
-  row,
-  defaultBase,
-  busy,
-  test,
-  confirming,
-  onToggle,
-  onTest,
-  onEdit,
-  onAskDelete,
-  onCancelDelete,
-  onDelete,
-}: {
-  row: ProviderRow;
-  defaultBase: string;
+interface ConnectionHandlers {
   busy: boolean;
   test: RowTest | undefined;
   confirming: boolean;
@@ -346,71 +332,124 @@ function ConnectionRow({
   onAskDelete: () => void;
   onCancelDelete: () => void;
   onDelete: () => void;
-}) {
+}
+
+/* The key and base URL line of a connection. */
+function ConnectionMeta({ row, defaultBase }: { row: ProviderRow; defaultBase: string }) {
   const key = keyState(row);
   const base = row.base_url && row.base_url !== defaultBase ? row.base_url : "";
+  return (
+    <span className="rt-conn-meta">
+      {row.api_key_env ? <code className="mono">{row.api_key_env}</code> : null}
+      <Badge tone={key.tone} dot>
+        {key.label}
+      </Badge>
+      {key.note ? <span className="hint">{key.note}</span> : null}
+      {base ? <span className="mono trunc rt-conn-base">{base}</span> : null}
+    </span>
+  );
+}
+
+/* The last connection test of a row. */
+function ConnectionTest({ test }: { test: RowTest | undefined }) {
+  if (!test || test.busy || !test.text) {
+    return null;
+  }
+  return (
+    <span className={"rt-test " + (test.ok ? "ok" : "bad")} role="status">
+      <Ic name={test.ok ? "circle-check" : "circle-alert"} size={12} /> {test.text}
+    </span>
+  );
+}
+
+/* The buttons of a connection: on/off, Test, Edit, Delete, or the delete
+   confirm. */
+function ConnectionActions({ row, handlers }: { row: ProviderRow; handlers: ConnectionHandlers }) {
+  const { busy, test, confirming } = handlers;
+  const enabled = !row.disabled;
+  if (confirming) {
+    return (
+      <>
+        <span className="hint">Delete {row.name}?</span>
+        <Button size="sm" variant="ghost" disabled={busy} onClick={handlers.onCancelDelete}>
+          Keep
+        </Button>
+        <Button size="sm" variant="danger" loading={busy} disabled={busy} onClick={handlers.onDelete}>
+          Delete
+        </Button>
+      </>
+    );
+  }
+  return (
+    <>
+      <label className="rt-conn-toggle">
+        <Toggle aria-label={"Use " + row.name} checked={enabled} disabled={busy} onChange={handlers.onToggle} />
+        <span className="hint">{enabled ? "On" : "Off"}</span>
+      </label>
+      <Button
+        size="sm"
+        variant="ghost"
+        icon="plug"
+        loading={Boolean(test && test.busy)}
+        disabled={busy || Boolean(test && test.busy)}
+        aria-label={"Test " + row.name}
+        onClick={handlers.onTest}
+      >
+        Test
+      </Button>
+      <IconButton icon="pencil" size="sm" label={"Edit " + row.name} disabled={busy} onClick={handlers.onEdit} />
+      <IconButton icon="trash-2" size="sm" label={"Delete " + row.name} disabled={busy} onClick={handlers.onAskDelete} />
+    </>
+  );
+}
+
+function ConnectionRow({
+  row,
+  defaultBase,
+  handlers,
+}: {
+  row: ProviderRow;
+  defaultBase: string;
+  handlers: ConnectionHandlers;
+}) {
   const enabled = !row.disabled;
   return (
     <li className={"rt-conn" + (enabled ? "" : " is-off")} aria-label={"Connection " + row.name}>
       <div className="rt-conn-main">
         <span className="rt-conn-name mono">{row.name}</span>
-        <span className="rt-conn-meta">
-          {row.api_key_env ? <code className="mono">{row.api_key_env}</code> : null}
-          <Badge tone={key.tone} dot>
-            {key.label}
-          </Badge>
-          {key.note ? <span className="hint">{key.note}</span> : null}
-          {base ? <span className="mono trunc rt-conn-base">{base}</span> : null}
-        </span>
+        <ConnectionMeta row={row} defaultBase={defaultBase} />
         <span className="rt-conn-users">
           <UsedBy usedBy={row.used_by} />
         </span>
-        {test && !test.busy && test.text ? (
-          <span className={"rt-test " + (test.ok ? "ok" : "bad")} role="status">
-            <Ic name={test.ok ? "circle-check" : "circle-alert"} size={12} /> {test.text}
-          </span>
-        ) : null}
+        <ConnectionTest test={handlers.test} />
       </div>
       <div className="rt-conn-acts">
-        {confirming ? (
-          <>
-            <span className="hint">Delete {row.name}?</span>
-            <Button size="sm" variant="ghost" disabled={busy} onClick={onCancelDelete}>
-              Keep
-            </Button>
-            <Button size="sm" variant="danger" loading={busy} disabled={busy} onClick={onDelete}>
-              Delete
-            </Button>
-          </>
-        ) : (
-          <>
-            <label className="rt-conn-toggle">
-              <Toggle
-                aria-label={"Use " + row.name}
-                checked={enabled}
-                disabled={busy}
-                onChange={onToggle}
-              />
-              <span className="hint">{enabled ? "On" : "Off"}</span>
-            </label>
-            <Button
-              size="sm"
-              variant="ghost"
-              icon="plug"
-              loading={Boolean(test && test.busy)}
-              disabled={busy || Boolean(test && test.busy)}
-              aria-label={"Test " + row.name}
-              onClick={onTest}
-            >
-              Test
-            </Button>
-            <IconButton icon="pencil" size="sm" label={"Edit " + row.name} disabled={busy} onClick={onEdit} />
-            <IconButton icon="trash-2" size="sm" label={"Delete " + row.name} disabled={busy} onClick={onAskDelete} />
-          </>
-        )}
+        <ConnectionActions row={row} handlers={handlers} />
       </div>
     </li>
   );
+}
+
+/* Spec 80 (REQ-ACP-005): the note under the connections of one pool. */
+export const CONNECTION_POOL_NOTE =
+  "The top connection is used first. Lana moves to the next one when a connection runs out of credit, hits its rate limit, or its key is rejected. Turn off Use as backup to keep a connection for agents set to it.";
+
+/* The connections form one ordered pool when there are two or more and all
+   of them share one pool group (spec 80 REQ-ACP-005). A page whose
+   connections are in different groups, or a daemon that sends no group,
+   keeps the plain rows. */
+export function connectionsPooled(connections: ProviderRow[]): boolean {
+  if (connections.length < 2) {
+    return false;
+  }
+  const group = connections[0] ? connections[0].pool_group : "";
+  return Boolean(group) && connections.every((row) => row.pool_group === group);
+}
+
+/* Pool order: priority (default 100), then name, as the router sorts. */
+function poolOrder(connections: ProviderRow[]): ProviderRow[] {
+  const priority = (row: ProviderRow) => (typeof row.priority === "number" ? row.priority : 100);
+  return connections.slice().sort((a, b) => priority(a) - priority(b) || (a.name < b.name ? -1 : a.name > b.name ? 1 : 0));
 }
 
 function ApiProviderDetail({ id }: { id: string }) {
@@ -454,6 +493,7 @@ function ApiProviderDetail({ id }: { id: string }) {
   const version = data ? data.version : "";
   const label = preset ? preset.label : id;
   const status = cardStatus(connections);
+  const pooled = connectionsPooled(connections);
 
   function fail(failure: unknown, what: string) {
     if (isStale(failure)) {
@@ -519,6 +559,27 @@ function ApiProviderDetail({ id }: { id: string }) {
     } finally {
       setBusyRow("");
     }
+  }
+
+  /* Spec 80 (REQ-ACP-003): a drop saves the pool order at once. */
+  async function saveOrder(order: string[], unpooled: string[]) {
+    await routerApi.savePoolOrder("api", order, unpooled, version || undefined);
+    markSettingsSaved();
+    reload();
+  }
+
+  function handlersFor(row: ProviderRow): ConnectionHandlers {
+    return {
+      busy: busyRow === row.name,
+      test: tests[row.name],
+      confirming: confirm === row.name,
+      onToggle: (enabled) => void toggle(row, enabled),
+      onTest: () => void testRow(row),
+      onEdit: () => setDialog({ connection: row }),
+      onAskDelete: () => setConfirm(row.name),
+      onCancelDelete: () => setConfirm(""),
+      onDelete: () => void remove(row),
+    };
   }
 
   async function testRow(row: ProviderRow) {
@@ -622,7 +683,7 @@ function ApiProviderDetail({ id }: { id: string }) {
 
       <Panel
         title="Connections"
-        className="rt-conns-panel"
+        className={"rt-conns-panel" + (pooled ? " rt-conns-pooled" : "")}
         actions={
           custom || connections.length === 0 ? null : (
             <Button variant="primary" size="sm" icon="plus" disabled={!version} onClick={() => setDialog({ connection: null })}>
@@ -640,31 +701,44 @@ function ApiProviderDetail({ id }: { id: string }) {
               Connect {label}
             </Button>
           </div>
+        ) : pooled ? (
+          <AccountOrderList
+            label={label + " connections"}
+            noun="connection"
+            disabled={Boolean(busyRow)}
+            onSave={saveOrder}
+            items={poolOrder(connections).map((row) => {
+              const handlers = handlersFor(row);
+              return {
+                id: row.name,
+                label: row.name,
+                mono: true,
+                rowLabel: "Connection " + row.name,
+                rowClass: row.disabled ? "is-off" : undefined,
+                pool: row.pool !== false,
+                sub: (
+                  <>
+                    <ConnectionMeta row={row} defaultBase={defaultBase(row)} />
+                    <span className="rt-conn-users">
+                      <UsedBy usedBy={row.used_by} />
+                    </span>
+                  </>
+                ),
+                below: handlers.test && !handlers.test.busy && handlers.test.text ? <ConnectionTest test={handlers.test} /> : null,
+                rowActions: <ConnectionActions row={row} handlers={handlers} />,
+              };
+            })}
+          />
         ) : (
           <ul className="rt-conns">
             {connections.map((row) => (
-              <ConnectionRow
-                key={row.name}
-                row={row}
-                defaultBase={defaultBase(row)}
-                busy={busyRow === row.name}
-                test={tests[row.name]}
-                confirming={confirm === row.name}
-                onToggle={(enabled) => void toggle(row, enabled)}
-                onTest={() => void testRow(row)}
-                onEdit={() => setDialog({ connection: row })}
-                onAskDelete={() => setConfirm(row.name)}
-                onCancelDelete={() => setConfirm("")}
-                onDelete={() => void remove(row)}
-              />
+              <ConnectionRow key={row.name} row={row} defaultBase={defaultBase(row)} handlers={handlersFor(row)} />
             ))}
           </ul>
         )}
-        {connections.length > 1 ? (
-          <p className="hint rt-conn-note">
-            Each connection is its own provider name with its own key, for example two accounts. Put
-            them in a combo to fall back from one to the other.
-          </p>
+        {pooled ? <p className="hint rt-conn-note">{CONNECTION_POOL_NOTE}</p> : null}
+        {pooled && connections.filter((row) => row.pool !== false).length > 1 ? (
+          <p className="hint rt-conn-note">{POOL_TERMS_NOTE}</p>
         ) : null}
       </Panel>
 

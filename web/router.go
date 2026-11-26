@@ -374,6 +374,11 @@ type routerProviderJSON struct {
 	KeyState       string   `json:"key_state"`
 	UsedBy         []string `json:"used_by"`
 	Disabled       bool     `json:"disabled"`
+	// Priority, Pool, and PoolGroup are set for an API connection (spec 80
+	// REQ-ACP-004), as on GET /v1/providers.
+	Priority  *int   `json:"priority,omitempty"`
+	Pool      *bool  `json:"pool,omitempty"`
+	PoolGroup string `json:"pool_group,omitempty"`
 }
 
 // routerComboJSON is one combo row of GET /v1/router.
@@ -477,7 +482,7 @@ func (s *Server) handleRouterOverview(w http.ResponseWriter, r *http.Request) {
 	providers := sortedMapKeys(document.Providers)
 	for _, name := range providers {
 		record := providerRecordFromMap(document.Providers[name])
-		response.Providers = append(response.Providers, routerProviderJSON{
+		row := routerProviderJSON{
 			Name:           name,
 			Kind:           record.Kind,
 			BaseURL:        record.BaseURL,
@@ -485,7 +490,11 @@ func (s *Server) handleRouterOverview(w http.ResponseWriter, r *http.Request) {
 			KeyState:       providerKeyState(providerEffectiveKeyEnv(record, name), secretValues),
 			UsedBy:         document.agentsUsingProvider(name),
 			Disabled:       record.Disabled,
-		})
+		}
+		if isAPIConnection(record) {
+			row.Priority, row.Pool, row.PoolGroup = connectionPoolFields(record)
+		}
+		response.Providers = append(response.Providers, row)
 	}
 	for _, name := range sortedMapKeys(document.Combos) {
 		table := document.Combos[name]

@@ -4,6 +4,7 @@ import (
 	"sort"
 
 	"github.com/ridhomujizat/lana-harness/core"
+	"github.com/ridhomujizat/lana-harness/internal/models"
 )
 
 // Default pool priorities (REQ-PAF-001): the built-in account first, then
@@ -99,4 +100,61 @@ func poolPriority(runtime, name string, pc core.ProviderConfig) int {
 		return BuiltinPoolPriority
 	}
 	return AccountPoolPriority
+}
+
+// APIPool returns the connection pool of the API connection name, in pool
+// order (spec 80 REQ-ACP-001): the enabled API connections with name's kind
+// and effective base URL that do not set pool = false, sorted by priority
+// (lower first; default 100) then name. It returns nil when name is not an
+// enabled API connection in the pool, or when its pool has fewer than two
+// connections: its address then uses only name.
+func (r *Router) APIPool(name string) []string {
+	return r.snap.Load().apiPool(name)
+}
+
+// apiPool is APIPool on one snapshot.
+func (s *snapshot) apiPool(name string) []string {
+	entry, ok := s.providers[name]
+	if !ok || !entry.apiConnection() || entry.cfg.Disabled || !entry.cfg.InPool() {
+		return nil
+	}
+	group := models.PoolGroup(entry.kind, entry.cfg.BaseURL)
+	type member struct {
+		name     string
+		priority int
+	}
+	var list []member
+	for other, e := range s.providers {
+		if !e.apiConnection() || e.cfg.Disabled || !e.cfg.InPool() {
+			continue
+		}
+		if e.kind != entry.kind || models.PoolGroup(e.kind, e.cfg.BaseURL) != group {
+			continue
+		}
+		priority := AccountPoolPriority
+		if e.cfg.Priority != nil {
+			priority = *e.cfg.Priority
+		}
+		list = append(list, member{name: other, priority: priority})
+	}
+	if len(list) < 2 {
+		return nil
+	}
+	sort.Slice(list, func(i, j int) bool {
+		if list[i].priority != list[j].priority {
+			return list[i].priority < list[j].priority
+		}
+		return list[i].name < list[j].name
+	})
+	out := make([]string, len(list))
+	for i, m := range list {
+		out[i] = m.name
+	}
+	return out
+}
+
+// apiConnection reports whether the entry is an API connection of the
+// config (spec 80): not one added with WithProviders.
+func (e *providerEntry) apiConnection() bool {
+	return e != nil && !e.custom && e.kind != core.ClaudeCodeKind && e.kind != core.AntigravityKind
 }
