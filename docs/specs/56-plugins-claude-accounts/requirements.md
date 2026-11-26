@@ -1,6 +1,7 @@
 # Spec 56: Plugins and the Claude accounts plugin
 
 - **Status**: Approved (owner, 2026-11-17: "ada mode buat manage dan swap account claude code, terapkan di sini juga. tapi sistemnya instal tool dulu baru bisa pakai. page tool jadi tool & plugin")
+- **Superseded**: REQ-PLG-010..013 (the claude-swap plugin) by spec 77 (Workbench panes on the Router's Claude Code accounts), 2026-11-26.
 - **Branch**: `feature/workbench` (with spec 55)
 - **Reference**: the owner's herdr mod `~/.config/herdr-app/mods/claude-accounts` (wraps the `cswap` CLI of claude-swap).
 

@@ -2,7 +2,6 @@ package lana
 
 import (
 	"context"
-	"errors"
 	"os"
 	"path/filepath"
 	"strings"
@@ -122,38 +121,49 @@ tools = ["memory_read"]
 	}
 }
 
-// Spec 39 revision 5: a failure decision (diagnosis) is a structured call on
-// the guardian's background chain; without a background model it answers the
-// clear error and nothing runs.
-func TestWorkflowDiagnosisClaudeGuardianNeedsBackgroundModel(t *testing.T) {
+// Spec 78 REQ-RPR-009 (superseding spec 39 revision 5): a failure decision
+// (diagnosis) of a guardian on Claude Code runs as a Claude Code turn, with
+// no background model and no allow_scheduled; the API provider is not
+// called.
+func TestWorkflowDiagnosisClaudeGuardianRunsInClaudeCode(t *testing.T) {
 	bin := buildFakeClaude(t)
+	fixtures, err := filepath.Abs(filepath.Join("runtime", "claudecode", "testdata"))
+	if err != nil {
+		t.Fatal(err)
+	}
 	logPath := filepath.Join(t.TempDir(), "fake.jsonl")
 	t.Setenv("FAKECLAUDE_LOG", logPath)
+	t.Setenv("FAKECLAUDE_FIXTURE", filepath.Join(fixtures, "hi.jsonl"))
 	ds := newSSEServer(t)
 	rt, _ := routedRuntime(t, guardianClaudeConfig(bin, t.TempDir(), ds.server.URL, ""))
 	wf := newGuardianWorkflow(t, rt)
-	_, err := rt.WorkflowDeps().RunAgent(context.Background(), workflow.AgentRequest{
+	result, err := rt.WorkflowDeps().RunAgent(context.Background(), workflow.AgentRequest{
 		WorkflowID: wf.ID, NodeID: "n1", Agent: "bima", Prompt: "decide", Background: true,
 	})
-	var needs *workflow.GuardianBackgroundError
-	if !errors.As(err, &needs) || errors.Is(err, workflow.ErrGuardianUnavailable) {
-		t.Fatalf("diagnosis err = %v", err)
+	if err != nil || result.Text != "Hello there, friend!" {
+		t.Fatalf("diagnosis = %+v, err = %v", result, err)
 	}
-	const want = "The guardian bima runs on Claude Code. Set a background model in Router (or add an API model to its combo) so it can plan workflow changes."
-	if err.Error() != want {
-		t.Fatalf("message = %q", err.Error())
+	starts := fakeClaudeStarts(t, logPath)
+	if len(starts) != 1 || argAfter(starts[0], "--model") != "haiku" {
+		t.Fatalf("starts = %v", starts)
 	}
-	if n := claudeStartCount(t, logPath); n != 0 || ds.requests.Load() != 0 {
-		t.Fatalf("a call ran: claude starts %d, provider requests %d", n, ds.requests.Load())
+	if ds.requests.Load() != 0 {
+		t.Fatalf("the provider was called %d times", ds.requests.Load())
 	}
 }
 
-// A guardian whose combo has an API model runs its structured calls on that
-// model without [router] background_model.
-func TestWorkflowGuardianComboUsesAPIModel(t *testing.T) {
+// Spec 78 REQ-RPR-009: a guardian whose combo starts on Claude Code runs its
+// structured call there first; when Claude Code fails before any output
+// (not signed in), the turn moves on to the combo's API model.
+func TestWorkflowGuardianComboFallsBackToAPIModel(t *testing.T) {
 	bin := buildFakeClaude(t)
+	fixtures, err := filepath.Abs(filepath.Join("runtime", "claudecode", "testdata"))
+	if err != nil {
+		t.Fatal(err)
+	}
 	logPath := filepath.Join(t.TempDir(), "fake.jsonl")
 	t.Setenv("FAKECLAUDE_LOG", logPath)
+	t.Setenv("FAKECLAUDE_FIXTURE", filepath.Join(fixtures, "notloggedin.jsonl"))
 	ds := newSSEServer(t,
 		sseResponse{body: textSSE(`{"reply":"combo plan","graph":null}`)},
 		sseResponse{body: textSSE("[]")},
@@ -171,7 +181,7 @@ models = ["claude-code/haiku", "ds/deepseek-flash"]
 	if err != nil || !strings.Contains(result.Text, "combo plan") {
 		t.Fatalf("result = %+v, err = %v", result, err)
 	}
-	if n := claudeStartCount(t, logPath); n != 0 {
+	if n := claudeStartCount(t, logPath); n != 1 {
 		t.Fatalf("claude code started %d times", n)
 	}
 }

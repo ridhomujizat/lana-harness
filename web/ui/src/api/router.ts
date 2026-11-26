@@ -860,6 +860,9 @@ export interface AntigravityAccount {
   builtin: boolean;
   label: string;
   display_name: string;
+  /* The Google account's email; "" when agy has not reported it (spec 77
+     revision 4). */
+  email: string;
   home: string;
   binary: string;
   disabled: boolean;
@@ -935,12 +938,14 @@ function normalizeAgyAccount(value: Partial<AntigravityAccount> | null | undefin
   const entry = value || {};
   const name = String(entry.name || ANTIGRAVITY_PROVIDER);
   const label = String(entry.label || "");
+  const email = String(entry.email || "");
   const usage = (entry.usage_24h || {}) as Partial<AntigravityUsage>;
   return {
     name,
     builtin: entry.builtin === true,
     label,
-    display_name: String(entry.display_name || "") || label || name,
+    display_name: String(entry.display_name || "") || label || email || name,
+    email,
     home: String(entry.home || ""),
     binary: String(entry.binary || ""),
     disabled: entry.disabled === true,

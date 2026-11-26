@@ -65,6 +65,7 @@ type options struct {
 	sleep      func(context.Context, time.Duration) error
 	jitter     func() float64
 	providers  map[string]core.Provider
+	runtime    RuntimeStreamer
 }
 
 // WithSecrets sets the secret source of API keys.
@@ -123,6 +124,9 @@ type Router struct {
 	// reported through SetRuntimeModels (REQ-AGY-009).
 	agyModelsMu sync.Mutex
 	agyModels   map[string][]core.RuntimeModel
+	// runtime is the streamer of Claude Code and Antigravity targets (spec
+	// 78): WithRuntimeStreamer, or SetRuntimeStreamer later.
+	runtime atomic.Pointer[runtimeBox]
 }
 
 type providerEntry struct {
@@ -185,6 +189,7 @@ func New(cfg Config, opts ...Option) (*Router, error) {
 	r.cool.until = map[Target]time.Time{}
 	r.keyCool.until = map[string]time.Time{}
 	r.recorder.Store(&recorderBox{rec: r.opts.recorder})
+	r.runtime.Store(&runtimeBox{s: r.opts.runtime})
 	r.limits.init(r.opts.limitStore)
 	r.models.entries = map[string]modelCacheEntry{}
 	next, err := r.build(cfg, nil)

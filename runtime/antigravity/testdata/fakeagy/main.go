@@ -13,6 +13,18 @@
 //	FAKEAGY_SIGNED_OUT     "1" makes `models` print the signed-out error and exit 1
 //	FAKEAGY_USAGE          `-p /usage` prints this file
 //	FAKEAGY_LOGIN_CODE     `acp --login` succeeds only when stdin matches this
+//	FAKEAGY_LOGIN_EMAIL    a successful `acp --login` prints "Logged in as <this>."
+//	FAKEAGY_PROMPT         file of lines a router prompt run (spec 78: `-p`
+//	                       without /usage) prints; the default streams "Hi
+//	                       from agy" as step_update text deltas and ends with
+//	                       a SUCCESS result with usage. Directives:
+//	                       {"fake":"sleep","ms":100}, {"fake":"hang"},
+//	                       {"fake":"exit","code":3,"stderr":"text"}. Any other
+//	                       line is printed as it is (an "AGY_ERROR: …" line
+//	                       too).
+//
+// A prompt run records a line with kind "prompt": argv, the selected
+// environment, cwd, the stdin text, and the number of entries in cwd.
 //
 // The fixture is the recorded `agy acp` conversation. Each line is a one-line
 // JSON object the recorder wrote: {"dir":"send"|"recv","msg":{…}}, where
@@ -30,6 +42,7 @@ import (
 	"bufio"
 	"encoding/json"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
@@ -52,7 +65,7 @@ type rpcMsg struct {
 }
 
 // selectedEnv lists the environment variables the fake records.
-var selectedEnv = []string{"HOME", "USERPROFILE", "AGY_CLI_DISABLE_AUTO_UPDATE", "GEMINI_API_KEY", "GOOGLE_API_KEY"}
+var selectedEnv = []string{"HOME", "USERPROFILE", "AGY_CLI_DISABLE_AUTO_UPDATE", "GEMINI_API_KEY", "GOOGLE_API_KEY", "SSH_CONNECTION"}
 
 var (
 	logMu sync.Mutex
@@ -76,6 +89,8 @@ func main() {
 		runModels()
 	case isUsageArgs(args):
 		runUsage(args)
+	case len(args) >= 1 && args[0] == "--input-format":
+		runPrompt(args)
 	default:
 		fmt.Fprintf(os.Stderr, "fakeagy: unsupported args %v\n", args)
 		os.Exit(2)
@@ -137,7 +152,7 @@ func runUsage(argv []string) {
 
 // runLogin fakes `agy acp --login`: it prints the link and the code prompt,
 // reads one stdin line, records it, and exits 0 only when it matches
-// FAKEAGY_LOGIN_CODE.
+// FAKEAGY_LOGIN_CODE, after "Logged in as <FAKEAGY_LOGIN_EMAIL>." when set.
 func runLogin(argv []string) {
 	cwd, _ := os.Getwd()
 	logStart(argv, cwd)
@@ -152,6 +167,9 @@ func runLogin(argv []string) {
 	line := strings.TrimRight(sc.Text(), "\r")
 	writeRecord(map[string]any{"kind": "login", "line": line})
 	if line != "" && line == os.Getenv("FAKEAGY_LOGIN_CODE") {
+		if email := os.Getenv("FAKEAGY_LOGIN_EMAIL"); email != "" {
+			fmt.Printf("Logged in as %s.\n", email)
+		}
 		return
 	}
 	fmt.Fprintln(os.Stderr, "login failed: bad code")
@@ -360,4 +378,84 @@ func waitCancel(stdin <-chan json.RawMessage) {
 // hang blocks forever, keeping the process alive until it is killed.
 func hang() {
 	select {}
+}
+
+// defaultPrompt is the answer of a prompt run without FAKEAGY_PROMPT.
+// defaultPrompt is agy 1.5.17's stream-json output shape (captured live).
+var defaultPrompt = []string{
+	`{"event":"init","conversation_id":"c-1","init":{"cwd":"/tmp","permission_mode":"request-review"}}`,
+	`{"event":"step_update","step_update":{"conversation_id":"c-1","step_index":0,"state":"DONE","step_type":"user_input"}}`,
+	`{"event":"step_update","step_update":{"conversation_id":"c-1","step_index":1,"state":"ACTIVE","step_type":"agent_response","thinking_delta":"secret thoughts"}}`,
+	`{"event":"step_update","step_update":{"conversation_id":"c-1","step_index":1,"state":"ACTIVE","step_type":"agent_response","text_delta":"Hi"}}`,
+	`{"event":"step_update","step_update":{"conversation_id":"c-1","step_index":1,"state":"DONE","step_type":"agent_response","text_delta":" from agy"}}`,
+	`{"event":"result","result":{"conversation_id":"c-1","status":"SUCCESS","response":"Hi from agy","usage":{"input_tokens":20,"output_tokens":5,"thinking_tokens":7,"cache_read_tokens":4,"total_tokens":36}}}`,
+}
+
+// runPrompt fakes a router prompt run (spec 78): it reads the whole stdin,
+// records it, and prints the prompt lines.
+func runPrompt(argv []string) {
+	cwd, _ := os.Getwd()
+	raw, _ := io.ReadAll(os.Stdin)
+	// Like agy 1.5.17, the prompt is one stream-json input message.
+	var input struct {
+		Event   string `json:"event"`
+		Message struct {
+			Content string `json:"content"`
+		} `json:"message"`
+	}
+	stdin := raw
+	if json.Unmarshal(raw, &input) == nil && input.Event == "user" {
+		stdin = []byte(input.Message.Content)
+	}
+	entries, _ := os.ReadDir(cwd)
+	var env []string
+	for _, kv := range os.Environ() {
+		name, _, _ := strings.Cut(kv, "=")
+		for _, want := range selectedEnv {
+			if name == want {
+				env = append(env, kv)
+				break
+			}
+		}
+	}
+	writeRecord(map[string]any{"kind": "prompt", "argv": argv, "env": env, "cwd": cwd, "stdin": string(stdin), "cwd_entries": len(entries)})
+	lines := defaultPrompt
+	if path := os.Getenv("FAKEAGY_PROMPT"); path != "" {
+		data, err := os.ReadFile(path)
+		if err != nil {
+			fmt.Fprintln(os.Stderr, "fakeagy: "+err.Error())
+			os.Exit(2)
+		}
+		lines = nil
+		for _, line := range strings.Split(string(data), "\n") {
+			if strings.TrimSpace(line) != "" {
+				lines = append(lines, line)
+			}
+		}
+	}
+	for _, line := range lines {
+		var d struct {
+			Fake   string `json:"fake"`
+			MS     int    `json:"ms"`
+			Code   int    `json:"code"`
+			Stderr string `json:"stderr"`
+		}
+		if json.Unmarshal([]byte(line), &d) == nil && d.Fake != "" {
+			switch d.Fake {
+			case "sleep":
+				time.Sleep(time.Duration(d.MS) * time.Millisecond)
+			case "hang":
+				time.Sleep(time.Hour)
+			case "exit":
+				if d.Stderr != "" {
+					fmt.Fprintln(os.Stderr, d.Stderr)
+				}
+				os.Exit(d.Code)
+			}
+			continue
+		}
+		outMu.Lock()
+		fmt.Fprintln(os.Stdout, line)
+		outMu.Unlock()
+	}
 }

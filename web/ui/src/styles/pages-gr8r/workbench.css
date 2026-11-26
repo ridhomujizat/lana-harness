@@ -1717,7 +1717,7 @@ body.wb-resizing {
   font-size: var(--fs-xs);
 }
 
-/* Spec 56: Claude accounts plugin (tab-bar button, popover, phone sheet). */
+/* Spec 56: the Accounts tab-bar button. */
 .wb-acc-btn {
   display: inline-flex;
   flex: none;
@@ -1739,60 +1739,283 @@ body.wb-resizing {
   border-color: var(--border-strong);
 }
 
-.wb-acc-pop {
+.spin {
+  animation: wb-spin 1s linear infinite;
+}
+
+@keyframes wb-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+/* Spec 77 revision 4: the Accounts popup, in the model picker's visual
+   language. The title and search sit on top above a divider; the provider
+   groups scroll under them, each a section with a sticky heading (chevron,
+   logo, name, count pill, Manage) and a full-width divider between sections;
+   accounts are flat rows with hairline dividers; the hook switch is a footer
+   under its own divider. The popover does not scroll, the list does; in the
+   phone sheet the same panel fills the sheet. */
+.pop.wb-acc-pop,
+.pop.wb-acc-pop[popover] {
+  display: flex;
+  flex-direction: column;
+  width: 440px !important;
+  max-width: calc(100vw - 24px);
   max-height: min(680px, 80vh);
-  overflow-y: auto;
   padding: 0;
+  overflow: hidden;
 }
 
 .wb-acc {
   display: flex;
+  flex: 1 1 auto;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 0;
+}
+
+.wb-acc-top-bar {
+  display: flex;
+  flex: none;
   flex-direction: column;
   gap: 8px;
-  padding: 12px;
+  padding: 10px 12px;
+  border-bottom: 1px solid var(--divider);
 }
 
 .wb-acc-head {
   display: flex;
   align-items: center;
   gap: 8px;
+  min-width: 0;
+  padding: 0 2px;
+  color: var(--text-2);
+  white-space: nowrap;
 }
 
-.wb-acc-sub {
-  color: var(--text-4);
-  font-size: var(--fs-xs);
+.wb-acc-head b {
+  color: var(--text);
+  font-size: 14px;
+  font-weight: 600;
 }
 
-.wb-acc-error {
-  margin: 0;
-  color: var(--red);
-  font-size: var(--fs-sm);
+.wb-acc-search {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  height: 32px;
+  padding: 0 6px 0 10px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--surface-2);
+  color: var(--text-3);
+  transition: border-color var(--dur, 140ms) var(--ease, ease), background var(--dur, 140ms) var(--ease, ease);
 }
 
-.wb-acc-note {
-  margin: 0;
-  color: var(--text-4);
-  font-size: var(--fs-xs);
+.wb-acc-search:focus-within {
+  border-color: var(--border-strong);
+  background: var(--surface);
 }
 
+.wb-acc-search input {
+  flex: 1;
+  min-width: 0;
+  height: 100%;
+  padding: 0;
+  border: 0;
+  outline: none;
+  background: transparent;
+  color: var(--text);
+  font: inherit;
+  font-size: 13px;
+}
+
+.wb-acc-search input::placeholder {
+  color: var(--text-4, var(--text-3));
+}
+
+.wb-acc-search input::-webkit-search-cancel-button {
+  display: none;
+}
+
+.wb-acc-clear {
+  display: inline-grid;
+  flex: none;
+  place-items: center;
+  width: 22px;
+  height: 22px;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--text-3);
+  cursor: pointer;
+}
+
+.wb-acc-clear:hover {
+  background: var(--surface-3, var(--surface-2));
+  color: var(--text);
+}
+
+.wb-acc-scroll {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-x: hidden;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+
+.wb-acc-empty {
+  padding: 16px 14px;
+  text-align: center;
+}
+
+/* A provider section. */
+.wb-acc-group {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.wb-acc-group + .wb-acc-group {
+  border-top: 1px solid var(--divider);
+}
+
+.wb-acc-gh {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  min-height: 38px;
+  padding: 0 12px 0 6px;
+  background: var(--surface);
+}
+
+.wb-acc-group.is-open > .wb-acc-gh {
+  box-shadow: 0 1px 0 var(--divider);
+}
+
+.wb-acc-gh-toggle {
+  display: flex;
+  flex: 1 1 auto;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  height: 30px;
+  padding: 0 6px;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--text-2);
+  font: inherit;
+  font-size: var(--fs-2xs, 11px);
+  justify-content: flex-start;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-align: left;
+  text-transform: uppercase;
+  white-space: normal;
+  cursor: pointer;
+}
+
+.wb-acc-gh-toggle:hover,
+.wb-acc-gh-toggle:focus-visible {
+  background: var(--surface-2);
+  color: var(--text);
+  outline: none;
+}
+
+.wb-acc-gh-chev {
+  flex: none;
+  color: var(--text-3);
+  transition: transform var(--dur, 140ms) var(--ease, ease);
+}
+
+.wb-acc-group.is-open .wb-acc-gh-chev {
+  transform: rotate(90deg);
+}
+
+.wb-acc-gh-name {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.wb-acc-gh-count {
+  flex: none;
+  min-width: 18px;
+  padding: 0 6px;
+  border-radius: 999px;
+  background: var(--surface-3, var(--surface-2));
+  color: var(--text-3);
+  font-size: 10.5px;
+  font-weight: 600;
+  letter-spacing: 0;
+  line-height: 17px;
+  text-align: center;
+  font-variant-numeric: tabular-nums;
+}
+
+.wb-acc-manage {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  gap: 3px;
+  height: 24px;
+  padding: 0 8px;
+  border-radius: 6px;
+  color: var(--text-3);
+  font-size: 12px;
+  text-decoration: none;
+  white-space: nowrap;
+}
+
+.wb-acc-manage:hover,
+.wb-acc-manage:focus-visible {
+  background: var(--surface-2);
+  color: var(--text);
+}
+
+.wb-acc-gbody {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  padding-bottom: 6px;
+}
+
+.wb-acc-gbody > .wb-acc-note,
+.wb-acc-gbody > .wb-acc-error {
+  padding: 8px 14px;
+}
+
+/* Account rows: a flat list with hairline dividers. */
 .wb-acc-list {
   display: flex;
   flex-direction: column;
-  gap: 8px;
+  min-width: 0;
+  margin: 0;
+  padding: 0;
+  list-style: none;
 }
 
 .wb-acc-item {
   display: flex;
   flex-direction: column;
-  gap: 8px;
-  padding: 10px 12px;
-  border: 1px solid var(--border);
-  border-radius: 10px;
-  background: var(--surface);
+  gap: 7px;
+  min-width: 0;
+  padding: 10px 14px;
+  transition: background var(--dur, 140ms) var(--ease, ease);
 }
 
-.wb-acc-item.is-active {
-  border-color: var(--border-strong);
+.wb-acc-item + .wb-acc-item {
+  border-top: 1px solid var(--divider);
+}
+
+.wb-acc-item:hover {
   background: var(--surface-2);
 }
 
@@ -1800,67 +2023,113 @@ body.wb-resizing {
   display: flex;
   align-items: center;
   gap: 10px;
+  min-width: 0;
 }
 
 .wb-acc-num {
   display: inline-grid;
   flex: none;
   place-items: center;
-  width: 22px;
-  height: 22px;
+  width: 20px;
+  height: 20px;
   border-radius: 6px;
-  background: #d97757;
-  color: #fff;
-  font-size: 12px;
-  font-weight: 600;
-}
-
-.wb-acc-name {
-  display: flex;
-  flex: 1;
-  flex-direction: column;
-  min-width: 0;
-}
-
-.wb-acc-name b {
-  overflow: hidden;
-  font-size: var(--fs-sm);
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.wb-acc-name span {
-  color: var(--text-4);
-  font-size: var(--fs-xs);
-}
-
-.wb-acc-tag {
-  flex: none;
-  padding: 2px 8px;
-  border-radius: 999px;
   background: var(--surface-3, var(--surface-2));
   color: var(--text-2);
   font-size: 11px;
   font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+
+.wb-acc-item.is-active .wb-acc-num {
+  background: var(--accent-soft, var(--surface-3));
+  color: color-mix(in srgb, var(--accent) 70%, var(--text));
+}
+
+.wb-acc-name {
+  display: flex;
+  flex: 1 1 auto;
+  flex-direction: column;
+  min-width: 0;
+  line-height: 1.3;
+}
+
+.wb-acc-name b,
+.wb-acc-name span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.wb-acc-name b {
+  color: var(--text);
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.wb-acc-name span {
+  color: var(--text-3);
+  font-size: 11.5px;
+}
+
+.wb-acc-tags {
+  display: flex;
+  flex: 0 1 auto;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 4px;
+  min-width: 0;
+}
+
+.wb-acc-tag {
+  flex: none;
+  padding: 1px 7px;
+  border-radius: 999px;
+  background: var(--surface-3, var(--surface-2));
+  color: var(--text-2);
+  font-size: 10.5px;
+  font-weight: 600;
+  line-height: 16px;
+}
+
+.wb-acc-tag.is-default {
+  background: var(--accent-soft, var(--surface-3));
+  color: color-mix(in srgb, var(--accent) 70%, var(--text));
 }
 
 .wb-acc-tag.is-best {
-  background: color-mix(in srgb, var(--green) 18%, transparent);
+  background: var(--green-soft, color-mix(in srgb, var(--green) 14%, transparent));
   color: var(--green);
+}
+
+.wb-acc-tag.is-warn {
+  background: var(--amber-soft, color-mix(in srgb, var(--amber) 14%, transparent));
+  color: var(--amber);
+}
+
+/* Bars and buttons line up under the name (number 20px + gap 10px). */
+.wb-acc-bars,
+.wb-acc-actions,
+.wb-acc-note.wb-acc-nouse {
+  margin-left: 30px;
 }
 
 .wb-acc-bars {
   display: flex;
   flex-direction: column;
-  gap: 5px;
+  gap: 4px;
+  min-width: 0;
 }
 
 .wb-acc-bar {
   display: grid;
-  grid-template-columns: 44px 1fr 38px 56px;
+  grid-template-columns: 38px minmax(0, 1fr) 34px 48px;
   align-items: center;
   gap: 8px;
-  font-size: 11.5px;
+  font-size: 11px;
+}
+
+.wb-acc-bars.is-agy .wb-acc-bar {
+  grid-template-columns: minmax(0, 72px) minmax(0, 1fr) 34px 48px;
 }
 
 .wb-acc-bar-label {
@@ -1871,7 +2140,7 @@ body.wb-resizing {
 }
 
 .wb-acc-track {
-  height: 6px;
+  height: 5px;
   overflow: hidden;
   border-radius: 3px;
   background: var(--surface-3, var(--surface-2));
@@ -1899,183 +2168,160 @@ body.wb-resizing {
 }
 
 .wb-acc-reset {
-  color: var(--text-4);
+  color: var(--text-4, var(--text-3));
   font-variant-numeric: tabular-nums;
 }
 
 .wb-acc-actions {
   display: flex;
   flex-wrap: wrap;
-  gap: 6px;
-}
-
-.wb-acc-actions .btn {
-  gap: 5px;
-}
-
-.spin {
-  animation: wb-spin 1s linear infinite;
-}
-
-@keyframes wb-spin {
-  to {
-    transform: rotate(360deg);
-  }
-}
-
-/* Claude accounts, compact pass (owner feedback 2026-11-17). */
-.wb-acc-pop {
-  width: 440px !important;
-  max-width: calc(100vw - 24px);
-}
-
-.wb-acc {
-  gap: 6px;
-  padding: 10px;
-}
-
-.wb-acc-head {
-  padding: 2px 2px 4px;
-  white-space: nowrap;
-}
-
-.wb-acc-head b {
-  font-size: 14px;
-}
-
-.wb-acc-list {
-  gap: 6px;
-}
-
-.wb-acc-item {
-  gap: 6px;
-  padding: 8px 10px;
-}
-
-.wb-acc-top {
-  gap: 8px;
-}
-
-.wb-acc-num {
-  width: 20px;
-  height: 20px;
-  font-size: 11px;
-}
-
-.wb-acc-name {
-  line-height: 1.25;
-}
-
-.wb-acc-name b,
-.wb-acc-name span {
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.wb-acc-name b {
-  font-size: 13px;
-  font-weight: 600;
-}
-
-.wb-acc-name span {
-  font-size: 11.5px;
-}
-
-.wb-acc-tag {
-  padding: 1px 7px;
-  font-size: 10.5px;
-}
-
-.wb-acc-bars {
-  gap: 3px;
-}
-
-.wb-acc-bar {
-  grid-template-columns: 38px 1fr 34px 48px;
-  gap: 8px;
-  font-size: 11px;
-}
-
-.wb-acc-track {
-  height: 5px;
-}
-
-.wb-acc-note {
-  font-size: 11px;
-}
-
-.wb-acc-actions {
+  align-items: center;
   gap: 4px;
-  margin-top: 1px;
+  min-width: 0;
 }
 
 .wb-acc-act {
   display: inline-flex;
   align-items: center;
-  gap: 4px;
-  height: 24px;
-  padding: 0 8px;
-  border: 1px solid transparent;
+  gap: 5px;
+  min-width: 0;
+  max-width: 100%;
+  min-height: 26px;
+  padding: 3px 9px;
+  border: 1px solid var(--border);
   border-radius: 6px;
-  background: transparent;
+  background: var(--surface);
   color: var(--text-2);
   font: inherit;
   font-size: 12px;
-  white-space: nowrap;
+  line-height: 1.2;
+  text-align: left;
+  text-decoration: none;
+  white-space: normal;
   cursor: pointer;
 }
 
-.wb-acc-act:hover {
-  border-color: var(--border);
-  background: var(--surface-2);
+.wb-acc-act > .i {
+  flex: none;
+}
+
+.wb-acc-act:hover:not(:disabled) {
+  border-color: var(--border-strong);
   color: var(--text);
 }
 
 .wb-acc-act.is-main {
-  border-color: var(--border);
-  color: var(--text);
+  border-color: var(--accent);
+  background: var(--accent);
+  color: var(--on-accent, #fff);
+}
+
+.wb-acc-act.is-main:hover {
+  border-color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 88%, var(--text));
+  color: var(--on-accent, #fff);
+}
+
+.wb-acc-act.is-quiet {
+  border-color: transparent;
+  background: transparent;
+  color: var(--text-3);
+}
+
+.wb-acc-act.is-quiet:hover:not(:disabled) {
+  border-color: transparent;
+  background: var(--surface-3, var(--surface-2));
 }
 
 .wb-acc-act:disabled {
+  cursor: default;
   opacity: 0.5;
 }
 
-.wb-acc-act.is-danger {
-  color: var(--text-4);
-}
-
-.wb-acc-act.is-danger:hover,
-.wb-acc-act.is-danger.is-armed {
-  border-color: color-mix(in srgb, var(--red) 40%, transparent);
-  background: color-mix(in srgb, var(--red) 12%, transparent);
+.wb-acc-error {
+  margin: 0;
   color: var(--red);
+  font-size: var(--fs-sm);
+  overflow-wrap: anywhere;
 }
 
-/* Remove account: an × at the card's top right; the first click arms it
-   (red trash), the second removes. */
-.wb-acc-x {
-  display: inline-grid;
+.wb-acc-note {
+  margin: 0;
+  color: var(--text-3);
+  font-size: 11px;
+}
+
+.wb-acc-note code {
+  font-family: var(--mono);
+  font-size: 0.95em;
+}
+
+.wb-acc-gbody > .wb-acc-foot {
+  padding-top: 8px;
+  border-top: 1px solid var(--divider);
+}
+
+/* The hook switch: a footer under its own divider (overrides the spec 69
+   rule in workbench-git.css). */
+.wb-acc > .wb-acc-hook {
   flex: none;
-  place-items: center;
-  width: 22px;
-  height: 22px;
-  margin-right: -4px;
-  border: 0;
-  border-radius: 6px;
-  background: transparent;
-  color: var(--text-4);
-  cursor: pointer;
+  margin: 0;
+  padding: 6px 8px;
+  border-top: 1px solid var(--divider);
 }
 
-.wb-acc-x:hover {
-  background: var(--surface-2);
-  color: var(--text);
+.wb-acc > .wb-acc-hook > .wb-acc-error {
+  padding: 2px 6px 4px;
 }
 
-.wb-acc-x.is-armed {
-  background: color-mix(in srgb, var(--red) 14%, transparent);
-  color: var(--red);
+/* Phone bottom sheet: the panel fills the sheet edge to edge so the
+   dividers run full width; only the list scrolls; touch targets grow. */
+.wb-sheet:has(> .wb-acc) {
+  overflow: hidden;
+  padding-left: 0;
+  padding-right: 0;
+}
+
+.wb-sheet > .wb-acc {
+  margin-top: -4px;
+}
+
+@media (max-width: 640px) {
+  .wb-acc-top-bar {
+    padding: 4px 14px 10px;
+  }
+
+  .wb-acc-search {
+    height: 40px;
+  }
+
+  .wb-acc-search input {
+    font-size: 16px;
+  }
+
+  .wb-acc-gh {
+    min-height: 44px;
+  }
+
+  .wb-acc-gh-toggle {
+    height: 40px;
+  }
+
+  .wb-acc-manage {
+    height: 32px;
+  }
+
+  .wb-acc-item {
+    padding: 12px 14px;
+  }
+
+  .wb-acc-act {
+    min-height: 34px;
+  }
+
+  .wb-acc-bars.is-agy .wb-acc-bar {
+    grid-template-columns: minmax(0, 64px) minmax(0, 1fr) 34px 44px;
+  }
 }
 
 /* The rename dialog fits above the phone keyboard (top/height set from the

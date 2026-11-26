@@ -337,8 +337,9 @@ func cmdInit(args []string) int {
 // initConfig renders the router-form config of `lana init`: one table per
 // provider with its preset kind, the default combo when there is a fallback,
 // and the agent with model = "<provider>/<model>" (or "default") and no
-// provider key. A Claude Code main model with an API fallback runs the
-// background passes on the fallback ([router] background_model, REQ-CCT-007).
+// provider key. Background passes run on the agent's chain, Claude Code
+// included (spec 78 REQ-RPR-009); a pass with tools falls back to the API
+// model of the combo.
 func initConfig(plan initPlan) string {
 	var b strings.Builder
 	for _, provider := range plan.providers {

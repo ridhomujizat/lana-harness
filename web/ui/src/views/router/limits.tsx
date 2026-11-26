@@ -332,6 +332,12 @@ export function UsageProbeError({ limit }: { limit: LimitSnapshot | null }) {
   );
 }
 
+/* The line under an account's shown name: its email and its name, each
+   when the shown name is not already it (spec 77 REQ-WRA-013). */
+function accountSub(shown: string, email: string, name: string): string {
+  return [email && email !== shown ? email : "", name !== shown ? name : ""].filter(Boolean).join(" · ");
+}
+
 /* One Claude Code account on the Quota page (REQ-CCT-011): its email, plan,
    login state, and its own plan windows. */
 export function ClaudeAccountCard({
@@ -342,13 +348,16 @@ export function ClaudeAccountCard({
   limit: LimitSnapshot | null;
 }) {
   const windows = accountWindows(account, limit);
+  const shown = account.label || account.email || account.name;
   return (
     <article className="rt-limit rt-claude" aria-label={"Claude Code plan of " + account.name}>
       <header className="rt-limit-h">
         <ProviderLogo logo="claude" name="Claude Code" size={28} />
         <span className="rt-limit-title">
-          <span className="rt-limit-name trunc">{account.email || "Claude Code"}</span>
-          <span className="rt-limit-sub mono trunc">{account.name}</span>
+          <span className="rt-limit-name trunc" title={shown}>
+            {shown}
+          </span>
+          <span className="rt-limit-sub trunc">{accountSub(shown, account.email, account.name)}</span>
         </span>
         {account.plan ? <Badge tone="violet">{planLabel(account.plan)}</Badge> : null}
         {account.logged_in ? (
@@ -381,15 +390,26 @@ export function ClaudeAccountCard({
 
 /* Spec 74 (API-AGY-027, 033): one Antigravity account's quota windows on the
    Quota page, one bar per model group and window ("Gemini · 5 hours"). */
-export function AntigravityLimitCard({ limit, title }: { limit: LimitSnapshot; title?: string }) {
+export function AntigravityLimitCard({
+  limit,
+  title,
+  email,
+}: {
+  limit: LimitSnapshot;
+  title?: string;
+  email?: string;
+}) {
   const windows = Array.isArray(limit.windows) ? limit.windows : [];
+  const shown = title || email || limit.provider;
   return (
     <article className="rt-limit rt-claude" aria-label={"Antigravity quota of " + limit.provider}>
       <header className="rt-limit-h">
         <ProviderLogo logo="antigravity" name="Antigravity" size={28} />
         <span className="rt-limit-title">
-          <span className="rt-limit-name trunc">{title || "Antigravity"}</span>
-          <span className="rt-limit-sub mono trunc">{limit.provider}</span>
+          <span className="rt-limit-name trunc" title={shown}>
+            {shown}
+          </span>
+          <span className="rt-limit-sub trunc">{accountSub(shown, email || "", limit.provider)}</span>
         </span>
       </header>
       <div className="rt-limit-b">

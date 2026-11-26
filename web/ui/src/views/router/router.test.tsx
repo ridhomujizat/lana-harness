@@ -878,6 +878,15 @@ describe("router provider page", () => {
 /* Spec 39 revision 2 (REQ-CCT-010, REQ-CCT-011): the Claude Code page lists
    the accounts as connections, adds one with a login command, and keeps the
    custom model IDs. */
+/* Spec 77 revision 4: an account's settings open under its row. */
+function openRow(row: HTMLElement) {
+  const name = (row.getAttribute("aria-label") || "").replace(/^Account /, "");
+  const button = within(row).getByRole("button", { name: "Details of " + name });
+  if (button.getAttribute("aria-expanded") !== "true") {
+    fireEvent.click(button);
+  }
+}
+
 describe("Claude Code page", () => {
   beforeEach(() => {
     vi.mocked(api.listProviders).mockResolvedValue(
@@ -907,16 +916,28 @@ describe("Claude Code page", () => {
     render(<ProviderDetail id="claude-code" />);
     const home = await screen.findByRole("listitem", { name: "Account claude-code" });
     const work = screen.getByRole("listitem", { name: "Account claude-work" });
+    /* Spec 77 revision 4: one list; each account once, with its handle;
+       its settings open under the row. */
+    const list = screen.getByRole("list", { name: "Claude Code accounts" });
+    expect(within(list).getAllByRole("listitem").map((item) => item.getAttribute("aria-label"))).toEqual([
+      "Account claude-code",
+      "Account claude-work",
+    ]);
+    expect(screen.queryByRole("heading", { name: "Account order" })).toBeNull();
+    expect(within(work).getByRole("button", { name: "Move me@work.dev" })).toBeTruthy();
+    expect(within(work).queryByRole("checkbox", { name: "Allow scheduled runs for claude-work" })).toBeNull();
+    openRow(home);
+    openRow(work);
     expect(within(home).getByText("me@home.dev")).toBeTruthy();
     expect(within(home).getByText("Max")).toBeTruthy();
     expect(within(home).getByText("Built in")).toBeTruthy();
-    expect(within(home).getByText(/^42 % used · resets /)).toBeTruthy();
-    expect(within(home).getByText(/^10 % used · resets /)).toBeTruthy();
+    expect(within(home).getByText("42%")).toBeTruthy();
+    expect(within(home).getByText("10%")).toBeTruthy();
     expect(await within(home).findByText(/^12 calls · 45k in/)).toBeTruthy();
     expect(within(work).getByText("me@work.dev")).toBeTruthy();
     expect(within(work).getByText("Team")).toBeTruthy();
-    expect(within(work).getByText(/^80 % used/)).toBeTruthy();
-    expect(within(work).getByText(/^55 % used/)).toBeTruthy();
+    expect(within(work).getByText("80%")).toBeTruthy();
+    expect(within(work).getByText("55%")).toBeTruthy();
     expect(within(work).getByText(/^3 calls · 9k in/)).toBeTruthy();
     /* The built-in account cannot be removed or renamed; an added one can. */
     expect(within(home).queryByRole("button", { name: "Remove claude-code" })).toBeNull();
@@ -956,6 +977,7 @@ describe("Claude Code page", () => {
     vi.mocked(api.getClaudeAgent).mockResolvedValue(TWO_ACCOUNTS);
     vi.mocked(api.saveProvider).mockResolvedValue({ name: "claude-work", version: "v2", restart_required: false });
     render(<ProviderDetail id="claude-code" />);
+    openRow(await screen.findByRole("listitem", { name: "Account claude-work" }));
     const toggle = await screen.findByRole("checkbox", { name: "Allow scheduled runs for claude-work" });
     expect((toggle as HTMLInputElement).checked).toBe(true);
     fireEvent.click(toggle);
@@ -1083,6 +1105,7 @@ describe("Claude Code page", () => {
     vi.mocked(api.signOutClaudeAccount).mockResolvedValue(account({ name: "claude-work", logged_in: false }));
     render(<ProviderDetail id="claude-code" />);
     const work = await screen.findByRole("listitem", { name: "Account claude-work" });
+    openRow(work);
     fireEvent.click(within(work).getByRole("button", { name: "Sign out" }));
     let dialog = screen.getByRole("dialog");
     expect(dialog.textContent).toContain("Sign out me@work.dev?");
@@ -1092,6 +1115,7 @@ describe("Claude Code page", () => {
     await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
 
     const home = screen.getByRole("listitem", { name: "Account claude-code" });
+    openRow(home);
     fireEvent.click(within(home).getByRole("button", { name: "Sign out" }));
     dialog = screen.getByRole("dialog");
     expect(dialog.textContent).toContain("Sign out of your own Claude Code?");
@@ -1114,6 +1138,7 @@ describe("Claude Code page", () => {
     });
     render(<ProviderDetail id="claude-code" />);
     const work = await screen.findByRole("listitem", { name: "Account claude-work" });
+    openRow(work);
     fireEvent.click(within(work).getByRole("button", { name: "Remove claude-work" }));
     const dialog = screen.getByRole("dialog");
     expect(dialog.textContent).toContain("Signs this account out and deletes its folder");
@@ -1288,7 +1313,7 @@ describe("plan usage refresh", () => {
     ]);
     render(<ProviderDetail id="claude-code" />);
     const home = await screen.findByRole("listitem", { name: "Account claude-code" });
-    expect(await within(home).findByText(/^43 % used/)).toBeTruthy();
+    expect(await within(home).findByText("43%")).toBeTruthy();
     expect(vi.mocked(api.refreshRouterLimits)).not.toHaveBeenCalled();
     const panel = screen.getByRole("heading", { name: "Accounts" }).closest("section") as HTMLElement;
     fireEvent.click(within(panel).getByRole("button", { name: "Refresh" }));

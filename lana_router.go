@@ -292,6 +292,9 @@ func (rt *Runtime) attachRouterStores() {
 	// API-AGY-026: the Antigravity model lists and tiers of the last run.
 	rt.loadAntigravityState()
 	rt.wireModelFacts()
+	// Spec 78: Claude Code and Antigravity targets of router calls run their
+	// account's CLI through the external runtimes.
+	rt.wireRuntimeStreamer()
 }
 
 // wireModelFacts connects the router's cached provider model lists to the

@@ -12,6 +12,7 @@ import (
 	"strings"
 	"sync"
 	"syscall"
+	"time"
 
 	"github.com/ridhomujizat/lana-harness/core"
 )
@@ -32,6 +33,26 @@ var signInURLRe = regexp.MustCompile(`(?i)\b[a-z][a-z0-9+.-]*://\S+`)
 
 // ansiRe matches ANSI escape sequences, stripped before a line is reported.
 var ansiRe = regexp.MustCompile(`\x1b\[[0-9;?]*[ -/]*[@-~]`)
+
+// loggedInRe matches the line agy prints after a successful login,
+// "Logged in as <email>." (spec 77 REQ-WRA-014; the format string is in the agy
+// 1.5.17 binary, unverified for `acp --login`). Only the email is kept.
+var loggedInRe = regexp.MustCompile(`^Logged in as (\S+@\S+?)\.?$`)
+
+// signInEmailRunes caps a kept email.
+const signInEmailRunes = 254
+
+// signInDrainWait bounds the wait for agy's output after a successful exit.
+const signInDrainWait = 2 * time.Second
+
+// loggedInEmail returns the email of a "Logged in as <email>." line, or "".
+func loggedInEmail(line string) string {
+	m := loggedInRe.FindStringSubmatch(strings.TrimSpace(stripANSI(line)))
+	if m == nil || len([]rune(m[1])) > signInEmailRunes {
+		return ""
+	}
+	return m[1]
+}
 
 // loginLinks are the owner files lana links into a named account's HOME
 // (REQ-AGY-010), so git over SSH and gh work there.
@@ -88,19 +109,27 @@ func linkInLine(line string) string {
 // context error; closing the code channel gives agy EOF so it reports the
 // cancellation itself. The built-in account cannot be signed in here.
 func (r *Runtime) SignIn(ctx context.Context, account core.RuntimeAccount, onLink func(url string), code <-chan string) error {
+	_, err := r.SignInWithEmail(ctx, account, onLink, code)
+	return err
+}
+
+// SignInWithEmail is SignIn that also returns the account's email when agy
+// printed "Logged in as <email>." before a successful exit (spec 77
+// REQ-WRA-014), else "". Nothing else of agy's output is kept.
+func (r *Runtime) SignInWithEmail(ctx context.Context, account core.RuntimeAccount, onLink func(url string), code <-chan string) (string, error) {
 	if agyAccountName(account) == core.AntigravityProvider {
-		return userError("the built-in account signs in with agy in a terminal")
+		return "", userError("the built-in account signs in with agy in a terminal")
 	}
 	bin, err := r.resolveBinary(account.Binary)
 	if err != nil {
-		return err
+		return "", err
 	}
 	home := account.Home
 	if err := os.MkdirAll(home, 0o700); err != nil {
-		return userError("cannot create the account folder: %v", err)
+		return "", userError("cannot create the account folder: %v", err)
 	}
 	if err := r.linkOwnerFiles(home); err != nil {
-		return err
+		return "", err
 	}
 	env := buildEnv(r.opts.Environ(), core.RuntimeConfig{Home: home})
 	runCtx, cancel := context.WithTimeout(ctx, r.opts.SignInTimeout)
@@ -112,11 +141,11 @@ func (r *Runtime) SignIn(ctx context.Context, account core.RuntimeAccount, onLin
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
 	stdin, err := cmd.StdinPipe()
 	if err != nil {
-		return userError("Could not start Antigravity sign-in: %v", err)
+		return "", userError("Could not start Antigravity sign-in: %v", err)
 	}
 	pr, pw, err := os.Pipe()
 	if err != nil {
-		return userError("Could not start Antigravity sign-in: %v", err)
+		return "", userError("Could not start Antigravity sign-in: %v", err)
 	}
 	// Stdout and stderr share one pipe, so the lines agy reads on stdin and
 	// lana reads here stay in order.
@@ -125,17 +154,17 @@ func (r *Runtime) SignIn(ctx context.Context, account core.RuntimeAccount, onLin
 	if err := cmd.Start(); err != nil {
 		_ = pw.Close()
 		_ = pr.Close()
-		return userError("Could not start Antigravity sign-in: %v", err)
+		return "", userError("Could not start Antigravity sign-in: %v", err)
 	}
 	_ = pw.Close() // the child holds its own copy
 
 	var mu sync.Mutex
-	last := ""
+	last, email := "", ""
 	linkCh := make(chan string, 1)
 	scanDone := make(chan struct{})
 	go func() {
 		defer close(scanDone)
-		defer pr.Close()
+		defer func() { _ = pr.Close() }()
 		sc := bufio.NewScanner(pr)
 		sc.Buffer(make([]byte, 64<<10), signInScanBytes)
 		for sc.Scan() {
@@ -143,6 +172,9 @@ func (r *Runtime) SignIn(ctx context.Context, account core.RuntimeAccount, onLin
 			if strings.TrimSpace(stripANSI(line)) != "" {
 				mu.Lock()
 				last = line
+				if found := loggedInEmail(line); found != "" {
+					email = found
+				}
 				mu.Unlock()
 			}
 			if url := linkInLine(line); url != "" {
@@ -175,11 +207,11 @@ func (r *Runtime) SignIn(ctx context.Context, account core.RuntimeAccount, onLin
 			onLink(url)
 		}
 	case <-scanDone:
-		<-done
-		return exitFailure()
+		<-done //nolint:errcheck // only waits for the exit; exitFailure reports it
+		return "", exitFailure()
 	case <-runCtx.Done():
 		r.stopProbe(cmd, done)
-		return signInContextErr(ctx)
+		return "", signInContextErr(ctx)
 	}
 
 	// Wait for one code, then write it once.
@@ -189,25 +221,25 @@ func (r *Runtime) SignIn(ctx context.Context, account core.RuntimeAccount, onLin
 			// No code will come: give agy EOF and read its answer.
 			_ = stdin.Close()
 			select {
-			case <-done:
+			case <-done: //nolint:errcheck // only waits for the exit
 			case <-runCtx.Done():
 				r.stopProbe(cmd, done)
-				return signInContextErr(ctx)
+				return "", signInContextErr(ctx)
 			}
-			return exitFailure()
+			return "", exitFailure()
 		}
 		if _, err := io.WriteString(stdin, value+"\n"); err != nil {
 			_ = stdin.Close()
 			r.stopProbe(cmd, done)
-			return exitFailure()
+			return "", exitFailure()
 		}
 		_ = stdin.Close()
 	case <-scanDone:
-		<-done
-		return exitFailure()
+		<-done //nolint:errcheck // only waits for the exit; exitFailure reports it
+		return "", exitFailure()
 	case <-runCtx.Done():
 		r.stopProbe(cmd, done)
-		return signInContextErr(ctx)
+		return "", signInContextErr(ctx)
 	}
 
 	select {
@@ -216,12 +248,20 @@ func (r *Runtime) SignIn(ctx context.Context, account core.RuntimeAccount, onLin
 			// The account just signed in: its cached `agy models` probe is
 			// stale, so the next AccountStatus runs it again.
 			r.ForgetAccountStatus(agyAccountName(account))
-			return nil
+			// Read agy's last lines for the email; a child still holding the
+			// pipe never holds up the sign-in.
+			select {
+			case <-scanDone:
+			case <-time.After(signInDrainWait):
+			}
+			mu.Lock()
+			defer mu.Unlock()
+			return email, nil
 		}
-		return exitFailure()
+		return "", exitFailure()
 	case <-runCtx.Done():
 		r.stopProbe(cmd, done)
-		return signInContextErr(ctx)
+		return "", signInContextErr(ctx)
 	}
 }
 

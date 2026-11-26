@@ -1,7 +1,6 @@
 package llmcall
 
 import (
-	"errors"
 	"reflect"
 	"testing"
 
@@ -102,21 +101,18 @@ func TestWithoutExternal(t *testing.T) {
 	}
 }
 
-// REQ-AGY-008: a background pass never runs on an Antigravity target.
-func TestBackgroundChainSkipsAntigravity(t *testing.T) {
+// Spec 78 REQ-RPR-009: a background pass keeps an Antigravity target; the
+// router runs it through agy.
+func TestBackgroundChainKeepsAntigravity(t *testing.T) {
 	r := newStubRouter()
 	chain := []core.LLMTarget{{Provider: Antigravity, Model: "x"}, {Provider: "a", Model: "y"}}
-	rest, requested, err := BackgroundChain(r, chain, "antigravity/x")
-	if err != nil || len(rest) != 1 || rest[0] != (core.LLMTarget{Provider: "a", Model: "y"}) || requested != "a/y" {
-		t.Fatalf("rest: chain=%v requested=%q err=%v", rest, requested, err)
+	got, requested, err := BackgroundChain(r, chain, "antigravity/x")
+	if err != nil || !reflect.DeepEqual(got, chain) || requested != "antigravity/x" {
+		t.Fatalf("chain=%v requested=%q err=%v", got, requested, err)
 	}
 	only := []core.LLMTarget{{Provider: Antigravity, Model: "x"}}
-	if _, _, err := BackgroundChain(r, only, "antigravity/x"); !errors.Is(err, ErrNoBackgroundModel) {
-		t.Fatalf("no background model: err = %v", err)
-	}
-	chain, requested, err = BackgroundChain(bgRouter{r, "b/y"}, only, "antigravity/x")
-	if err != nil || len(chain) != 1 || chain[0] != (core.LLMTarget{Provider: "b", Model: "y"}) || requested != "b/y" {
-		t.Fatalf("background model: chain=%v requested=%q err=%v", chain, requested, err)
+	if got, _, err := BackgroundChain(bgRouter{r, "b/y"}, only, "antigravity/x"); err != nil || !reflect.DeepEqual(got, only) {
+		t.Fatalf("only: chain=%v err=%v", got, err)
 	}
 }
 

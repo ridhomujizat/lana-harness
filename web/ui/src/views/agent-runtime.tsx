@@ -22,15 +22,18 @@ import type { ModelOption } from "./model-picker";
    provider under its name (AC-RTR-024), and Claude Code models under one
    group per account with the Claude logo (REQ-CCT-009), and Antigravity
    models under their groups with the Antigravity logo (API-AGY-033). With the provider
-   list, each model carries its provider's logo. */
+   list, each model carries its provider's logo. With merged (spec 77
+   revision 6, mergeAccountChoices), the choices already sit in one group per
+   family and keep it. */
 export function choiceOptions(
   choices: RouterChoice[],
   providers?: RouterProvider[],
-  accounts?: ClaudeAccount[] | null
+  accounts?: ClaudeAccount[] | null,
+  merged = false
 ): ModelOption[] {
   const index = providers ? providerIndex(providers) : null;
   const names = claudeAccountNames(choices, providers, accounts);
-  const grouped = groupClaudeChoices(choices, providers, accounts);
+  const grouped = merged ? choices : groupClaudeChoices(choices, providers, accounts);
   const combos = grouped.filter((choice) => choice.group === COMBOS_GROUP);
   const groups: string[] = [];
   for (const choice of grouped) {

@@ -35,17 +35,48 @@ var scrubbedEnv = []string{
 // (REQ-AGY-002).
 const autoUpdateEnv = "AGY_CLI_DISABLE_AUTO_UPDATE=true"
 
+// File-based token storage for added accounts (spec 77 REQ-WRA-013, pending
+// the owner's live check: sign an added account out and in again on the
+// scratch daemon; no "Keychain Not Found" dialog means it works).
+//
+// An added account runs agy with its own HOME, which has no macOS login
+// Keychain, so a keychain write (sign-in, token refresh) pops "Keychain Not
+// Found — A keychain cannot be found to store “antigravity.”". agy 1.5.17's
+// changelog: "Fixed the macOS "Keychain Not Found" dialog reappearing about
+// once an hour: after a keychain write fails, the CLI now saves your sign-in
+// token to its file-based storage for the rest of the session" and "Fixed
+// running `agy` over SSH on macOS always bypassing your existing macOS Keychain
+// sign-in …; when your login Keychain is unlocked, `agy` now reuses it and
+// falls back to file-based token storage when locked." The binary logs "Using
+// file-based token storage because %s detected" and reads SSH_CONNECTION,
+// SSH_CLIENT and SSH_TTY. Setting SSH_CONNECTION makes agy treat the HOME's
+// missing login Keychain as unavailable and use its file-based storage
+// without trying a keychain write. The built-in account (the owner's real
+// HOME and login Keychain) never gets it.
+const (
+	// FileTokenStorageEnvName is the variable set for added accounts.
+	FileTokenStorageEnvName = "SSH_CONNECTION"
+	// FileTokenStorageEnvValue is its value: a loopback SSH connection.
+	FileTokenStorageEnvValue = "127.0.0.1 0 127.0.0.1 0"
+)
+
 // buildArgs returns the argv after the binary.
 func buildArgs() []string { return append([]string(nil), acpArgs...) }
 
 // buildEnv returns the child environment: the daemon environment minus the
 // Google API-key and Agent Platform variables, with AGY_CLI_DISABLE_AUTO_UPDATE
 // pinned. A configured Home replaces HOME and USERPROFILE (each exactly once),
-// so an account's agy finds only its own login.
+// so an account's agy finds only its own login, and sets SSH_CONNECTION when
+// the daemon environment has none (REQ-WRA-013), so agy keeps that login in
+// its file-based storage instead of a Keychain the HOME does not have.
 func buildEnv(base []string, cfg core.RuntimeConfig) []string {
-	env := make([]string, 0, len(base)+3)
+	env := make([]string, 0, len(base)+4)
+	hasFileStorageEnv := false
 	for _, kv := range base {
 		name, _, _ := strings.Cut(kv, "=")
+		if name == FileTokenStorageEnvName {
+			hasFileStorageEnv = true
+		}
 		drop := false
 		for _, s := range scrubbedEnv {
 			if name == s {
@@ -63,6 +94,9 @@ func buildEnv(base []string, cfg core.RuntimeConfig) []string {
 	env = append(env, autoUpdateEnv)
 	if cfg.Home != "" {
 		env = append(env, "HOME="+cfg.Home, "USERPROFILE="+cfg.Home)
+		if !hasFileStorageEnv {
+			env = append(env, FileTokenStorageEnvName+"="+FileTokenStorageEnvValue)
+		}
 	}
 	return env
 }

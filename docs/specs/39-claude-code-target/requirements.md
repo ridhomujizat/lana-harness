@@ -116,6 +116,10 @@ owner's own Claude MCP servers no longer load.)*
 
 ### REQ-CCT-007: Background passes
 
+> Superseded by spec 78 REQ-RPR-009 (2026-11-26): background passes use the agent's chain as it is,
+> Claude Code included (the router runs it as a headless CLI call); `[router] background_model` is used
+> only for an empty chain.
+
 Compaction, memory capture, knowledge passes, and embeddings shall never use `claude-code/*`. They use the
 first non-Claude target of the agent's chain, else `[router] background_model` (an address or combo
 without Claude Code targets), else they are skipped with one warning per agent per hour.

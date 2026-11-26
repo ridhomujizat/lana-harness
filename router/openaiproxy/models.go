@@ -6,6 +6,9 @@ import (
 	"sort"
 	"sync"
 	"time"
+
+	"github.com/ridhomujizat/lana-harness/core"
+	"github.com/ridhomujizat/lana-harness/router"
 )
 
 // modelListTimeout bounds the provider model list fetches of GET /models.
@@ -25,7 +28,11 @@ type modelObject struct {
 
 // models serves GET /models: the combos first (owned_by "combo"), then every
 // enabled provider's models as "provider/model" addresses. A provider whose model
-// list cannot be fetched still lists its catalog models.
+// list cannot be fetched still lists its catalog models. Then every enabled
+// Claude Code account's models (owned_by "claude-code") and every enabled
+// Antigravity account's models (owned_by "antigravity"), from the lists the
+// agent pickers use; an account whose CLI is not found lists nothing (spec
+// 78 REQ-RPR-001).
 func (h *handler) models(w http.ResponseWriter, req *http.Request) {
 	out := modelList{Object: "list", Data: []modelObject{}}
 	seen := map[string]bool{}
@@ -74,6 +81,32 @@ func (h *handler) models(w http.ResponseWriter, req *http.Request) {
 			}
 			seen[address] = true
 			out.Data = append(out.Data, modelObject{ID: address, Object: "model", OwnedBy: provider})
+		}
+	}
+	runtimes := []struct {
+		owner    string
+		accounts []string
+	}{
+		{core.ClaudeCodeKind, append([]string{router.ClaudeCode}, h.r.ClaudeCodeAccounts()...)},
+		{core.AntigravityKind, h.r.AntigravityAccounts()},
+	}
+	for _, rt := range runtimes {
+		for _, account := range rt.accounts {
+			if !h.r.RuntimeServes(account) {
+				continue
+			}
+			infos, _ := h.r.Models(ctx, account, false)
+			for _, info := range infos {
+				address := info.Address
+				if address == "" {
+					address = account + "/" + info.ID
+				}
+				if seen[address] {
+					continue
+				}
+				seen[address] = true
+				out.Data = append(out.Data, modelObject{ID: address, Object: "model", OwnedBy: rt.owner})
+			}
 		}
 	}
 	writeJSON(w, http.StatusOK, out)

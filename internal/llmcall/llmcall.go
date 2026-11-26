@@ -41,10 +41,9 @@ const (
 var ErrUnknownModel = errors.New("unknown provider or combo")
 
 // ErrNoBackgroundModel is returned by BackgroundChain when an agent's chain
-// has no target outside an external runtime (Claude Code or Antigravity) and
-// [router] background_model is empty (REQ-CCT-007, REQ-AGY-008). The pass is
-// skipped.
-var ErrNoBackgroundModel = errors.New("no background model: the chain has only external targets and [router] background_model is empty")
+// is empty and [router] background_model is empty (spec 78 REQ-RPR-009). The
+// pass is skipped.
+var ErrNoBackgroundModel = errors.New("no background model: the chain is empty and [router] background_model is empty")
 
 // ClaudeCode is the built-in provider of Claude Code targets (ADR 0020).
 const ClaudeCode = core.ClaudeCodeProvider
@@ -538,15 +537,43 @@ type BackgroundModeler interface {
 	BackgroundModel() string
 }
 
-// BackgroundChain returns the chain a background pass (compaction, memory
-// capture, knowledge passes) uses for an agent whose turn chain is chain
-// (REQ-CCT-007, REQ-AGY-008): chain without its external runtime targets
-// (Claude Code or Antigravity), else [router] background_model resolved
-// through llm, else ErrNoBackgroundModel. requested is kept when targets of
-// chain remain, else it is the background model.
+// BackgroundChain returns the chain a background pass (titles, compaction,
+// memory capture, knowledge passes, avatars) uses for an agent whose turn
+// chain is chain (spec 78 REQ-RPR-009, superseding REQ-CCT-007 and
+// REQ-AGY-008's "never in an external runtime"): chain as it is, Claude Code
+// and Antigravity targets included, which the router runs through their
+// CLIs; else, when chain is empty, [router] background_model resolved
+// through llm; else ErrNoBackgroundModel. requested is kept when chain has
+// targets, else it is the background model.
 func BackgroundChain(llm core.LLMRegistry, chain []core.LLMTarget, requested string) ([]core.LLMTarget, string, error) {
-	if !HasExternal(llm, chain) {
+	if len(chain) > 0 {
 		return chain, requested, nil
+	}
+	background := ""
+	if bm, ok := llm.(BackgroundModeler); ok {
+		background = strings.TrimSpace(bm.BackgroundModel())
+	}
+	if background == "" {
+		return nil, "", ErrNoBackgroundModel
+	}
+	resolved, err := Chain(llm, "", background, nil)
+	if err != nil {
+		return nil, "", fmt.Errorf("[router] background_model: %w", err)
+	}
+	if len(resolved) == 0 {
+		return nil, "", ErrNoBackgroundModel
+	}
+	return resolved, background, nil
+}
+
+// ToolBackgroundChain is the chain of a background pass that sends tool
+// definitions or tool blocks (compaction, memory capture): the CLI runtimes
+// serve text only (spec 78 REQ-RPR-003), so chain without its Claude Code and
+// Antigravity targets; else [router] background_model without them; else
+// ErrNoBackgroundModel. requested follows the first target kept.
+func ToolBackgroundChain(llm core.LLMRegistry, chain []core.LLMTarget, requested string) ([]core.LLMTarget, string, error) {
+	if !HasExternal(llm, chain) {
+		return BackgroundChain(llm, chain, requested)
 	}
 	if rest := WithoutExternal(llm, chain); len(rest) > 0 {
 		if IsExternalAddress(llm, requested) {
@@ -582,7 +609,7 @@ func AgentBackgroundChain(llm core.LLMRegistry, cfg core.AgentConfig) ([]core.LL
 }
 
 // backgroundWarnEvery is how often a skipped background pass is logged per
-// agent (REQ-CCT-007).
+// agent.
 const backgroundWarnEvery = time.Hour
 
 var (
@@ -591,9 +618,8 @@ var (
 )
 
 // WarnNoBackground logs that a background pass of agent was skipped because
-// it has no model outside an external runtime (Claude Code or Antigravity),
-// at most once per agent per hour (REQ-CCT-007, REQ-AGY-008). It reports
-// whether it logged.
+// it has no model at all (ErrNoBackgroundModel), at most once per agent per
+// hour. It reports whether it logged.
 func WarnNoBackground(agent, pass string) bool {
 	now := time.Now()
 	backgroundWarnMu.Lock()

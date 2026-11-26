@@ -1,4 +1,4 @@
-import { request } from "./client";
+import { ApiError, request } from "./client";
 
 /* Spec 55: the Workbench API. Sessions live in the workbench core process;
    the daemon proxies them under /v1/workbench (REQ-WB-040, REQ-WB-041). */
@@ -186,10 +186,13 @@ export function clearWorktreeReport(id: string): Promise<void> {
 
 /* Spec 69 REQ-WA-014: the Claude Code hooks switch (SessionStart + PreToolUse
    pre-edit). The hooks are installed only by the owner's action: "unset" means
-   never asked, so the Workbench shows the install notice while needs_install. */
+   never asked, so the Workbench shows the install notice while needs_install.
+   Spec 77 REQ-WRA-009: the same switch manages the Antigravity (agy) hooks.json
+   folders; kind tells them apart (missing from an older daemon = "claude"). */
 export interface AgentHookFolder {
   dir: string;
   account: string;
+  kind?: "claude" | "antigravity";
   installed: boolean;
   error?: string;
 }
@@ -207,4 +210,43 @@ export function getAgentHook(): Promise<AgentHookState> {
 
 export function setAgentHook(enabled: boolean): Promise<AgentHookState> {
   return request("PUT", "/v1/workbench/agent-hook", { enabled });
+}
+
+/* Spec 77 REQ-WRA-005: the Router Claude Code account every new Workbench
+   terminal runs `claude` on (its CLAUDE_CONFIG_DIR and
+   CLAUDE_SECURESTORAGE_CONFIG_DIR). The built-in account "claude-code" has
+   config_dir "" and sets neither. */
+export interface WorkbenchClaudeAccount {
+  account: string;
+  config_dir: string;
+  /* false when the daemon is older than spec 77 (404): the value is then
+     the built-in account and cannot be changed. */
+  supported: boolean;
+}
+
+const BUILTIN_CLAUDE_ACCOUNT = "claude-code";
+
+function claudeAccountValue(data: Partial<WorkbenchClaudeAccount> | null): WorkbenchClaudeAccount {
+  return {
+    account: String(data?.account || BUILTIN_CLAUDE_ACCOUNT),
+    config_dir: String(data?.config_dir || ""),
+    supported: true,
+  };
+}
+
+export async function getWorkbenchClaudeAccount(): Promise<WorkbenchClaudeAccount> {
+  try {
+    return claudeAccountValue(await request<Partial<WorkbenchClaudeAccount> | null>("GET", "/v1/workbench/claude-account"));
+  } catch (err) {
+    if (err instanceof ApiError && err.status === 404) {
+      return { account: BUILTIN_CLAUDE_ACCOUNT, config_dir: "", supported: false };
+    }
+    throw err;
+  }
+}
+
+export async function setWorkbenchClaudeAccount(account: string): Promise<WorkbenchClaudeAccount> {
+  return claudeAccountValue(
+    await request<Partial<WorkbenchClaudeAccount> | null>("PUT", "/v1/workbench/claude-account", { account }),
+  );
 }

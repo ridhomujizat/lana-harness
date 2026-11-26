@@ -21,6 +21,7 @@ type agentHookAnswer struct {
 	Folders      []struct {
 		Dir       string `json:"dir"`
 		Account   string `json:"account"`
+		Kind      string `json:"kind"`
 		Installed bool   `json:"installed"`
 		Error     string `json:"error"`
 	} `json:"folders"`
@@ -79,6 +80,7 @@ func decodeAgentHook(t *testing.T, rr *httptest.ResponseRecorder) agentHookAnswe
 func folderView(t *testing.T, body agentHookAnswer, dir string) struct {
 	Dir       string `json:"dir"`
 	Account   string `json:"account"`
+	Kind      string `json:"kind"`
 	Installed bool   `json:"installed"`
 	Error     string `json:"error"`
 } {
@@ -340,5 +342,66 @@ func TestWorkbenchAgentHookNotAllowed(t *testing.T) {
 
 	if _, err := os.Stat(filepath.Join(folder, "settings.json")); !errors.Is(err, os.ErrNotExist) {
 		t.Fatalf("a daemon that may not manage the hook wrote settings.json: %v", err)
+	}
+}
+
+// Spec 77 REQ-WRA-009: the switch manages the agy hooks.json of an
+// Antigravity folder next to the Claude Code settings.json, and each folder
+// view carries its kind.
+func TestWorkbenchAgentHookAntigravityFolders(t *testing.T) {
+	s, cookie, csrf := newWorkbenchServer(t)
+	writeAgentHookFlag(t, s, false)
+	claude := t.TempDir()
+	agy := agenthook.AgyConfigDir(t.TempDir())
+	const bin = "/opt/lana/lana"
+	s.SetAgentHook(AgentHookConfig{
+		Binary: bin,
+		Folders: func() []AgentHookFolder {
+			return []AgentHookFolder{
+				{Dir: claude, Account: "claude-code"},
+				{Dir: agy, Account: "agy-2", Kind: AgentHookAntigravity},
+			}
+		},
+		Allowed: true,
+	})
+	hooksPath := filepath.Join(agy, agenthook.AgyHooksFile)
+
+	body := decodeAgentHook(t, workbenchRequest(s, http.MethodGet, "/v1/workbench/agent-hook", "", cookie, ""))
+	if len(body.Folders) != 2 || folderView(t, body, claude).Kind != "claude" {
+		t.Fatalf("GET answer = %+v", body)
+	}
+	if view := folderView(t, body, agy); view.Kind != "antigravity" || view.Account != "agy-2" || view.Installed {
+		t.Fatalf("agy folder = %+v", view)
+	}
+
+	body = decodeAgentHook(t, workbenchRequest(s, http.MethodPut, "/v1/workbench/agent-hook", `{"enabled":true}`, cookie, csrf))
+	if body.NeedsInstall || !folderView(t, body, agy).Installed {
+		t.Fatalf("PUT true answer = %+v", body)
+	}
+	if ok, err := agenthook.InstalledAgy(hooksPath, bin); err != nil || !ok {
+		t.Fatalf("hooks.json not installed: %v %v", ok, err)
+	}
+	if _, err := os.Stat(filepath.Join(agy, "settings.json")); !os.IsNotExist(err) {
+		t.Fatalf("an agy folder must not get a settings.json: %v", err)
+	}
+
+	body = decodeAgentHook(t, workbenchRequest(s, http.MethodPut, "/v1/workbench/agent-hook", `{"enabled":false}`, cookie, csrf))
+	if folderView(t, body, agy).Installed {
+		t.Fatalf("PUT false answer = %+v", body)
+	}
+	if ok, _ := agenthook.InstalledAgy(hooksPath, bin); ok {
+		t.Fatal("PUT false left the agy hooks")
+	}
+
+	// An unusable hooks.json is reported on its folder only.
+	if err := os.WriteFile(hooksPath, []byte("nope"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	body = decodeAgentHook(t, workbenchRequest(s, http.MethodPut, "/v1/workbench/agent-hook", `{"enabled":true}`, cookie, csrf))
+	if view := folderView(t, body, agy); view.Error != "hooks.json is not valid JSON" {
+		t.Fatalf("agy folder = %+v", view)
+	}
+	if !folderView(t, body, claude).Installed {
+		t.Fatal("the Claude folder must still install")
 	}
 }

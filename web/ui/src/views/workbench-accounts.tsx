@@ -1,51 +1,42 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 
 import { errorMessage } from "../api/client";
-import { runCommand } from "../api/toolbox";
-import { getAgentHook, setAgentHook, type AgentHookState } from "../api/workbench";
+import {
+  getAntigravity,
+  getClaudeAgent,
+  refreshRouterLimits,
+  type AntigravityAccount,
+  type AntigravityStatus,
+  type AntigravityWindow,
+  type ClaudeAccount,
+  type PlanWindow,
+} from "../api/router";
+import {
+  getAgentHook,
+  getWorkbenchClaudeAccount,
+  setAgentHook,
+  setWorkbenchClaudeAccount,
+  type AgentHookFolder,
+  type AgentHookState,
+  type WorkbenchClaudeAccount,
+} from "../api/workbench";
 import { Popover } from "../ui/gr8r";
 import { Ic } from "../ui/icons";
 import { AgentLogo } from "./agent-logo";
+import { planLabel } from "./router/limits";
 
-/* Spec 56: the "Claude accounts" plugin. It is the herdr mod
-   ~/.config/herdr-app/mods/claude-accounts ported to the Workbench: every
-   account claude-swap (`cswap`) manages, with its usage, and four actions.
-   - Default: `cswap switch N` makes N the login plain `claude` uses.
-   - New tab: `cswap run N` in a new tab, in the focused terminal's folder.
-   - Beside: `cswap run N -- --continue` beside the focused pane, so the
-     folder's latest conversation carries on under N.
-   - Add / Re-login: `claude auth login`, then `cswap add`, in a new tab. */
-
-interface UsageWindow {
-  pct?: number | null;
-  resetsAt?: string;
-  name?: string;
-}
-
-interface Usage {
-  fiveHour?: UsageWindow;
-  sevenDay?: UsageWindow;
-  scoped?: UsageWindow[];
-}
-
-export interface ClaudeAccount {
-  number: number;
-  email?: string;
-  organizationName?: string;
-  active?: boolean;
-  disabled?: boolean;
-  usageStatus?: string;
-  usage?: Usage | null;
-  lastGoodUsage?: Usage | null;
-  lastGoodAgeSeconds?: number;
-  loginExpiresAt?: string;
-  alias?: string;
-}
-
-interface AccountList {
-  activeAccountNumber?: number;
-  accounts?: ClaudeAccount[];
-}
+/* Spec 77: the Workbench "Accounts" popup. It lists the Router's accounts
+   grouped by provider, each account in its own folder, so no login is ever
+   copied in or out of the Keychain. Adding, removing, renaming and signing in
+   live in the Router.
+   - Claude Code (GET /v1/router/claude-agent): New tab, Beside (--continue),
+     Sign in (login_command, signed out only), Use for new terminals (the
+     Workbench default account, REQ-WRA-005).
+   - Antigravity (GET /v1/router/antigravity): New tab and Beside run `agy`
+     with the account's HOME; sign-in is a link + code flow, so a signed-out
+     account links to the Router's Antigravity page. There is no default:
+     HOME for a whole shell would break it.
+   A search box filters both groups; each group collapses (remembered). */
 
 export interface AccountActions {
   /* Opens `argv` in a new tab of the current space, in the focused folder.
@@ -58,6 +49,50 @@ export interface AccountActions {
 
 const REFRESH_MS = 120_000;
 
+export const CLAUDE_MANAGE_HREF = "#/router/providers/claude-code";
+export const AGY_MANAGE_HREF = "#/router/providers/antigravity";
+
+export type AccountGroup = "claude" | "agy";
+
+export const COLLAPSE_STORAGE_KEY = "lana.workbench.accounts.collapsed";
+
+function readCollapsed(): Partial<Record<AccountGroup, boolean>> {
+  try {
+    const raw = window.localStorage.getItem(COLLAPSE_STORAGE_KEY);
+    const parsed: unknown = raw ? JSON.parse(raw) : null;
+    if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
+      const value = parsed as Record<string, unknown>;
+      return { claude: value.claude === true, agy: value.agy === true };
+    }
+  } catch {
+    /* storage blocked or bad JSON: every group starts expanded */
+  }
+  return {};
+}
+
+function writeCollapsed(state: Partial<Record<AccountGroup, boolean>>) {
+  try {
+    window.localStorage.setItem(COLLAPSE_STORAGE_KEY, JSON.stringify(state));
+  } catch {
+    /* storage blocked: the state lasts until the popup closes */
+  }
+}
+
+/* True when any field holds the query, ignoring case. */
+export function matchesQuery(fields: (string | undefined | null)[], query: string): boolean {
+  const q = query.trim().toLowerCase();
+  if (!q) return true;
+  return fields.some((f) => Boolean(f) && String(f).toLowerCase().includes(q));
+}
+
+function claudeMatches(a: ClaudeAccount, query: string): boolean {
+  return matchesQuery([a.display_name, a.name, a.email, a.plan, a.plan ? planLabel(a.plan) : "", a.label], query);
+}
+
+function agyMatches(a: AntigravityAccount, query: string): boolean {
+  return matchesQuery([a.display_name, a.name, a.email, a.tier, a.label], query);
+}
+
 function until(iso?: string): string {
   if (!iso) return "";
   const ms = Date.parse(iso) - Date.now();
@@ -69,253 +104,565 @@ function until(iso?: string): string {
   return d ? d + "d " + h + "h" : h ? h + "h " + mm + "m" : mm + "m";
 }
 
-function ago(seconds?: number): string {
-  if (seconds === undefined) return "";
-  const s = Math.max(0, Math.round(seconds));
-  if (s < 60) return s + "s ago";
-  if (s < 3600) return Math.round(s / 60) + "m ago";
-  if (s < 86400) return Math.round(s / 3600) + "h ago";
-  return Math.round(s / 86400) + "d ago";
+function past(iso?: string | null): boolean {
+  return Boolean(iso && Date.parse(iso) <= Date.now());
 }
 
-/* A window past its reset is empty again, whatever was last read. */
-function used(w?: UsageWindow): number | null {
-  if (!w) return null;
-  if (w.resetsAt && Date.parse(w.resetsAt) <= Date.now()) return 0;
-  return typeof w.pct === "number" ? w.pct : null;
+/* Percent used; a window past its reset is empty again, whatever was last
+   read. utilization is a fraction (0.42 is 42 %). */
+function used(w: PlanWindow): number | null {
+  if (past(w.resets_at)) return 0;
+  return typeof w.utilization === "number" ? w.utilization * 100 : null;
 }
 
-function windows(a: ClaudeAccount): { label: string; w: UsageWindow }[] {
-  const u = a.usage ?? a.lastGoodUsage;
-  if (!u) return [];
-  const rows: { label: string; w: UsageWindow }[] = [];
-  if (u.fiveHour) rows.push({ label: "5h", w: u.fiveHour });
-  if (u.sevenDay) rows.push({ label: "7d", w: u.sevenDay });
-  for (const s of u.scoped ?? []) rows.push({ label: s.name ?? "model", w: s });
-  return rows;
+/* Percent used of an Antigravity window: remaining is a fraction LEFT. */
+export function agyUsed(w: AntigravityWindow): number | null {
+  if (past(w.resets_at)) return 0;
+  if (w.remaining === null) return null;
+  return Math.max(0, Math.min(100, (1 - w.remaining) * 100));
 }
 
-/* Most headroom: the usable account whose tightest window is the least used. */
-function bestOf(accounts: ClaudeAccount[]): number | null {
-  let best: number | null = null;
+export function windowShortLabel(w: PlanWindow): string {
+  if (w.type === "five_hour") return "5h";
+  if (w.type === "seven_day") return "7d";
+  return w.label || w.type;
+}
+
+/* "Gemini 5h", "Claude wk": the model group and a short span. */
+export function agyWindowLabel(w: AntigravityWindow): string {
+  const span = w.type === "5h" ? "5h" : w.type === "weekly" ? "wk" : w.type;
+  return [w.group, span].filter(Boolean).join(" ");
+}
+
+/* The command a pane runs for an account (REQ-WRA-004): the account's own
+   config folder, or neither variable for the built-in account. */
+export function accountArgv(a: ClaudeAccount): string[] {
+  const binary = a.binary || "claude";
+  if (a.builtin) return ["env", "-u", "CLAUDE_CONFIG_DIR", "-u", "CLAUDE_SECURESTORAGE_CONFIG_DIR", binary];
+  return ["env", "CLAUDE_CONFIG_DIR=" + a.config_dir, "CLAUDE_SECURESTORAGE_CONFIG_DIR=" + a.config_dir, binary];
+}
+
+/* Spec 77 revision 4: set for every agy of an added account, like the daemon
+   does. On macOS agy then keeps its login in its file token storage under
+   HOME instead of the Keychain, so no "Keychain Not Found" dialog pops up for
+   an account HOME that has no login keychain. */
+export const AGY_FILE_TOKEN_ENV = "SSH_CONNECTION=127.0.0.1 0 127.0.0.1 0";
+
+/* The command a pane runs for an Antigravity account: the account's own HOME
+   (where agy keeps its login), or plain agy for the built-in account. */
+export function agyArgv(a: AntigravityAccount, statusBinary = ""): string[] {
+  const binary = a.binary || statusBinary || "agy";
+  if (a.builtin) return [binary];
+  /* Without its own HOME an added account would run on the owner's own
+     login, so it gets no command (its buttons are off). */
+  if (!a.home) return [];
+  return ["env", "HOME=" + a.home, AGY_FILE_TOKEN_ENV, binary];
+}
+
+function cooling(a: { cooling_until?: string | null }, now = Date.now()): boolean {
+  return Boolean(a.cooling_until && Date.parse(a.cooling_until) > now);
+}
+
+/* The built-in account first, then pool order (spec 75), then name. */
+export function sortAccounts<T extends { builtin: boolean; priority?: number; display_name: string }>(accounts: T[]): T[] {
+  return [...accounts].sort(
+    (x, y) =>
+      Number(y.builtin) - Number(x.builtin) ||
+      (x.priority ?? 0) - (y.priority ?? 0) ||
+      x.display_name.localeCompare(y.display_name),
+  );
+}
+
+/* Most room: the signed-in account whose tightest 5-hour/weekly window is
+   the least used. A cooling account is skipped. */
+export function mostRoom(accounts: ClaudeAccount[], now = Date.now()): string | null {
+  let best: string | null = null;
   let score = Infinity;
   for (const a of accounts) {
-    if (a.disabled || !(a.usage ?? a.lastGoodUsage)) continue;
-    const tight = Math.max(
-      0,
-      ...windows(a)
-        .filter((r) => r.label === "5h" || r.label === "7d")
-        .map((r) => used(r.w) ?? 0)
-    );
+    if (!a.logged_in || cooling(a, now)) continue;
+    const levels = a.windows
+      .filter((w) => w.type === "five_hour" || w.type === "seven_day")
+      .map(used)
+      .filter((v): v is number => v !== null);
+    if (levels.length === 0) continue;
+    const tight = Math.max(...levels);
     if (tight < score) {
       score = tight;
-      best = a.number;
+      best = a.name;
     }
   }
   return best;
 }
 
-/* The tool runs `cswap list --json`; the output may carry a note before the
-   JSON, so read from the first brace. */
-function parseList(output: string): AccountList {
-  const start = output.indexOf("{");
-  if (start < 0) throw new Error(output.trim().split("\n").pop() || "cswap returned no list");
-  return JSON.parse(output.slice(start)) as AccountList;
+/* Most room among Antigravity accounts: the signed-in, enabled, not cooling
+   account with the highest minimum remaining across its windows. */
+export function agyMostRoom(accounts: AntigravityAccount[], now = Date.now()): string | null {
+  let best: string | null = null;
+  let score = -Infinity;
+  for (const a of accounts) {
+    if (!a.signed_in || a.disabled || cooling(a, now)) continue;
+    const left = a.windows
+      .map(agyUsed)
+      .filter((v): v is number => v !== null)
+      .map((v) => 100 - v);
+    if (left.length === 0) continue;
+    const tight = Math.min(...left);
+    if (tight > score) {
+      score = tight;
+      best = a.name;
+    }
+  }
+  return best;
 }
 
-/* "x's Organization" is a personal account; show that instead. */
-function orgLabel(a: ClaudeAccount): string {
-  const org = a.organizationName || "";
-  if (!org) return "";
-  if (a.email && org === a.email + "'s Organization") return "Personal";
-  return org;
-}
-
-function Bar({ label, w }: { label: string; w: UsageWindow }) {
-  const pct = used(w);
+function Bar({ label, title, pct, resetsAt }: { label: string; title?: string; pct: number | null; resetsAt?: string }) {
   const tone = pct === null ? "" : pct >= 90 ? " is-red" : pct >= 70 ? " is-amber" : "";
   return (
     <div className="wb-acc-bar">
-      <span className="wb-acc-bar-label">{label}</span>
+      <span className="wb-acc-bar-label" title={title || undefined}>
+        {label}
+      </span>
       <span className="wb-acc-track">
         <span className={"wb-acc-fill" + tone} style={{ width: Math.min(100, Math.max(0, pct ?? 0)) + "%" }} />
       </span>
       <span className="wb-acc-pct">{pct === null ? "–" : Math.round(pct) + "%"}</span>
-      <span className="wb-acc-reset">{until(w.resetsAt)}</span>
+      <span className="wb-acc-reset">{until(resetsAt)}</span>
     </div>
   );
 }
 
-export function ClaudeAccountsPanel({
-  binary,
+function countText(n: number): string {
+  return n + (n === 1 ? " account" : " accounts");
+}
+
+/* One provider group: a sticky heading that collapses it (chevron, logo,
+   name, count) with a link to the provider's Router page at its right, then
+   the group's rows as a flat list. */
+function Group({
+  id,
+  agent,
+  title,
+  count,
+  expanded,
+  manageHref,
+  onToggle,
+  onClose,
+  children,
+}: {
+  id: AccountGroup;
+  agent: string;
+  title: string;
+  count: number | null;
+  expanded: boolean;
+  manageHref: string;
+  onToggle: () => void;
+  onClose: () => void;
+  children: ReactNode;
+}) {
+  return (
+    <section className={"wb-acc-group" + (expanded ? " is-open" : "")} data-group={id} role="group" aria-label={title}>
+      <div className="wb-acc-gh">
+        <button
+          type="button"
+          className="wb-acc-gh-toggle"
+          aria-expanded={expanded}
+          aria-label={title + (count === null ? "" : ", " + countText(count))}
+          onClick={onToggle}
+        >
+          <Ic name="chevron-right" size={14} className="wb-acc-gh-chev" />
+          <AgentLogo agent={agent} size={16} />
+          <span className="wb-acc-gh-name">{title}</span>
+          {count === null ? null : <span className="wb-acc-gh-count">{count}</span>}
+        </button>
+        <a className="wb-acc-manage" href={manageHref} onClick={onClose} aria-label={"Manage " + title + " in Router"}>
+          Manage <Ic name="arrow-up-right" size={13} />
+        </a>
+      </div>
+      {expanded ? <div className="wb-acc-gbody">{children}</div> : null}
+    </section>
+  );
+}
+
+export function AccountsPanel({
   actions,
   onClose,
+  autoFocusSearch = false,
 }: {
-  binary: string;
   actions: AccountActions;
   onClose: () => void;
+  /* Desktop popover only: the phone keyboard would cover the sheet. */
+  autoFocusSearch?: boolean;
 }) {
-  const [list, setList] = useState<AccountList | null>(null);
+  const [accounts, setAccounts] = useState<ClaudeAccount[] | null>(null);
   const [error, setError] = useState("");
+  const [agy, setAgy] = useState<AntigravityStatus | null>(null);
+  const [agyError, setAgyError] = useState("");
+  const [current, setCurrent] = useState<WorkbenchClaudeAccount | null>(null);
   const [loading, setLoading] = useState(false);
-  const [busy, setBusy] = useState<number | null>(null);
-  /* Remove asks twice: the first click arms it for a few seconds. */
-  const [arming, setArming] = useState<number | null>(null);
-  useEffect(() => {
-    if (arming === null) return;
-    const timer = setTimeout(() => setArming(null), 4000);
-    return () => clearTimeout(timer);
-  }, [arming]);
+  const [busy, setBusy] = useState<string | null>(null);
+  const [query, setQuery] = useState("");
+  const [collapsed, setCollapsed] = useState(readCollapsed);
+  const searchRef = useRef<HTMLInputElement>(null);
 
-  const refresh = useCallback(() => {
-    setLoading(true);
-    runCommand("claude-swap", "list", {})
-      .then((r) => {
-        if (r.exit_code !== 0) throw new Error(r.output.trim().split("\n").pop() || "cswap exited " + r.exit_code);
-        setList(parseList(r.output));
-        setError("");
-      })
-      .catch((err) => setError(errorMessage(err)))
-      .finally(() => setLoading(false));
+  /* Both providers in parallel; a failure stays inside its own group. */
+  const load = useCallback(() => {
+    return Promise.all([
+      getClaudeAgent()
+        .then((status) => {
+          setAccounts(sortAccounts(status.accounts));
+          setError("");
+        })
+        .catch((err) => setError(errorMessage(err))),
+      getAntigravity()
+        .then((status) => {
+          setAgy({ ...status, accounts: sortAccounts(status.accounts) });
+          setAgyError("");
+        })
+        .catch((err) => setAgyError(errorMessage(err))),
+    ]);
   }, []);
 
+  /* Refresh also probes usage (claude /usage and the Antigravity quota; the
+     daemon probes an account at most once a minute), then rereads both. */
+  const refresh = () => {
+    setLoading(true);
+    refreshRouterLimits()
+      .catch(() => {})
+      .then(load)
+      .finally(() => setLoading(false));
+  };
+
+  /* Opening the popup probes usage once (a daemon restart leaves the
+     windows empty until something asks); the timer only rereads. */
   useEffect(() => {
-    // eslint-disable-next-line react-hooks/set-state-in-effect -- the fetch is async; state lands after the await.
-    refresh();
-    const timer = setInterval(refresh, REFRESH_MS);
+    refreshRouterLimits()
+      .catch(() => {})
+      .then(load);
+    const timer = setInterval(load, REFRESH_MS);
     return () => clearInterval(timer);
-  }, [refresh]);
+  }, [load]);
 
-  const accounts = useMemo(() => list?.accounts ?? [], [list]);
-  const best = useMemo(() => bestOf(accounts), [accounts]);
+  useEffect(() => {
+    let alive = true;
+    getWorkbenchClaudeAccount()
+      .then((value) => alive && setCurrent(value))
+      .catch(() => alive && setCurrent({ account: "claude-code", config_dir: "", supported: false }));
+    return () => {
+      alive = false;
+    };
+  }, []);
 
-  const makeDefault = (n: number) => {
-    setBusy(n);
-    runCommand("claude-swap", "switch", { account: String(n) })
-      .then((r) => {
-        if (r.exit_code !== 0) throw new Error(r.output.trim().split("\n").pop() || "cswap exited " + r.exit_code);
-        refresh();
+  /* After the popover is shown (a passive effect runs after its layout
+     effect), so the focus lands. */
+  useEffect(() => {
+    if (autoFocusSearch) searchRef.current?.focus({ preventScroll: true });
+  }, [autoFocusSearch]);
+
+  const list = useMemo(() => accounts ?? [], [accounts]);
+  const agyList = useMemo(() => agy?.accounts ?? [], [agy]);
+  const best = useMemo(() => mostRoom(list), [list]);
+  const agyBest = useMemo(() => agyMostRoom(agyList), [agyList]);
+  /* The Workbench default; a name no account has falls back to built-in. */
+  const defaultName = useMemo(() => {
+    const name = current?.account || "claude-code";
+    if (list.some((a) => a.name === name)) return name;
+    return list.find((a) => a.builtin)?.name ?? name;
+  }, [current, list]);
+  const canSetDefault = Boolean(current?.supported);
+
+  const searching = query.trim() !== "";
+  const claudeShown = useMemo(() => list.filter((a) => claudeMatches(a, query)), [list, query]);
+  const agyShown = useMemo(() => agyList.filter((a) => agyMatches(a, query)), [agyList, query]);
+  /* Antigravity hides while it is not installed and has no accounts; until
+     it is read, only an error shows it. */
+  const agyAvailable = agy ? agy.installed || agy.accounts.length > 0 : Boolean(agyError);
+  const showClaude = !searching || claudeShown.length > 0;
+  const showAgy = searching ? agyShown.length > 0 : agyAvailable;
+  const noMatch = searching && claudeShown.length === 0 && agyShown.length === 0;
+  const isExpanded = (g: AccountGroup) => searching || !collapsed[g];
+
+  const toggle = (g: AccountGroup) => {
+    if (searching) return;
+    const next = { ...collapsed, [g]: !collapsed[g] };
+    setCollapsed(next);
+    writeCollapsed(next);
+  };
+
+  const makeDefault = (a: ClaudeAccount) => {
+    setBusy(a.name);
+    setWorkbenchClaudeAccount(a.name)
+      .then((value) => {
+        setCurrent(value);
+        setError("");
       })
       .catch((err) => setError(errorMessage(err)))
       .finally(() => setBusy(null));
   };
 
-  const addAccount = (relogin?: ClaudeAccount) => {
-    const what = relogin ? "reconnect" : "add";
-    const script =
-      "printf '\\n  Sign in with the Claude account to " + what + " in the browser.\\n  It becomes the default login; cswap keeps the others.\\n\\n'" +
-      " && claude auth login && printf '\\n  Saving it in cswap...\\n' && '" + binary.replace(/'/g, "'\\''") + "' add";
-    actions.newTab(["sh", "-c", script], relogin ? "Re-login Claude" : "Add Claude account");
-    onClose();
-  };
-
-  /* `cswap remove` confirms on stdin and has no --yes flag, so it runs in a
-     terminal tab with the answer piped in; the tab shows what happened. */
-  const removeAccount = (a: ClaudeAccount) => {
-    const bin = "'" + binary.replace(/'/g, "'\\''") + "'";
-    const script =
-      "printf 'y\\n' | " + bin + " remove " + a.number +
-      "; printf '\\n  Done. Close this tab when you are ready.\\n'";
-    actions.newTab(["sh", "-c", script], "Remove Claude account " + a.number);
-    setArming(null);
-    setTimeout(refresh, 4000);
-  };
-
   return (
     <div className="wb-acc">
-      <div className="wb-acc-head">
-        <AgentLogo agent="claude" size={20} />
-        <b>Claude accounts</b>
-        <span className="wb-acc-sub">{list ? accounts.length + (accounts.length === 1 ? " account" : " accounts") : ""}</span>
-        <span className="wb-spacer" />
-        <button type="button" className="wb-icon-btn" aria-label="Refresh" data-tip="Refresh" onClick={refresh} disabled={loading}>
-          <Ic name={loading ? "loader-circle" : "refresh-cw"} size={15} className={loading ? "spin" : ""} />
-        </button>
-        <button type="button" className="wb-icon-btn" aria-label="Add account" data-tip="Add account" onClick={() => addAccount()}>
-          <Ic name="user-plus" size={15} />
-        </button>
+      <div className="wb-acc-top-bar">
+        <div className="wb-acc-head">
+          <Ic name="users" size={16} />
+          <b>Accounts</b>
+          <span className="wb-spacer" />
+          <button type="button" className="wb-icon-btn" aria-label="Refresh" data-tip="Refresh" onClick={refresh} disabled={loading}>
+            <Ic name={loading ? "loader-circle" : "refresh-cw"} size={15} className={loading ? "spin" : ""} />
+          </button>
+        </div>
+        <div className="wb-acc-search">
+          <Ic name="search" size={14} />
+          <input
+            ref={searchRef}
+            type="search"
+            aria-label="Search accounts"
+            placeholder="Search name, email, plan"
+            autoComplete="off"
+            spellCheck={false}
+            value={query}
+            onChange={(e) => setQuery(e.target.value)}
+            onKeyDown={(e) => {
+              /* Escape clears the search first; the next one closes the popup. */
+              if (e.key === "Escape" && query) {
+                e.preventDefault();
+                e.stopPropagation();
+                setQuery("");
+              }
+            }}
+          />
+          {query ? (
+            <button
+              type="button"
+              className="wb-acc-clear"
+              aria-label="Clear search"
+              onClick={() => {
+                setQuery("");
+                searchRef.current?.focus({ preventScroll: true });
+              }}
+            >
+              <Ic name="x" size={13} />
+            </button>
+          ) : null}
+        </div>
       </div>
-      {error ? <p className="wb-acc-error">{error}</p> : null}
-      {!list && !error ? <p className="wb-acc-note">Reading accounts…</p> : null}
-      <div className="wb-acc-list">
-        {accounts.map((a) => {
-          const isActive = a.active || a.number === list?.activeAccountNumber;
-          const rows = windows(a);
-          const stale = a.usageStatus && a.usageStatus !== "ok";
-          return (
-            <div key={a.number} className={"wb-acc-item" + (isActive ? " is-active" : "")}>
-              <div className="wb-acc-top">
-                <span className="wb-acc-num">{a.number}</span>
-                <span className="wb-acc-name" title={a.email || undefined}>
-                  <b>{a.alias || a.email || "Account " + a.number}</b>
-                  <span>{orgLabel(a)}</span>
-                </span>
-                {isActive ? <span className="wb-acc-tag">default</span> : null}
-                {best === a.number && !isActive ? <span className="wb-acc-tag is-best">most room</span> : null}
-                <button
-                  type="button"
-                  className={"wb-acc-x" + (arming === a.number ? " is-armed" : "")}
-                  aria-label={arming === a.number ? "Click again to remove account " + a.number : "Remove account " + a.number}
-                  data-tip={arming === a.number ? "Click again to remove" : "Remove account"}
-                  onClick={() => (arming === a.number ? removeAccount(a) : setArming(a.number))}
-                >
-                  <Ic name={arming === a.number ? "trash-2" : "x"} size={14} />
-                </button>
-              </div>
-              {rows.length ? (
-                <div className="wb-acc-bars">
-                  {rows.map((r) => (
-                    <Bar key={r.label} label={r.label} w={r.w} />
-                  ))}
-                </div>
-              ) : (
-                <p className="wb-acc-note">No usage read yet.</p>
-              )}
-              {stale ? (
-                <p className="wb-acc-note">
-                  {a.usageStatus === "auth_error" || a.usageStatus === "expired" ? "Login expired." : "Usage not current"}
-                  {a.lastGoodAgeSeconds !== undefined ? " · last read " + ago(a.lastGoodAgeSeconds) : ""}
-                </p>
-              ) : null}
-              <div className="wb-acc-actions">
-                {!isActive ? (
-                  <button type="button" className="wb-acc-act is-main" disabled={busy === a.number} onClick={() => makeDefault(a.number)}>
-                    <Ic name="check" size={13} /> Make default
-                  </button>
-                ) : null}
-                <button
-                  type="button"
-                  className="wb-acc-act"
-                  onClick={() => {
-                    actions.newTab([binary, "run", String(a.number)]);
-                    onClose();
-                  }}
-                >
-                  <Ic name="square-terminal" size={13} /> New tab
-                </button>
-                <button
-                  type="button"
-                  className="wb-acc-act"
-                  onClick={() => {
-                    actions.beside([binary, "run", String(a.number), "--", "--continue"]);
-                    onClose();
-                  }}
-                >
-                  <Ic name="columns-2" size={13} /> Beside
-                </button>
-                {stale ? (
-                  <button type="button" className="wb-acc-act" onClick={() => addAccount(a)}>
-                    <Ic name="log-in" size={13} /> Re-login
-                  </button>
-                ) : null}
 
-              </div>
-            </div>
-          );
-        })}
+      <div className="wb-acc-scroll">
+        {noMatch ? (
+          <p className="wb-acc-note wb-acc-empty" role="status">
+            No accounts match
+          </p>
+        ) : null}
+
+        {showClaude ? (
+          <Group
+            id="claude"
+            agent="claude"
+            title="Claude Code"
+            count={accounts ? (searching ? claudeShown.length : list.length) : null}
+            expanded={isExpanded("claude")}
+            manageHref={CLAUDE_MANAGE_HREF}
+            onToggle={() => toggle("claude")}
+            onClose={onClose}
+          >
+            {error ? <p className="wb-acc-error">{error}</p> : null}
+            {!accounts && !error ? <p className="wb-acc-note">Reading accounts…</p> : null}
+            {accounts && list.length === 0 ? <p className="wb-acc-note">No Claude Code accounts in the Router yet.</p> : null}
+            {claudeShown.length ? (
+              <ul className="wb-acc-list" aria-label="Claude Code accounts">
+                {claudeShown.map((a) => {
+                  const isDefault = a.name === defaultName;
+                  const sub = [a.email, a.plan ? planLabel(a.plan) : ""].filter(Boolean).join(" · ");
+                  return (
+                    <li key={a.name} className={"wb-acc-item" + (isDefault ? " is-active" : "")}>
+                      <div className="wb-acc-top">
+                        <span className="wb-acc-num">{list.indexOf(a) + 1}</span>
+                        <span className="wb-acc-name" title={a.config_dir || "~/.claude"}>
+                          <b>{a.display_name}</b>
+                          <span>{sub || a.name}</span>
+                        </span>
+                        <span className="wb-acc-tags">
+                          {isDefault ? <span className="wb-acc-tag is-default">default</span> : null}
+                          {best === a.name && !isDefault ? <span className="wb-acc-tag is-best">most room</span> : null}
+                          {!a.logged_in ? <span className="wb-acc-tag is-warn">signed out</span> : null}
+                          {cooling(a) ? (
+                            <span className="wb-acc-tag is-warn" title={"Until " + new Date(a.cooling_until as string).toLocaleTimeString()}>
+                              cooling
+                            </span>
+                          ) : null}
+                        </span>
+                      </div>
+                      {a.windows.length ? (
+                        <div className="wb-acc-bars">
+                          {a.windows.map((w, j) => (
+                            <Bar key={w.type + ":" + j} label={windowShortLabel(w)} title={w.label} pct={used(w)} resetsAt={w.resets_at} />
+                          ))}
+                        </div>
+                      ) : (
+                        <p className="wb-acc-note wb-acc-nouse">No usage read yet.</p>
+                      )}
+                      <div className="wb-acc-actions">
+                        {!a.logged_in && a.login_command ? (
+                          <button
+                            type="button"
+                            className="wb-acc-act is-main"
+                            onClick={() => {
+                              actions.newTab(["sh", "-c", a.login_command], "Sign in " + a.display_name);
+                              onClose();
+                            }}
+                          >
+                            <Ic name="log-in" size={13} /> Sign in
+                          </button>
+                        ) : null}
+                        <button
+                          type="button"
+                          className="wb-acc-act"
+                          onClick={() => {
+                            actions.newTab(accountArgv(a));
+                            onClose();
+                          }}
+                        >
+                          <Ic name="square-terminal" size={13} /> New tab
+                        </button>
+                        <button
+                          type="button"
+                          className="wb-acc-act"
+                          onClick={() => {
+                            actions.beside([...accountArgv(a), "--continue"]);
+                            onClose();
+                          }}
+                        >
+                          <Ic name="columns-2" size={13} /> Beside
+                        </button>
+                        {canSetDefault && !isDefault ? (
+                          <button type="button" className="wb-acc-act is-quiet" disabled={busy === a.name} onClick={() => makeDefault(a)}>
+                            <Ic name="check" size={13} /> Use for new terminals
+                          </button>
+                        ) : null}
+                      </div>
+                    </li>
+                  );
+                })}
+              </ul>
+            ) : null}
+            {canSetDefault ? (
+              <p className="wb-acc-note wb-acc-foot">
+                New Workbench terminals run <code>claude</code> on the default account. Plain <code>claude</code> outside the
+                Workbench is unchanged.
+              </p>
+            ) : null}
+          </Group>
+        ) : null}
+
+        {showAgy ? (
+          <Group
+            id="agy"
+            agent="agy"
+            title="Antigravity"
+            count={agy ? (searching ? agyShown.length : agyList.length) : null}
+            expanded={isExpanded("agy")}
+            manageHref={AGY_MANAGE_HREF}
+            onToggle={() => toggle("agy")}
+            onClose={onClose}
+          >
+            {agyError ? <p className="wb-acc-error">{agyError}</p> : null}
+            {agy && agyList.length === 0 ? <p className="wb-acc-note">No Antigravity accounts in the Router yet.</p> : null}
+            {agyShown.length ? (
+              <ul className="wb-acc-list" aria-label="Antigravity accounts">
+                {agyShown.map((a) => {
+                  const argv = agyArgv(a, agy?.binary);
+                  /* The display name, then email · tier; the email is left
+                     out when it already is the display name. */
+                  const sub = [a.email && a.email !== a.display_name ? a.email : "", a.tier].filter(Boolean).join(" · ");
+                  return (
+                    <li key={a.name} className="wb-acc-item">
+                      <div className="wb-acc-top">
+                        <span className="wb-acc-num">{agyList.indexOf(a) + 1}</span>
+                        <span className="wb-acc-name" title={a.home || "~"}>
+                          <b>{a.display_name}</b>
+                          <span>{sub || a.name}</span>
+                        </span>
+                        <span className="wb-acc-tags">
+                          {agyBest === a.name ? <span className="wb-acc-tag is-best">most room</span> : null}
+                          {!a.signed_in ? <span className="wb-acc-tag is-warn">signed out</span> : null}
+                          {cooling(a) ? (
+                            <span className="wb-acc-tag is-warn" title={"Until " + new Date(a.cooling_until as string).toLocaleTimeString()}>
+                              cooling
+                            </span>
+                          ) : null}
+                          {a.disabled ? <span className="wb-acc-tag">disabled</span> : null}
+                        </span>
+                      </div>
+                      {a.windows.length ? (
+                        <div className="wb-acc-bars is-agy">
+                          {a.windows.map((w, j) => (
+                            <Bar
+                              key={w.group + "/" + w.type + ":" + j}
+                              label={agyWindowLabel(w)}
+                              title={[w.group, w.type].filter(Boolean).join(" · ")}
+                              pct={agyUsed(w)}
+                              resetsAt={w.resets_at}
+                            />
+                          ))}
+                        </div>
+                      ) : (
+                        <p className="wb-acc-note wb-acc-nouse" title={a.windows_error || undefined}>
+                          No usage read yet.
+                        </p>
+                      )}
+                      <div className="wb-acc-actions">
+                        {!a.signed_in ? (
+                          <a className="wb-acc-act is-main" href={AGY_MANAGE_HREF} onClick={onClose}>
+                            <Ic name="log-in" size={13} /> Sign in in Router
+                          </a>
+                        ) : null}
+                        <button
+                          type="button"
+                          className="wb-acc-act"
+                          disabled={argv.length === 0}
+                          onClick={() => {
+                            actions.newTab(argv);
+                            onClose();
+                          }}
+                        >
+                          <Ic name="square-terminal" size={13} /> New tab
+                        </button>
+                        <button
+                          type="button"
+                          className="wb-acc-act"
+                          disabled={argv.length === 0}
+                          onClick={() => {
+                            actions.beside([...argv, "--continue"]);
+                            onClose();
+                          }}
+                        >
+                          <Ic name="columns-2" size={13} /> Beside
+                        </button>
+                      </div>
+                    </li>
+                  );
+                })}
+              </ul>
+            ) : null}
+          </Group>
+        ) : null}
       </div>
       <AgentHookRow />
     </div>
+  );
+}
+
+const AGENT_HOOK_TITLE = "Connect Claude Code and Antigravity to the Workbench";
+
+/* Spec 77 REQ-WRA-009: "Installed in 3 of 3 folders (Claude 2, Antigravity 1)".
+   A kind with no folder is left out of the brackets. */
+export function agentHookCount(folders: AgentHookFolder[]): string {
+  const installed = folders.filter((f) => f.installed).length;
+  const agy = folders.filter((f) => f.kind === "antigravity").length;
+  const parts: string[] = [];
+  if (folders.length - agy > 0) parts.push("Claude " + (folders.length - agy));
+  if (agy > 0) parts.push("Antigravity " + agy);
+  return (
+    "Installed in " + installed + " of " + folders.length + " folders" + (parts.length ? " (" + parts.join(", ") + ")" : "") + "."
   );
 }
 
@@ -323,7 +670,7 @@ export function ClaudeAccountsPanel({
    hooks are not installed and the owner was never asked (state "unset").
    Lana writes settings.json only on Install. "Not now" hides it until the
    Workbench opens again; "Don't ask again" stores off, so it never returns
-   (the switch in Claude accounts can still turn the hooks on). */
+   (the switch in Accounts can still turn the hooks on). */
 export function AgentHookNotice() {
   const [state, setState] = useState<AgentHookState | null>(null);
   const [hidden, setHidden] = useState(false);
@@ -346,7 +693,7 @@ export function AgentHookNotice() {
       return (
         <div className="wb-hook-notice" role="status">
           <div className="wb-hook-notice-body">
-            <b>Some Claude folders could not be updated</b>
+            <b>Some agent folders could not be updated</b>
             {broken.map((f) => (
               <small key={f.dir} className="wb-hook-notice-error">
                 {f.dir}: {f.error}
@@ -375,8 +722,8 @@ export function AgentHookNotice() {
     <div className="wb-hook-notice" role="status">
       <Ic name="git-branch" size={16} className="wb-hook-notice-icon" />
       <div className="wb-hook-notice-body">
-        <b>Connect Claude Code to the Workbench</b>
-        <small>Lana adds its hooks to Claude Code's settings, so the Workbench can follow what Claude Code works on.</small>
+        <b>{AGENT_HOOK_TITLE}</b>
+        <small>Lana adds its hooks to Claude Code and Antigravity, so the Workbench can follow what they work on.</small>
         {error ? <small className="wb-hook-notice-error">{error}</small> : null}
       </div>
       <div className="wb-hook-notice-actions">
@@ -430,10 +777,10 @@ function AgentHookRow() {
         }}
       >
         <span className="wb-acc-hook-text">
-          <b>Connect Claude Code to the Workbench</b>
+          <b>{AGENT_HOOK_TITLE}</b>
           <small>
-            Lana's hooks in Claude Code's settings, so the Workbench can follow what Claude Code works on.
-            {state.enabled ? " Installed in " + state.folders.filter((f) => f.installed).length + " of " + state.folders.length + " Claude folders." : ""}
+            Lana's hooks in Claude Code and Antigravity, so the Workbench can follow what they work on.
+            {state.enabled ? " " + agentHookCount(state.folders) : ""}
           </small>
         </span>
         <span className={"wbg-switch" + (state.enabled ? " is-on" : "")} />
@@ -449,21 +796,19 @@ function AgentHookRow() {
 }
 
 /* Desktop: a popover under the tab-bar button. */
-export function ClaudeAccountsPopover({
+export function AccountsPopover({
   anchor,
-  binary,
   actions,
   onClose,
 }: {
   anchor: HTMLElement;
-  binary: string;
   actions: AccountActions;
   onClose: () => void;
 }) {
   const anchorRef = useMemo(() => ({ current: anchor as HTMLElement | null }), [anchor]);
   return (
-    <Popover anchorRef={anchorRef} open onClose={onClose} className="wb-acc-pop" width={460}>
-      <ClaudeAccountsPanel binary={binary} actions={actions} onClose={onClose} />
+    <Popover anchorRef={anchorRef} open onClose={onClose} className="wb-acc-pop" width={440}>
+      <AccountsPanel actions={actions} onClose={onClose} autoFocusSearch />
     </Popover>
   );
 }

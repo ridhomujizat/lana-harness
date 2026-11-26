@@ -24,15 +24,78 @@ const (
 	agentHookOff agentHookState = "off"
 )
 
-// AgentHookFolder is one Claude Code config folder the daemon installs the
-// Workbench hooks into (spec 69 REQ-WA-013, REQ-WA-014). The hooks are
-// installed only by the owner's action.
+// Agent hook folder kinds (spec 77 REQ-WRA-009).
+const (
+	// AgentHookClaude is a Claude Code config folder (settings.json).
+	AgentHookClaude = "claude"
+	// AgentHookAntigravity is an agy config folder, <HOME>/.gemini/config
+	// (hooks.json).
+	AgentHookAntigravity = "antigravity"
+)
+
+// AgentHookFolder is one config folder the daemon installs the Workbench hooks
+// into (spec 69 REQ-WA-013, REQ-WA-014; spec 77 REQ-WRA-009 for agy). The
+// hooks are installed only by the owner's action.
 type AgentHookFolder struct {
-	// Dir is the folder that holds settings.json.
+	// Dir is the folder that holds settings.json (Claude Code) or hooks.json
+	// (Antigravity).
 	Dir string
-	// Account is the Claude Code account the folder belongs to; "claude-code"
-	// is the daemon's own folder.
+	// Account is the account the folder belongs to; "claude-code" is the
+	// daemon's own Claude Code folder and "antigravity" the owner's agy one.
 	Account string
+	// Kind is AgentHookClaude ("" too) or AgentHookAntigravity.
+	Kind string
+}
+
+// kind is the folder's kind, AgentHookClaude when unset.
+func (f AgentHookFolder) kind() string {
+	if f.Kind == AgentHookAntigravity {
+		return AgentHookAntigravity
+	}
+	return AgentHookClaude
+}
+
+// install adds Lana's hooks to the folder's file.
+func (f AgentHookFolder) install(binary string) error {
+	var err error
+	if f.kind() == AgentHookAntigravity {
+		_, err = agenthook.InstallAgy(f.path(), binary)
+	} else {
+		_, err = agenthook.Install(f.path(), binary)
+	}
+	return err
+}
+
+// remove takes Lana's hooks out of the folder's file.
+func (f AgentHookFolder) remove() error {
+	var err error
+	if f.kind() == AgentHookAntigravity {
+		_, err = agenthook.RemoveAgy(f.path())
+	} else {
+		_, err = agenthook.Remove(f.path())
+	}
+	return err
+}
+
+// installed reports whether the folder's file holds Lana's hooks for binary.
+func (f AgentHookFolder) installed(binary string) (bool, error) {
+	if f.kind() == AgentHookAntigravity {
+		return agenthook.InstalledAgy(f.path(), binary)
+	}
+	return agenthook.Installed(f.path(), binary)
+}
+
+// path is the hook file of the folder.
+func (f AgentHookFolder) path() string {
+	if f.kind() == AgentHookAntigravity {
+		return filepath.Join(f.Dir, agenthook.AgyHooksFile)
+	}
+	return agentHookSettingsPath(f.Dir)
+}
+
+// view is the route view of the folder, without its install state.
+func (f AgentHookFolder) view() agentHookFolderView {
+	return agentHookFolderView{Dir: f.Dir, Account: f.Account, Kind: f.kind()}
 }
 
 // AgentHookConfig configures the Workbench agent hook routes (spec 69). The
@@ -101,8 +164,8 @@ func (s *Server) installAgentHook(cfg AgentHookConfig) {
 		return
 	}
 	for _, folder := range agentHookFolders(cfg) {
-		if _, err := agenthook.Install(agentHookSettingsPath(folder.Dir), cfg.Binary); err != nil {
-			s.logger.Warn("web: install Claude Code hooks", "dir", folder.Dir, "error", err)
+		if err := folder.install(cfg.Binary); err != nil {
+			s.logger.Warn("web: install Workbench agent hooks", "dir", folder.Dir, "kind", folder.kind(), "error", err)
 		}
 	}
 }
@@ -119,8 +182,10 @@ func (s *Server) registerWorkbenchAgentHookRoutes() {
 
 // agentHookFolderView is one folder of the route answer.
 type agentHookFolderView struct {
-	Dir       string `json:"dir"`
-	Account   string `json:"account"`
+	Dir     string `json:"dir"`
+	Account string `json:"account"`
+	// Kind is "claude" or "antigravity" (spec 77 REQ-WRA-009).
+	Kind      string `json:"kind"`
 	Installed bool   `json:"installed"`
 	Error     string `json:"error,omitempty"`
 }
@@ -152,14 +217,13 @@ func (s *Server) handleAgentHookGet(w http.ResponseWriter, r *http.Request) {
 	folders := agentHookFolders(cfg)
 	views := make([]agentHookFolderView, 0, len(folders))
 	for _, folder := range folders {
-		path := agentHookSettingsPath(folder.Dir)
-		view := agentHookFolderView{Dir: folder.Dir, Account: folder.Account}
+		view := folder.view()
 		if state == agentHookOn {
-			if _, err := agenthook.Install(path, cfg.Binary); err != nil {
+			if err := folder.install(cfg.Binary); err != nil {
 				view.Error = agentHookErrorText(err)
 			}
 		}
-		view.Installed = agentHookInstalled(path, cfg.Binary, &view)
+		view.Installed = agentHookInstalled(folder, cfg.Binary, &view)
 		views = append(views, view)
 	}
 	writeJSON(w, http.StatusOK, agentHookAnswerOf(state, views))
@@ -194,18 +258,17 @@ func (s *Server) handleAgentHookPut(w http.ResponseWriter, r *http.Request) {
 	folders := agentHookFolders(cfg)
 	views := make([]agentHookFolderView, 0, len(folders))
 	for _, folder := range folders {
-		path := agentHookSettingsPath(folder.Dir)
-		view := agentHookFolderView{Dir: folder.Dir, Account: folder.Account}
+		view := folder.view()
 		var err error
 		if body.Enabled {
-			_, err = agenthook.Install(path, cfg.Binary)
+			err = folder.install(cfg.Binary)
 		} else {
-			_, err = agenthook.Remove(path)
+			err = folder.remove()
 		}
 		if err != nil {
 			view.Error = agentHookErrorText(err)
 		}
-		view.Installed = agentHookInstalled(path, cfg.Binary, &view)
+		view.Installed = agentHookInstalled(folder, cfg.Binary, &view)
 		views = append(views, view)
 	}
 	writeJSON(w, http.StatusOK, agentHookAnswerOf(state, views))
@@ -238,17 +301,17 @@ func agentHookNotAllowedResponse(cfg AgentHookConfig) agentHookResponse {
 	folders := agentHookFolders(cfg)
 	views := make([]agentHookFolderView, 0, len(folders))
 	for _, folder := range folders {
-		views = append(views, agentHookFolderView{
-			Dir: folder.Dir, Account: folder.Account, Error: agentHookNotAllowed,
-		})
+		view := folder.view()
+		view.Error = agentHookNotAllowed
+		views = append(views, view)
 	}
 	return agentHookResponse{Enabled: false, State: agentHookOff, Folders: views}
 }
 
 // agentHookInstalled reports whether the hook runs cfg.Binary in the folder,
 // folding a read error into the view so it never fails the call.
-func agentHookInstalled(path, binary string, view *agentHookFolderView) bool {
-	installed, err := agenthook.Installed(path, binary)
+func agentHookInstalled(folder AgentHookFolder, binary string, view *agentHookFolderView) bool {
+	installed, err := folder.installed(binary)
 	if err != nil {
 		if view.Error == "" {
 			view.Error = agentHookErrorText(err)
@@ -263,6 +326,9 @@ func agentHookInstalled(path, binary string, view *agentHookFolderView) bool {
 func agentHookErrorText(err error) string {
 	if errors.Is(err, agenthook.ErrInvalidSettings) {
 		return "settings.json is not valid JSON"
+	}
+	if errors.Is(err, agenthook.ErrInvalidHooks) {
+		return "hooks.json is not valid JSON"
 	}
 	return err.Error()
 }

@@ -199,8 +199,6 @@ func TestAvatarGenerateAI(t *testing.T) {
 	backend := &avatarTestBackend{fakeWebBackend: newFakeWebBackend(), generate: func(_ context.Context, agent, mode, model, prompt string, seed int64, color string) (avatar.Result, error) {
 		calls = append(calls, agent+"|"+mode+"|"+model)
 		switch model {
-		case "claude-code/opus":
-			return avatar.Result{}, avatar.ErrClaudeCodeModel
 		case "nope/x":
 			return avatar.Result{}, avatar.ErrUnknownModel
 		case "boom/x":
@@ -244,7 +242,7 @@ func TestAvatarGenerateAI(t *testing.T) {
 		t.Fatalf("calls = %v, want %v", calls, want)
 	}
 
-	for model, code := range map[string]int{"claude-code/opus": http.StatusBadRequest, "nope/x": http.StatusBadRequest, "boom/x": http.StatusInternalServerError} {
+	for model, code := range map[string]int{"nope/x": http.StatusBadRequest, "boom/x": http.StatusInternalServerError} {
 		rr = avatarRequest(t, s, http.MethodPost, "/v1/agents/coder/avatar/generate", map[string]any{"mode": "ai_parts", "model": model}, cookie, csrf)
 		if rr.code != code {
 			t.Fatalf("%s status = %d, body = %s", model, rr.code, rr.body)

@@ -97,17 +97,20 @@ type AntigravityUsage struct {
 // AntigravityAccountStatus is one account row of GET /v1/router/antigravity
 // (API-AGY-020, spec 75 additions).
 type AntigravityAccountStatus struct {
-	Name             string              `json:"name"`
-	Builtin          bool                `json:"builtin"`
-	Label            string              `json:"label"`
-	DisplayName      string              `json:"display_name"`
-	Home             string              `json:"home"`
-	Binary           string              `json:"binary"`
-	Disabled         bool                `json:"disabled"`
-	AllowScheduled   bool                `json:"allow_scheduled"`
-	SignedIn         bool                `json:"signed_in"`
-	Error            string              `json:"error"`
-	Tier             string              `json:"tier"`
+	Name           string `json:"name"`
+	Builtin        bool   `json:"builtin"`
+	Label          string `json:"label"`
+	DisplayName    string `json:"display_name"`
+	Home           string `json:"home"`
+	Binary         string `json:"binary"`
+	Disabled       bool   `json:"disabled"`
+	AllowScheduled bool   `json:"allow_scheduled"`
+	SignedIn       bool   `json:"signed_in"`
+	Error          string `json:"error"`
+	Tier           string `json:"tier"`
+	// Email is the email agy printed at the account's last Router sign-in
+	// (spec 77 REQ-WRA-014); "" when unknown.
+	Email            string              `json:"email"`
 	ModelsCount      int                 `json:"models_count"`
 	Running          int                 `json:"running"`
 	Queued           int                 `json:"queued"`
@@ -446,6 +449,9 @@ func (s *Server) handleCreateAntigravityAccount(w http.ResponseWriter, r *http.R
 		return
 	}
 	s.auditSave("provider.save", providerConfigPath(file, s.providerHome()), name, changed)
+	// Spec 77 REQ-WRA-010, REQ-WRA-011: share the new HOME's conversations and
+	// settings with the owner's, before the first sign-in starts.
+	s.shareAntigravityAccount(name, home)
 	response := antigravityAccountCreateResponse{
 		Name: name, Home: home, Version: webfiles.ConfigVersion(candidate),
 		RestartRequired: s.applyLiveRestartRequired(r.Context(), store, candidate),
@@ -712,7 +718,11 @@ func (s *Server) decorateAntigravityAccounts(ctx context.Context, rows []Antigra
 		if label, ok := labels[row.Name]; ok {
 			row.Label = label
 		}
+		// Spec 77 REQ-WRA-013: the label, else the email, else the name.
 		row.DisplayName = row.Label
+		if row.DisplayName == "" {
+			row.DisplayName = row.Email
+		}
 		if row.DisplayName == "" {
 			row.DisplayName = row.Name
 		}
@@ -865,6 +875,10 @@ func (s *Server) putAntigravityAccount(w http.ResponseWriter, r *http.Request, s
 		s.auditSave("provider.save", providerConfigPath(file, s.providerHome()), name, changed)
 		restartRequired = s.applyLiveRestartRequired(r.Context(), store, candidate)
 	}
+	// Spec 77 REQ-WRA-010, REQ-WRA-011: share the account HOME's
+	// conversations and settings with the owner's; the built-in account
+	// (home "") is left alone.
+	s.shareAntigravityAccount(name, home)
 	writeJSON(w, http.StatusOK, providerSaveResponse{
 		Name: name, Version: webfiles.ConfigVersion(candidate), RestartRequired: restartRequired, Home: home,
 	})

@@ -49,18 +49,47 @@ var (
 // cmdWorkbenchHook runs `lana workbench hook <event>`: session-start tells a
 // session it runs in a pane, and pre-edit reports the worktree an edit lands
 // in (spec 69).
+//
+// With `--agent agy` the hooks speak Antigravity's hook protocol (spec 77
+// REQ-WRA-009): session-start prints agy's injectSteps answer, and post-edit
+// reports the worktree of the file an edit tool wrote. Both always print a
+// JSON object agy accepts and exit 0.
 func cmdWorkbenchHook(args []string) int {
+	const usage = "error: use lana workbench hook session-start|pre-edit, or session-start|post-edit --agent agy"
 	if len(args) == 0 {
-		fmt.Fprintln(os.Stderr, "error: use lana workbench hook session-start|pre-edit")
+		fmt.Fprintln(os.Stderr, usage)
 		return 2
 	}
-	switch args[0] {
-	case "session-start":
-		return workbenchSessionStart(os.Stdin, os.Stdout)
-	case "pre-edit":
-		return workbenchPreEdit(os.Stdin)
+	agent := ""
+	for i := 1; i < len(args); i++ {
+		switch {
+		case args[i] == "--agent" && i+1 < len(args):
+			agent = args[i+1]
+			i++
+		case strings.HasPrefix(args[i], "--agent="):
+			agent = strings.TrimPrefix(args[i], "--agent=")
+		default:
+			fmt.Fprintln(os.Stderr, usage)
+			return 2
+		}
 	}
-	fmt.Fprintln(os.Stderr, "error: use lana workbench hook session-start|pre-edit")
+	switch agent {
+	case "", "claude":
+		switch args[0] {
+		case "session-start":
+			return workbenchSessionStart(os.Stdin, os.Stdout)
+		case "pre-edit":
+			return workbenchPreEdit(os.Stdin)
+		}
+	case "agy":
+		switch args[0] {
+		case "session-start":
+			return workbenchAgySessionStart(os.Stdin, os.Stdout)
+		case "post-edit":
+			return workbenchAgyPostEdit(os.Stdin, os.Stdout)
+		}
+	}
+	fmt.Fprintln(os.Stderr, usage)
 	return 2
 }
 

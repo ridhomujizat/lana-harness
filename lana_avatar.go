@@ -14,9 +14,6 @@ type AvatarResult = avatar.Result
 
 // Avatar generation errors (spec 62).
 var (
-	// ErrAvatarClaudeCode is returned when the requested model runs in
-	// Claude Code (REQ-PXA-007).
-	ErrAvatarClaudeCode = avatar.ErrClaudeCodeModel
 	// ErrAvatarUnknownModel is returned when the requested model names no
 	// combo or known provider address.
 	ErrAvatarUnknownModel = avatar.ErrUnknownModel

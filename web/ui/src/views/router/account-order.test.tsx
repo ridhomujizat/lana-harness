@@ -220,6 +220,71 @@ function usage(): api.RouterUsage {
   return { range: "24h", totals: STATS, series: [], by_provider: [], by_model: [], by_source: [] };
 }
 
+/* Spec 77 revision 4: the accounts list is the order list; a row carries its
+   logo, name line, always-on notes, and settings that open under it. */
+describe("AccountOrderList rich rows", () => {
+  const RICH: OrderItem[] = [
+    {
+      id: "a",
+      label: "Alpha",
+      rowLabel: "Account a",
+      rowClass: "is-off",
+      lead: <span data-testid="logo-a" />,
+      sub: <span>a@x.dev</span>,
+      rowActions: <button type="button">Sign in</button>,
+      below: <p>Signing in…</p>,
+      details: <button type="button">Remove a</button>,
+    },
+    { id: "b", label: "Beta", rowLabel: "Account b", details: <span>Beta settings</span>, open: true },
+  ];
+
+  it("shows each row once with its handle, line, notes, and a details toggle", async () => {
+    const onSave = vi.fn().mockResolvedValue(undefined);
+    render(<AccountOrderList label="Accounts" items={RICH} onSave={onSave} />);
+    const list = screen.getByRole("list", { name: "Accounts" });
+    expect(within(list).getAllByRole("listitem")).toHaveLength(2);
+    const alpha = within(list).getByRole("listitem", { name: "Account a" });
+    expect(alpha.className).toContain("is-off");
+    expect(within(alpha).getByTestId("logo-a")).toBeTruthy();
+    expect(within(alpha).getByText("a@x.dev")).toBeTruthy();
+    expect(within(alpha).getByRole("button", { name: "Sign in" })).toBeTruthy();
+    expect(within(alpha).getByText("Signing in…")).toBeTruthy();
+    expect(within(alpha).getByRole("button", { name: "Move Alpha" })).toBeTruthy();
+    expect(within(alpha).getByRole("checkbox", { name: "Use Alpha as backup" })).toBeTruthy();
+
+    /* Closed by default; the chevron opens the settings region. */
+    const toggle = within(alpha).getByRole("button", { name: "Details of a" });
+    expect(toggle.getAttribute("aria-expanded")).toBe("false");
+    expect(within(alpha).queryByRole("button", { name: "Remove a" })).toBeNull();
+    fireEvent.click(toggle);
+    expect(toggle.getAttribute("aria-expanded")).toBe("true");
+    const region = within(alpha).getByRole("region", { name: "Details of a" });
+    expect(toggle.getAttribute("aria-controls")).toBe(region.id);
+    expect(within(region).getByRole("button", { name: "Remove a" })).toBeTruthy();
+
+    /* open: true starts open; the owner can close it. */
+    const beta = within(list).getByRole("listitem", { name: "Account b" });
+    expect(within(beta).getByText("Beta settings")).toBeTruthy();
+    fireEvent.click(within(beta).getByRole("button", { name: "Details of b" }));
+    expect(within(beta).queryByText("Beta settings")).toBeNull();
+
+    /* The handle still reorders with the same save. */
+    fireEvent.keyDown(within(beta).getByRole("button", { name: "Move Beta" }), { key: "ArrowUp" });
+    expect(onSave).toHaveBeenCalledWith(["b", "a"], []);
+    await screen.findByText("Saved");
+  });
+
+  it("a list of one has no handle, backup switch, hint, or Used first", () => {
+    render(<AccountOrderList label="Accounts" items={[RICH[0] as OrderItem]} sortable={false} onSave={vi.fn()} />);
+    const alpha = screen.getByRole("listitem", { name: "Account a" });
+    expect(within(alpha).queryByRole("button", { name: "Move Alpha" })).toBeNull();
+    expect(within(alpha).queryByRole("checkbox", { name: "Use Alpha as backup" })).toBeNull();
+    expect(within(alpha).queryByText("Used first")).toBeNull();
+    expect(screen.queryByText(/Drag a row/)).toBeNull();
+    expect(within(alpha).getByRole("button", { name: "Details of a" })).toBeTruthy();
+  });
+});
+
 describe("provider keys", () => {
   beforeEach(() => {
     vi.mocked(api.listRouterModels).mockResolvedValue([]);
@@ -341,8 +406,10 @@ describe("Claude Code account order", () => {
       ],
     });
     render(<ProviderDetail id="claude-code" />);
-    const list = await screen.findByRole("list", { name: "Claude Code account order" });
-    expect(within(list).getByRole("listitem", { name: "me@home.dev" }).textContent).toContain("Used first");
+    const list = await screen.findByRole("list", { name: "Claude Code accounts" });
+    expect(within(list).getByRole("listitem", { name: "Account claude-code" }).textContent).toContain("Used first");
+    /* Spec 77 revision 4: the order lives in the accounts list. */
+    expect(screen.queryByRole("heading", { name: "Account order" })).toBeNull();
     expect(screen.getByText(POOL_TERMS_NOTE)).toBeTruthy();
     fireEvent.keyDown(within(list).getByRole("button", { name: "Move me@work.dev" }), { key: "ArrowUp" });
     await waitFor(() =>

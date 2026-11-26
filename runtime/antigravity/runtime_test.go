@@ -80,12 +80,6 @@ func (h *harness) setFixture(name string) {
 	h.fixture.Store(abs)
 }
 
-func (h *harness) setEnv(env ...string) {
-	h.mu.Lock()
-	h.env = env
-	h.mu.Unlock()
-}
-
 // recorder collects emitted events.
 type recorder struct {
 	mu     sync.Mutex
@@ -680,6 +674,24 @@ func TestBuildEnvScrub(t *testing.T) {
 	plain := buildEnv(base, core.RuntimeConfig{})
 	if countPrefix(plain, "HOME=") != 1 || !hasEnv(plain, "HOME=/daemon") {
 		t.Fatalf("plain = %v", plain)
+	}
+}
+
+// Spec 77 REQ-WRA-013: an added account gets SSH_CONNECTION (file-based token
+// storage, no Keychain dialog); the built-in account does not; a value the
+// daemon already has is kept, exactly once.
+func TestBuildEnvFileTokenStorage(t *testing.T) {
+	base := []string{"HOME=/daemon", "PATH=/bin"}
+	want := "SSH_CONNECTION=127.0.0.1 0 127.0.0.1 0"
+	if env := buildEnv(base, core.RuntimeConfig{Home: "/acc"}); !hasEnv(env, want) || countPrefix(env, "SSH_CONNECTION=") != 1 {
+		t.Fatalf("added = %v", env)
+	}
+	if env := buildEnv(base, core.RuntimeConfig{}); countPrefix(env, "SSH_CONNECTION=") != 0 {
+		t.Fatalf("built-in = %v", env)
+	}
+	preset := append([]string{"SSH_CONNECTION=10.0.0.1 22 10.0.0.2 22"}, base...)
+	if env := buildEnv(preset, core.RuntimeConfig{Home: "/acc"}); !hasEnv(env, "SSH_CONNECTION=10.0.0.1 22 10.0.0.2 22") || countPrefix(env, "SSH_CONNECTION=") != 1 {
+		t.Fatalf("preset = %v", env)
 	}
 }
 

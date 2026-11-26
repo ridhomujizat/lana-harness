@@ -75,6 +75,11 @@ type ChatRequest struct {
 	// its own off setting. "" means the provider default (REQ-MDL-001). An
 	// adapter sends a level the model does not list as the model's default.
 	ReasoningEffort string
+	// ToolChoice is the OpenAI tool_choice of a proxy request: "" (not set),
+	// "none", "auto", "required", or "function" for a named function. API
+	// adapters ignore it; a Claude Code or Antigravity target serves a
+	// request with tools only when it is "none" (spec 78 REQ-RPR-003).
+	ToolChoice string
 }
 
 type ChatEventKind string

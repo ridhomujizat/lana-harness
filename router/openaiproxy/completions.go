@@ -112,16 +112,6 @@ func (h *handler) chatCompletions(w http.ResponseWriter, req *http.Request, keyI
 		writeError(w, http.StatusBadRequest, "invalid_request_error", "invalid_value", err.Error())
 		return
 	}
-	// ADR 0022, AC-AGY-016: an Antigravity address is never served through the
-	// proxy. It answers model_not_found like an unknown model and nothing runs.
-	if t, ok := router.ParseAddress(in.Model); ok {
-		if kind, _ := h.r.Kind(t.Provider); kind == core.AntigravityKind {
-			writeError(w, http.StatusNotFound, "invalid_request_error", "model_not_found",
-				fmt.Sprintf("The model %q does not exist. Use a combo name or a provider/model address; GET /models lists them.", in.Model))
-			return
-		}
-	}
-
 	id := newCompletionID()
 	meta := router.CallMeta{Source: "proxy", Agent: "proxy:" + keyID, TurnID: id, Requested: in.Model}
 	ctx := req.Context()

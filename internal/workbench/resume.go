@@ -115,7 +115,8 @@ func resumeLine(label, id, configDir, home string, env []string) (string, bool) 
 // false when the plain `claude <tail>` form is what should be typed. A
 // claude-swap profile whose account email can be read, with cswap installed,
 // runs under that account: `cswap run <email> -- <tail>`. Any other config dir
-// that still exists and is safe to quote is passed as CLAUDE_CONFIG_DIR.
+// that still exists and is safe to quote is passed as CLAUDE_CONFIG_DIR and
+// CLAUDE_SECURESTORAGE_CONFIG_DIR (spec 77 REQ-WRA-006).
 // Every failure falls through to the plain form (spec 60 addendum).
 func claudeResumeLine(configDir, tail, home string, env []string) (string, bool) {
 	if !isDir(configDir) {
@@ -127,7 +128,9 @@ func claudeResumeLine(configDir, tail, home string, env []string) (string, bool)
 		}
 	}
 	if safeConfigDir(configDir) {
-		return "CLAUDE_CONFIG_DIR='" + configDir + "' claude " + tail, true
+		// Spec 77 REQ-WRA-006: a Router account keeps its Keychain login under
+		// CLAUDE_SECURESTORAGE_CONFIG_DIR, so both are set.
+		return "CLAUDE_CONFIG_DIR='" + configDir + "' CLAUDE_SECURESTORAGE_CONFIG_DIR='" + configDir + "' claude " + tail, true
 	}
 	return "", false
 }

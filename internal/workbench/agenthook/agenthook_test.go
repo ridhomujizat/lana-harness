@@ -574,3 +574,44 @@ func jsonStringForTest(s string) string {
 	}
 	return string(data)
 }
+
+// TestInstallWritesThroughSymlink is AC-WRA-003 (spec 77 REQ-WRA-002): an
+// account's settings.json linked to the default folder's stays a link, and the
+// target holds the hooks; Remove keeps the link too.
+func TestInstallWritesThroughSymlink(t *testing.T) {
+	defaultDir := t.TempDir()
+	accountDir := t.TempDir()
+	target := filepath.Join(defaultDir, "settings.json")
+	writeFile(t, target, `{"theme":"dark"}`, 0o600)
+	link := filepath.Join(accountDir, "settings.json")
+	if err := os.Symlink(target, link); err != nil {
+		t.Fatal(err)
+	}
+	const bin = "/opt/lana/bin/lana"
+	if changed, err := Install(link, bin); err != nil || !changed {
+		t.Fatalf("Install = (%v, %v), want (true, nil)", changed, err)
+	}
+	info, err := os.Lstat(link)
+	if err != nil || info.Mode()&os.ModeSymlink == 0 {
+		t.Fatalf("account settings.json is no longer a symlink: %v %v", info, err)
+	}
+	if got := readCommands(t, target); len(got) != 1 || got[0] != Command(bin) {
+		t.Fatalf("target SessionStart commands = %q", got)
+	}
+	data, _ := os.ReadFile(target)
+	if !strings.Contains(string(data), `"theme": "dark"`) {
+		t.Fatalf("target lost its keys:\n%s", data)
+	}
+	if ok, err := Installed(link, bin); err != nil || !ok {
+		t.Fatalf("Installed through link = (%v, %v)", ok, err)
+	}
+	if changed, err := Remove(link); err != nil || !changed {
+		t.Fatalf("Remove = (%v, %v), want (true, nil)", changed, err)
+	}
+	if info, err := os.Lstat(link); err != nil || info.Mode()&os.ModeSymlink == 0 {
+		t.Fatalf("account settings.json is no longer a symlink after Remove")
+	}
+	if _, err := os.Lstat(link + backupSuffix); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("backup written next to the link, want next to the target: %v", err)
+	}
+}

@@ -26,23 +26,28 @@ func (c *cooldowns) clear(t Target) {
 	delete(c.until, t)
 }
 
-// filter drops the targets cooling down at now. When every target is
-// cooling down, it returns the full chain.
-func (c *cooldowns) filter(chain []Target, now time.Time) []Target {
+// filterIndex returns the indexes of the targets of chain that are not
+// cooling down at now. When every target is cooling down, it returns every
+// index.
+func (c *cooldowns) filterIndex(chain []Target, now time.Time) []int {
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	if len(c.until) == 0 {
-		return chain
+	all := make([]int, len(chain))
+	for i := range chain {
+		all[i] = i
 	}
-	active := make([]Target, 0, len(chain))
-	for _, t := range chain {
+	if len(c.until) == 0 {
+		return all
+	}
+	active := make([]int, 0, len(chain))
+	for i, t := range chain {
 		if until, ok := c.until[t]; ok && now.Before(until) {
 			continue
 		}
-		active = append(active, t)
+		active = append(active, i)
 	}
 	if len(active) == 0 {
-		return chain
+		return all
 	}
 	return active
 }

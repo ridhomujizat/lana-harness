@@ -23,10 +23,12 @@ import (
 	"github.com/ridhomujizat/lana-harness/core"
 	"github.com/ridhomujizat/lana-harness/internal/agenthome"
 	"github.com/ridhomujizat/lana-harness/internal/browser"
+	"github.com/ridhomujizat/lana-harness/internal/claudeshare"
 	"github.com/ridhomujizat/lana-harness/internal/llmcall"
 	"github.com/ridhomujizat/lana-harness/internal/logring"
 	"github.com/ridhomujizat/lana-harness/internal/selfupdate"
 	"github.com/ridhomujizat/lana-harness/internal/workbench"
+	"github.com/ridhomujizat/lana-harness/internal/workbench/agenthook"
 	"github.com/ridhomujizat/lana-harness/web"
 )
 
@@ -387,11 +389,37 @@ func runDaemonLocked(ctx context.Context, stderr io.Writer, signals <-chan os.Si
 		// the owner's action; the Workbench shows an Install / Not now notice.
 		// Only the main daemon on the owner's default home touches the real
 		// Claude settings.
+		// Spec 77 REQ-WRA-009: the same switch manages the agy hooks.json of
+		// the owner's ~/.gemini/config and of every added Antigravity account
+		// HOME, while agy is installed.
 		webServer.SetAgentHook(web.AgentHookConfig{
 			Binary:  lanaBinaryPath(),
-			Folders: claudeHookFolders(home),
+			Folders: workbenchHookFolders(home, func() bool { return rt != nil && rt.AntigravityInstalled(context.Background()) }),
 			Allowed: isDefaultLanaHome(home),
 		})
+		// Spec 77 REQ-WRA-001: every Router Claude Code account shares its
+		// history, projects and user settings with the default Claude Code
+		// folder, linked on save and once here, in the background. Like the
+		// hooks above, only the main daemon (or one given its own
+		// CLAUDE_CONFIG_DIR) links into the owner's Claude folder.
+		// Spec 77 REQ-WRA-012: under the same gate, an account that never
+		// signed in gets the default's .claude.json without its login keys.
+		if claudeShareAllowed(home) {
+			webServer.SetClaudeDefaultDir(defaultClaudeDir())
+			webServer.SetClaudeDefaultJSON(defaultClaudeJSON())
+			go shareClaudeAccounts(home, defaultClaudeDir(), defaultClaudeJSON())
+		}
+		// Spec 77 REQ-WRA-010 (experimental), REQ-WRA-011: every added
+		// Antigravity account HOME shares its conversations and settings with
+		// the owner's HOME, linked on create and save and once here, in the
+		// background. Only the main daemon, or one started with
+		// LANA_SHARE_HISTORY=1, links into the owner's ~/.gemini.
+		if agyShareAllowed(home) {
+			if ownerHome, err := os.UserHomeDir(); err == nil && ownerHome != "" {
+				webServer.SetAntigravityShareHome(ownerHome)
+				go shareAntigravityAccounts(home, ownerHome)
+			}
+		}
 		// Spec 55 A5: agent-finished and agent-needs-you banners. The watcher
 		// subscribes to a core the browser starts through the backend's onLive
 		// hook, and to one already running at start; it never starts a core.
@@ -673,23 +701,173 @@ func claudeHookFolders(home string) func() []web.AgentHookFolder {
 			folders = append(folders, web.AgentHookFolder{Dir: dir, Account: account})
 		}
 		add(defaultClaudeDir(), core.ClaudeCodeProvider)
-		result, err := config.Load(context.Background(), config.Options{Home: home})
-		if err != nil {
-			return folders
-		}
-		names := make([]string, 0, len(result.Config.Providers))
-		for name := range result.Config.Providers {
-			names = append(names, name)
-		}
-		sort.Strings(names)
-		for _, name := range names {
-			cfg := result.Config.Providers[name]
-			if cfg.Kind != core.ClaudeCodeKind {
-				continue
-			}
-			add(llmcall.ClaudeConfigDir(home, name, cfg), name)
+		for _, account := range claudeAccountFolders(home) {
+			add(account.Dir, account.Account)
 		}
 		return folders
+	}
+}
+
+// claudeAccountFolders returns the configured Claude Code accounts (every
+// provider of kind claude-code, by name) with their config folders. A config
+// that cannot be loaded has none.
+func claudeAccountFolders(home string) []web.AgentHookFolder {
+	result, err := config.Load(context.Background(), config.Options{Home: home})
+	if err != nil {
+		return nil
+	}
+	names := make([]string, 0, len(result.Config.Providers))
+	for name := range result.Config.Providers {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	var out []web.AgentHookFolder
+	for _, name := range names {
+		cfg := result.Config.Providers[name]
+		if cfg.Kind != core.ClaudeCodeKind {
+			continue
+		}
+		if dir := llmcall.ClaudeConfigDir(home, name, cfg); dir != "" {
+			out = append(out, web.AgentHookFolder{Dir: dir, Account: name})
+		}
+	}
+	return out
+}
+
+// claudeShareAllowed reports whether this daemon links account folders into
+// the default Claude Code folder (spec 77 REQ-WRA-001): the main daemon on the
+// owner's default home, any daemon started with its own CLAUDE_CONFIG_DIR, or
+// one started with LANA_SHARE_HISTORY=1 (the owner's explicit opt-in). Another
+// dev, scratch or test daemon never moves files into the owner's ~/.claude.
+func claudeShareAllowed(home string) bool {
+	return isDefaultLanaHome(home) || shareHistoryOptIn() || strings.TrimSpace(os.Getenv("CLAUDE_CONFIG_DIR")) != ""
+}
+
+// shareHistoryOptIn reports LANA_SHARE_HISTORY=1: the owner lets a scratch
+// daemon link account history into the real Claude Code and agy folders
+// (spec 77 REQ-WRA-001, REQ-WRA-010).
+func shareHistoryOptIn() bool {
+	return strings.TrimSpace(os.Getenv("LANA_SHARE_HISTORY")) == "1"
+}
+
+// agyShareAllowed reports whether this daemon links Antigravity account HOMEs
+// into the owner's HOME (spec 77 REQ-WRA-010): the main daemon, or one started
+// with LANA_SHARE_HISTORY=1.
+func agyShareAllowed(home string) bool {
+	return isDefaultLanaHome(home) || shareHistoryOptIn()
+}
+
+// workbenchHookFolders returns every folder the Workbench hook switch manages
+// (spec 69, spec 77 REQ-WRA-009): the Claude Code folders, then, while
+// agyInstalled reports agy found, the agy config folders.
+func workbenchHookFolders(home string, agyInstalled func() bool) func() []web.AgentHookFolder {
+	claude := claudeHookFolders(home)
+	return func() []web.AgentHookFolder {
+		folders := claude()
+		if agyInstalled == nil || !agyInstalled() {
+			return folders
+		}
+		return append(folders, agyHookFolders(home)...)
+	}
+}
+
+// agyHookFolders returns the agy config folders (<HOME>/.gemini/config) the
+// hook switch manages: the owner's, only on the main daemon (the gate of the
+// default Claude Code folder), and every added Antigravity account HOME's.
+func agyHookFolders(home string) []web.AgentHookFolder {
+	var folders []web.AgentHookFolder
+	seen := map[string]bool{}
+	add := func(dir, account string) {
+		dir = filepath.Clean(dir)
+		if seen[dir] {
+			return
+		}
+		seen[dir] = true
+		folders = append(folders, web.AgentHookFolder{Dir: dir, Account: account, Kind: web.AgentHookAntigravity})
+	}
+	if isDefaultLanaHome(home) {
+		if ownerHome, err := os.UserHomeDir(); err == nil && ownerHome != "" {
+			add(agenthook.AgyConfigDir(ownerHome), core.AntigravityProvider)
+		}
+	}
+	for _, account := range antigravityAccountHomes(home) {
+		add(agenthook.AgyConfigDir(account.Dir), account.Account)
+	}
+	return folders
+}
+
+// antigravityAccountHomes returns the added Antigravity accounts (every
+// provider of kind antigravity but the built-in one, by name) with their HOME
+// in Dir. A config that cannot be loaded has none.
+func antigravityAccountHomes(home string) []web.AgentHookFolder {
+	result, err := config.Load(context.Background(), config.Options{Home: home})
+	if err != nil {
+		return nil
+	}
+	names := make([]string, 0, len(result.Config.Providers))
+	for name := range result.Config.Providers {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	var out []web.AgentHookFolder
+	for _, name := range names {
+		cfg := result.Config.Providers[name]
+		if cfg.Kind != core.AntigravityKind || name == core.AntigravityProvider {
+			continue
+		}
+		if dir := llmcall.AntigravityHomeDir(home, name, cfg); dir != "" {
+			out = append(out, web.AgentHookFolder{Dir: dir, Account: name, Kind: web.AgentHookAntigravity})
+		}
+	}
+	return out
+}
+
+// shareAntigravityAccounts links every added Antigravity account HOME's
+// conversations and settings to ownerHome once (spec 77 REQ-WRA-010,
+// REQ-WRA-011). A HOME that does not
+// exist yet is skipped. Failures are only logged.
+func shareAntigravityAccounts(home, ownerHome string) {
+	if ownerHome == "" {
+		return
+	}
+	for _, account := range antigravityAccountHomes(home) {
+		report, err := claudeshare.LinkAntigravity(account.Dir, ownerHome, time.Now())
+		if err != nil {
+			slog.Warn("antigravity: share conversations with the owner HOME", "account", account.Account, "home", account.Dir, "error", err)
+		}
+		if report.Changed() {
+			slog.Info("antigravity: shared conversations with the owner HOME", "account", account.Account, "home", account.Dir)
+		}
+	}
+}
+
+// shareClaudeAccounts links every configured Claude Code account folder to
+// defaultDir once (spec 77 REQ-WRA-001) and gives an account that never signed
+// in a copy of defaultJSON without its login keys (REQ-WRA-012). Failures are
+// only logged.
+func shareClaudeAccounts(home, defaultDir, defaultJSON string) {
+	if defaultDir == "" && defaultJSON == "" {
+		return
+	}
+	for _, account := range claudeAccountFolders(home) {
+		if defaultDir != "" {
+			report, err := claudeshare.Link(account.Dir, defaultDir, time.Now())
+			if err != nil {
+				slog.Warn("claude: share history with the default folder", "account", account.Account, "dir", account.Dir, "error", err)
+			}
+			if report.Changed() {
+				slog.Info("claude: shared history with the default folder", "account", account.Account, "dir", account.Dir)
+			}
+		}
+		if defaultJSON != "" {
+			wrote, err := claudeshare.SeedClaudeJSON(account.Dir, defaultJSON)
+			if err != nil {
+				slog.Warn("claude: copy settings from the default account", "account", account.Account, "dir", account.Dir, "error", err)
+			}
+			if wrote {
+				slog.Info("claude: copied settings from the default account", "account", account.Account, "dir", account.Dir)
+			}
+		}
 	}
 }
 
@@ -704,6 +882,13 @@ func defaultClaudeDir() string {
 		return ""
 	}
 	return filepath.Join(userHome, ".claude")
+}
+
+// defaultClaudeJSON is the daemon's own Claude Code global config file (spec
+// 77 REQ-WRA-012): $CLAUDE_CONFIG_DIR/.claude.json, else ~/.claude.json.
+func defaultClaudeJSON() string {
+	explicit := strings.TrimSpace(os.Getenv("CLAUDE_CONFIG_DIR")) != ""
+	return claudeshare.ClaudeJSONPath(defaultClaudeDir(), explicit)
 }
 
 // startWeb binds the web listener and prints the contract start line.

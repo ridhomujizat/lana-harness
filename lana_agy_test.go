@@ -132,14 +132,16 @@ func TestAntigravitySignInStateMachine(t *testing.T) {
 	record := filepath.Join(t.TempDir(), "agy.jsonl")
 	t.Setenv("FAKEAGY_RECORD", record)
 	t.Setenv("FAKEAGY_LOGIN_CODE", "4/good-code")
+	t.Setenv("FAKEAGY_LOGIN_EMAIL", "second@example.com")
 	t.Setenv("FAKEAGY_MODELS", agyFixture(t, "models.txt"))
 	home := t.TempDir()
+	st := openRouterTestStore(t)
 	cfg := `
 [providers.agy-2]
 kind = "antigravity"
 binary = "` + bin + `"
 `
-	rt, err := New(context.Background(), Options{Home: home, Store: openRouterTestStore(t), Layers: []config.Layer{{Name: "test", TOML: []byte(cfg)}}})
+	rt, err := New(context.Background(), Options{Home: home, Store: st, Layers: []config.Layer{{Name: "test", TOML: []byte(cfg)}}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -193,6 +195,28 @@ binary = "` + bin + `"
 	logins := fakeAgyRecords(t, record, "login")
 	if len(logins) != 1 || logins[0]["line"] != "4/good-code" {
 		t.Fatalf("login lines = %+v", logins)
+	}
+	// Spec 77 REQ-WRA-013: the added account's agy runs with SSH_CONNECTION
+	// (file-based token storage) unless the test runs with one already.
+	if os.Getenv("SSH_CONNECTION") == "" && !recordEnv(starts[0], "SSH_CONNECTION=127.0.0.1 0 127.0.0.1 0") {
+		t.Fatalf("login env = %+v", starts[0])
+	}
+	// Spec 77 REQ-WRA-014: the email agy printed is kept for the account, in
+	// router_kv, and reported on its row.
+	if got := rt.AntigravityEmail("agy-2"); got != "second@example.com" {
+		t.Fatalf("email = %q", got)
+	}
+	if value, ok, err := st.GetRouterKV(context.Background(), kvAntigravityEmailPrefix+"agy-2"); err != nil || !ok || value != "second@example.com" {
+		t.Fatalf("stored email = %q %v %v", value, ok, err)
+	}
+	rows, err := rt.AntigravityAccounts(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, row := range rows {
+		if row.Name == "agy-2" && row.Email != "second@example.com" {
+			t.Fatalf("row = %+v", row)
+		}
 	}
 
 	// A wrong code fails with agy's last line.
@@ -474,5 +498,43 @@ agent = "plain"
 	t.Cleanup(func() { _ = rt3.Close() })
 	if err := rt3.scheduledRunAllowed("plain", ""); err == nil || err.Error() != want {
 		t.Fatalf("no allow_scheduled = %v", err)
+	}
+}
+
+// Spec 77 REQ-WRA-014: a kept email survives a restart (router_kv) and a
+// removed account's email is dropped.
+func TestAntigravityEmailStoredAndForgotten(t *testing.T) {
+	home := t.TempDir()
+	st := openRouterTestStore(t)
+	cfg := `
+[providers.agy-2]
+kind = "antigravity"
+`
+	open := func() *Runtime {
+		rt, err := New(context.Background(), Options{Home: home, Store: st, Layers: []config.Layer{{Name: "test", TOML: []byte(cfg)}}})
+		if err != nil {
+			t.Fatal(err)
+		}
+		return rt
+	}
+	rt := open()
+	rt.setAntigravityEmail("agy-2", "second@example.com")
+	rt.setAntigravityEmail(AntigravityRuntime, "owner@example.com")
+	if got := rt.AntigravityEmail(AntigravityRuntime); got != "" {
+		t.Fatalf("built-in email = %q", got)
+	}
+	_ = rt.Close()
+
+	rt = open()
+	t.Cleanup(func() { _ = rt.Close() })
+	if got := rt.AntigravityEmail("agy-2"); got != "second@example.com" {
+		t.Fatalf("email after restart = %q", got)
+	}
+	rt.ForgetAntigravityAccount("agy-2")
+	if got := rt.AntigravityEmail("agy-2"); got != "" {
+		t.Fatalf("email after forget = %q", got)
+	}
+	if value, _, err := st.GetRouterKV(context.Background(), kvAntigravityEmailPrefix+"agy-2"); err != nil || value != "" {
+		t.Fatalf("stored email after forget = %q %v", value, err)
 	}
 }

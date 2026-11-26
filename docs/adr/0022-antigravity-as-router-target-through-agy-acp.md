@@ -4,6 +4,7 @@
 - **Date**: 2026-11-25
 - **Deciders**: Ridho
 - **Related ADRs**: [0018](0018-claude-code-as-external-agent-runtime.md), [0020](0020-claude-code-as-router-target-with-lana-context.md), [0012](0012-acp-and-sdk-json-rpc.md)
+- **Superseded in part by ADR 0023**: [0023](0023-claude-code-and-antigravity-through-the-router-endpoint.md) (2026-11-26) replaces the proxy clause of item 5: Antigravity models are served through the router endpoint as headless `agy -p` calls. The agent runtime clauses stay.
 
 ## Context
 

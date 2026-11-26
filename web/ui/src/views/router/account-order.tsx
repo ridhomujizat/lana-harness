@@ -1,10 +1,10 @@
 import { useId, useRef, useState } from "react";
 import type { KeyboardEvent as ReactKeyboardEvent, PointerEvent as ReactPointerEvent, ReactNode } from "react";
 import type { PlanWindow } from "../../api/router";
-import { Badge, Progress, Toggle } from "../../ui/gr8r";
+import { Badge, IconButton, Progress, Toggle } from "../../ui/gr8r";
 import { Ic } from "../../ui/icons";
 import { planWindowLabel } from "./limits";
-import { failureOf, parseTime } from "./router-common";
+import { failureOf, parseTime, resetsIn } from "./router-common";
 
 /* Spec 75 (REQ-PAF-006): the "Account order" list of a subscription pool
    (Claude Code, Antigravity) and the key list of an API provider. The top row
@@ -12,7 +12,12 @@ import { failureOf, parseTime } from "./router-common";
    a line shows where it lands) or with ↑/↓ on the focused handle, which is
    announced. Every move saves at once; a failed save puts the list back and
    shows the error. Rows with pool = false sit below a "Not used as backup"
-   divider and can be dragged back above it. */
+   divider and can be dragged back above it.
+
+   Spec 77 revision 4: on the Claude Code and Antigravity pages this is the
+   one accounts list. A row then also carries the account's logo, name line,
+   sign-in progress (always shown), and its settings, which open under the
+   row with the chevron; there is no separate account card. */
 
 export interface OrderItem {
   /* The account or secret name; it is what the save sends. */
@@ -27,6 +32,25 @@ export interface OrderItem {
   coolingUntil?: string | null;
   /* false = not used by a pooled address (below the divider). */
   pool?: boolean;
+  /* Rich rows (spec 77 revision 4). The row's accessible name (default
+     label). */
+  rowLabel?: string;
+  /* Extra classes of the row, for example "is-off" or "is-new". */
+  rowClass?: string;
+  /* Before the name, for example the provider logo. */
+  lead?: ReactNode;
+  /* In place of the label text: the name with its rename button or form. */
+  name?: ReactNode;
+  /* In place of detail: the line under the name. */
+  sub?: ReactNode;
+  /* Buttons of this row before the details chevron (Sign in). */
+  rowActions?: ReactNode;
+  /* Always shown under the row line: sign-in progress and errors. */
+  below?: ReactNode;
+  /* The row's settings, shown while the row is open. */
+  details?: ReactNode;
+  /* Open until the owner toggles it. */
+  open?: boolean;
 }
 
 export interface AccountOrderListProps {
@@ -42,6 +66,9 @@ export interface AccountOrderListProps {
   onSave: (order: string[], unpooled: string[]) => Promise<unknown>;
   /* Extra buttons at the end of a row. */
   actions?: (item: OrderItem) => ReactNode;
+  /* false: no handle, no "Use as backup" switch and no hint (a list of one
+     account has no order). */
+  sortable?: boolean;
 }
 
 type Zone = "pool" | "rest";
@@ -81,21 +108,27 @@ export function restingText(until: string | null | undefined, now: number = Date
   return "Resting until " + pad(date.getHours()) + ":" + pad(date.getMinutes());
 }
 
-/* The fullest window of a row: its share used, for the mini bar. */
-function fullestWindow(windows: PlanWindow[] | undefined): { window: PlanWindow; used: number } | null {
-  let best: { window: PlanWindow; used: number } | null = null;
+/* The reported windows of a row with their share used (a rejected window
+   without a figure counts as full), for the usage bars under the name. */
+export function usageRows(windows: PlanWindow[] | undefined): { window: PlanWindow; used: number }[] {
+  const rows: { window: PlanWindow; used: number }[] = [];
   for (const window of windows || []) {
     const reported = window.utilization !== null && window.utilization !== undefined;
-    const used =
-      window.status === "rejected" && !reported ? 1 : Math.max(0, Math.min(1, Number(window.utilization) || 0));
     if (!reported && window.status !== "rejected") {
       continue;
     }
-    if (!best || used > best.used) {
-      best = { window, used };
-    }
+    const used =
+      window.status === "rejected" && !reported ? 1 : Math.max(0, Math.min(1, Number(window.utilization) || 0));
+    rows.push({ window, used });
   }
-  return best;
+  return rows;
+}
+
+/* "5h" and "7d" for the two plan windows, else the window's own name. */
+function usageLabel(window: PlanWindow): string {
+  if (window.type === "five_hour") return "5h";
+  if (window.type === "seven_day") return "7d";
+  return planWindowLabel(window);
 }
 
 function arrange(items: OrderItem[]): Entry[] {
@@ -127,11 +160,15 @@ export function AccountOrderList({
   disabled,
   onSave,
   actions,
+  sortable = true,
 }: AccountOrderListProps) {
   const hintId = useId();
+  const moreId = useId();
   const listRef = useRef<HTMLOListElement | null>(null);
   const targetRef = useRef<DropTarget | null>(null);
-  const poolSwitch = variant === "account";
+  const poolSwitch = variant === "account" && sortable;
+  /* Rows the owner opened or closed; the rest follow item.open. */
+  const [opened, setOpened] = useState<Record<string, boolean>>({});
 
   /* The order is local so a move shows at once; new props (a reload) reset
      it. */
@@ -328,84 +365,126 @@ export function AccountOrderList({
   /* pos is the row's place on screen, the divider counted. */
   const renderRow = (entry: Entry, pos: number) => {
     const item = byId[entry.id] as OrderItem;
-    const fullest = fullestWindow(item.windows);
+    const usage = usageRows(item.windows);
     const resting = restingText(item.coolingUntil);
-    const first = entry.pool && pos === 0;
+    const first = sortable && entry.pool && pos === 0;
+    const hasDetails = item.details !== undefined && item.details !== null && item.details !== false;
+    const open = hasDetails && (opened[entry.id] ?? Boolean(item.open));
+    const panelId = moreId + "-" + pos;
     return (
       <li
         key={entry.id}
         className={
           "rt-order-row" +
+          (sortable ? " is-sortable" : "") +
+          (item.lead ? " has-lead" : "") +
+          (open ? " is-open" : "") +
           (entry.pool ? "" : " is-unpooled") +
           (drop && drop.id === entry.id ? " is-dragging" : "") +
-          dropClass(entry)
+          dropClass(entry) +
+          (item.rowClass ? " " + item.rowClass : "")
         }
         data-order-id={entry.id}
         data-order-pool={entry.pool ? "1" : "0"}
         data-order-pos={pos}
-        aria-label={item.label}
+        aria-label={item.rowLabel || item.label}
       >
-        <button
-          type="button"
-          className="rt-order-grip"
-          aria-label={"Move " + item.label}
-          aria-describedby={hintId}
-          disabled={locked}
-          onPointerDown={(event) => onPointerDown(event, entry)}
-          onKeyDown={(event) => onKeyDown(event, entry)}
-        >
-          <Ic name="grip-vertical" size={16} />
-        </button>
-        <span className="rt-order-id">
-          <span className="rt-order-name">
-            <span className={"trunc" + (item.mono ? " mono" : "")} title={item.label}>
-              {item.label}
+        <div className="rt-order-line">
+          {sortable ? (
+            <button
+              type="button"
+              className="rt-order-grip"
+              aria-label={"Move " + item.label}
+              aria-describedby={hintId}
+              disabled={locked}
+              onPointerDown={(event) => onPointerDown(event, entry)}
+              onKeyDown={(event) => onKeyDown(event, entry)}
+            >
+              <Ic name="grip-vertical" size={16} />
+            </button>
+          ) : null}
+          {item.lead ? <span className="rt-order-lead">{item.lead}</span> : null}
+          <span className="rt-order-id">
+            <span className="rt-order-name">
+              {item.name !== undefined ? (
+                item.name
+              ) : (
+                <span className={"trunc" + (item.mono ? " mono" : "")} title={item.label}>
+                  {item.label}
+                </span>
+              )}
+              {first ? <Badge tone="accent">Used first</Badge> : null}
             </span>
-            {first ? <Badge tone="accent">Used first</Badge> : null}
-          </span>
-          <span className="rt-order-sub">
-            {item.detail ? <span className="trunc">{item.detail}</span> : null}
-            {item.badges}
-            {resting ? (
-              <span className="rt-order-rest">
-                <Ic name="moon" size={12} /> {resting}
+            <span className="rt-order-sub">
+              {item.sub !== undefined ? item.sub : item.detail ? <span className="trunc">{item.detail}</span> : null}
+              {item.badges}
+              {resting ? (
+                <span className="rt-order-rest">
+                  <Ic name="moon" size={12} /> {resting}
+                </span>
+              ) : null}
+            </span>
+            {usage.length ? (
+              <span className="rt-order-usage">
+                {usage.map(({ window, used }, index) => (
+                  <span key={window.type + ":" + (window.label || "") + ":" + index} className="rt-order-use" title={planWindowLabel(window)}>
+                    <span className="rt-order-use-l">{usageLabel(window)}</span>
+                    <Progress
+                      value={used}
+                      tone={used >= 0.9 ? "red" : used >= 0.7 ? "amber" : undefined}
+                      aria-label={item.label + " · " + planWindowLabel(window)}
+                    />
+                    <span className="rt-order-use-p num">{Math.round(used * 100)}%</span>
+                    <span className="rt-order-use-r">{resetsIn(window.resets_at).replace(/^resets in /, "")}</span>
+                  </span>
+                ))}
               </span>
             ) : null}
           </span>
-        </span>
-        {fullest ? (
-          <span className="rt-order-bar" title={planWindowLabel(fullest.window)}>
-            <Progress
-              value={fullest.used}
-              tone={fullest.used >= 0.9 ? "red" : fullest.used >= 0.7 ? "amber" : undefined}
-              aria-label={item.label + " · " + planWindowLabel(fullest.window)}
-            />
-            <span className="rt-order-bar-t num">{Math.round(fullest.used * 100)} %</span>
-          </span>
-        ) : null}
-        <span className="rt-order-acts">
-          {poolSwitch ? (
-            <label className="rt-order-pool">
-              <Toggle
-                aria-label={"Use " + item.label + " as backup"}
-                checked={entry.pool}
-                disabled={locked}
-                onChange={(on) => setPool(entry.id, on)}
+          <span className="rt-order-acts">
+            {item.rowActions}
+            {poolSwitch ? (
+              <label className="rt-order-pool">
+                <Toggle
+                  aria-label={"Use " + item.label + " as backup"}
+                  checked={entry.pool}
+                  disabled={locked}
+                  onChange={(on) => setPool(entry.id, on)}
+                />
+                <span className="hint">Use as backup</span>
+              </label>
+            ) : null}
+            {actions ? actions(item) : null}
+            {hasDetails ? (
+              <IconButton
+                icon="chevron-down"
+                size="sm"
+                className={"rt-order-more-btn" + (open ? " is-open" : "")}
+                label={"Details of " + item.id}
+                aria-expanded={open}
+                aria-controls={open ? panelId : undefined}
+                onClick={() => setOpened((current) => ({ ...current, [entry.id]: !open }))}
               />
-              <span className="hint">Use as backup</span>
-            </label>
-          ) : null}
-          {actions ? actions(item) : null}
-        </span>
+            ) : null}
+          </span>
+        </div>
+        {item.below ? <div className="rt-order-below">{item.below}</div> : null}
+        {open ? (
+          <div className="rt-order-more" id={panelId} role="region" aria-label={"Details of " + item.id}>
+            {item.details}
+          </div>
+        ) : null}
       </li>
     );
   };
 
   return (
     <div className="rt-order">
-      <p id={hintId} className="hint rt-order-hint">
-        The top {variant === "key" ? "key" : "account"} is used first. Drag a row, or focus its handle and press ↑ or ↓.
-      </p>
+      {sortable ? (
+        <p id={hintId} className="hint rt-order-hint">
+          The top {variant === "key" ? "key" : "account"} is used first. Drag a row, or focus its handle and press ↑ or ↓.
+        </p>
+      ) : null}
       <ol className="rt-order-list" ref={listRef} aria-label={label}>
         {pooled.map((entry, index) => renderRow(entry, index))}
         {poolSwitch && rest.length > 0 ? (

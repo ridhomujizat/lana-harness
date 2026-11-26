@@ -30,12 +30,18 @@ const (
 	// kvAntigravityTierPrefix starts the router_kv key of an account's last
 	// plan tier: "antigravity_tier/<account>".
 	kvAntigravityTierPrefix = "antigravity_tier/"
+	// kvAntigravityEmailPrefix starts the router_kv key of an account's email
+	// from its last sign-in: "antigravity_email/<account>" (spec 77
+	// REQ-WRA-014).
+	kvAntigravityEmailPrefix = "antigravity_email/"
 )
 
-// agyTiers keeps the last plan tier per Antigravity account.
+// agyTiers keeps the last plan tier and the sign-in email per Antigravity
+// account.
 type agyTiers struct {
-	mu    sync.Mutex
-	tiers map[string]string
+	mu     sync.Mutex
+	tiers  map[string]string
+	emails map[string]string
 }
 
 // AntigravityUsage24h is an account's use in the last 24 hours, from the
@@ -66,7 +72,10 @@ type AntigravityAccount struct {
 	// the error.
 	Status core.RuntimeAccountStatus
 	// Tier is the last plan tier session/new reported, else "".
-	Tier        string
+	Tier string
+	// Email is the email agy printed at the account's last sign-in from the
+	// Router (spec 77 REQ-WRA-014), else "".
+	Email       string
 	ModelsCount int
 	// Windows are the plan windows of the account's limit snapshot, with its
 	// time and error.
@@ -176,7 +185,7 @@ func (rt *Runtime) AntigravityAccounts(ctx context.Context) ([]AntigravityAccoun
 			Name: name, Builtin: name == AntigravityRuntime, Label: cfg.Label, Home: account.Home,
 			Binary: cfg.Binary, Disabled: cfg.Disabled, AllowScheduled: cfg.AllowScheduled,
 			Priority: priority, Pool: cfg.InPool(), CoolingUntil: cooling[name],
-			Tier:    rt.AntigravityTier(name),
+			Tier: rt.AntigravityTier(name), Email: rt.AntigravityEmail(name),
 			Windows: snap.Windows, WindowsUpdatedAt: snap.UpdatedAt, WindowsError: snap.Error,
 			Usage24h: usage[name],
 		}
@@ -332,7 +341,51 @@ func (rt *Runtime) loadAntigravityState() {
 			rt.agyTiers.tiers[account] = value
 			rt.agyTiers.mu.Unlock()
 		}
+		if value, ok, err := rt.routerKV.GetRouterKV(ctx, kvAntigravityEmailPrefix+account); err == nil && ok && value != "" {
+			rt.agyTiers.mu.Lock()
+			if rt.agyTiers.emails == nil {
+				rt.agyTiers.emails = map[string]string{}
+			}
+			rt.agyTiers.emails[account] = value
+			rt.agyTiers.mu.Unlock()
+		}
 	}
+}
+
+// setAntigravityEmail keeps the email of an account's last sign-in (spec 77
+// REQ-WRA-014), in memory and in router_kv as "antigravity_email/<account>";
+// "" clears it.
+func (rt *Runtime) setAntigravityEmail(account, email string) {
+	email = truncateRunes(strings.TrimSpace(email), 254)
+	if account == "" || account == AntigravityRuntime {
+		return
+	}
+	rt.agyTiers.mu.Lock()
+	if rt.agyTiers.emails == nil {
+		rt.agyTiers.emails = map[string]string{}
+	}
+	unchanged := rt.agyTiers.emails[account] == email
+	if email == "" {
+		delete(rt.agyTiers.emails, account)
+	} else {
+		rt.agyTiers.emails[account] = email
+	}
+	rt.agyTiers.mu.Unlock()
+	if unchanged || rt.routerKV == nil {
+		return
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), routerStoreTimeout)
+	defer cancel()
+	if err := rt.routerKV.PutRouterKV(ctx, kvAntigravityEmailPrefix+account, email); err != nil {
+		slog.Warn("router: save antigravity email", "account", account, "error", err)
+	}
+}
+
+// AntigravityEmail returns the email of the account's last sign-in, else "".
+func (rt *Runtime) AntigravityEmail(account string) string {
+	rt.agyTiers.mu.Lock()
+	defer rt.agyTiers.mu.Unlock()
+	return rt.agyTiers.emails[account]
 }
 
 // updateExternalTier keeps the plan tier an Antigravity turn reported for
@@ -369,12 +422,13 @@ func (rt *Runtime) AntigravityTier(account string) string {
 }
 
 // ForgetAntigravityAccount drops what lana keeps about a removed account: a
-// running sign-in, its cached runtime status, and its model list.
+// running sign-in, its email, its cached runtime status, and its model list.
 func (rt *Runtime) ForgetAntigravityAccount(name string) {
 	if name == "" || name == AntigravityRuntime {
 		return
 	}
 	rt.ForgetAntigravitySignIn(name)
+	rt.setAntigravityEmail(name, "")
 	if rt.registry != nil {
 		if ext, err := rt.registry.Runtime(AntigravityRuntime); err == nil {
 			if f, ok := ext.(agyStatusForget); ok {

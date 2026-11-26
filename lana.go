@@ -1256,6 +1256,10 @@ func (rt *Runtime) Close() error {
 		return rt.closeErr
 	}
 	rt.closed.Store(true)
+	// Spec 78: no new router call starts a Claude Code or Antigravity CLI.
+	if rt.router != nil {
+		rt.router.SetRuntimeStreamer(nil)
+	}
 	// REQ-CCT-012: stop the running Claude Code sign-ins.
 	rt.cancelClaudeSignIns()
 	// REQ-AGY-010: stop the running Antigravity sign-ins.

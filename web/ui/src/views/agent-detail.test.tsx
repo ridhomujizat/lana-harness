@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 
 /* The network calls of the General tab are mocked so the model picker, the
    Thinking select, and the legacy banner can be observed (REQ-MDL-012,
@@ -434,13 +434,13 @@ describe("Claude Code as a model (AC-CCT-011)", () => {
     });
   });
 
-  it("groups Claude Code models per account with the account email", async () => {
-    mockRouterAgent("coding");
+  it("lists each Claude Code model once and picks the account under it", async () => {
+    mockRouterAgent("claude-code/opus");
     vi.mocked(getRouter).mockResolvedValue({
       ...CLAUDE_ROUTER,
       choices: [
         ...CLAUDE_ROUTER.choices,
-        { value: "claude-work/opus", label: "Claude Code · Opus (latest)", group: "Claude Code" },
+        { value: "claude-work/opus", label: "Claude Code (claude-work) · Opus (latest)", group: "Claude Code" },
       ],
     });
     vi.mocked(getClaudeAgent).mockResolvedValue({
@@ -466,11 +466,20 @@ describe("Claude Code as a model (AC-CCT-011)", () => {
       const groups = Array.from(listbox.querySelectorAll('[role="group"]')).map((node) =>
         node.getAttribute("aria-label")
       );
-      expect(groups).toContain("Claude Code · claude-code (me@home.dev)");
-      expect(groups).toContain("Claude Code · claude-work (me@work.dev)");
+      expect(groups.filter((group) => String(group).startsWith("Claude Code"))).toEqual(["Claude Code"]);
     });
-    const work = listbox.querySelector('[aria-label="Claude Code · claude-work (me@work.dev)"]') as HTMLElement;
-    expect(work.querySelector('[data-logo="claude"]')).toBeTruthy();
+    const claude = listbox.querySelector('[aria-label="Claude Code"]') as HTMLElement;
+    expect(claude.querySelector('[data-logo="claude"]')).toBeTruthy();
+    expect(within(claude).getAllByRole("option", { name: /Opus \(latest\)/ })).toHaveLength(1);
+    fireEvent.keyDown(document.activeElement || document.body, { key: "Escape" });
+
+    const account = await screen.findByRole("combobox", { name: "Account" });
+    expect(account.textContent).toContain("me@home.dev");
+    fireEvent.click(account);
+    fireEvent.click(await screen.findByRole("option", { name: /me@work\.dev/ }));
+    await waitFor(() =>
+      expect(screen.getByRole("combobox", { name: "Account" }).textContent).toContain("me@work.dev")
+    );
   });
 });
 

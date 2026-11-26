@@ -107,12 +107,11 @@ func (r *Registry) isScheduled(sessionID string) bool {
 	return r.scheduled[sessionID] > 0
 }
 
-// MarkBackground marks the session's turns as lana background work until the
-// returned func is called (spec 39 revision 5): they never run in Claude
-// Code; they run in lana's loop on the agent's background chain (the chain
-// without its Claude Code targets, else [router] background_model,
-// REQ-CCT-007). Without one the turn fails with llmcall.ErrNoBackgroundModel.
-// Marks nest.
+// MarkBackground marks the session's turns as lana background work (a
+// workflow guardian's structured call) until the returned func is called.
+// Spec 78 REQ-RPR-009 (superseding spec 39 revision 5): they run on the
+// agent's own chain like any turn, Claude Code and Antigravity included; a
+// background session only never runs as a group turn. Marks nest.
 func (r *Registry) MarkBackground(sessionID string) func() {
 	r.runtimeMu.Lock()
 	if r.background == nil {
@@ -754,8 +753,10 @@ func (rn *Runner) runExternalTurn(ctx context.Context, initial inboxItem, turnID
 	if err := writeTurnEnd(writeCtx, events, core.EventDraft{Kind: core.KindTurnEnd, TurnID: turnID, Payload: end}); err != nil {
 		slog.Error("failed to write turn/end", "session_id", rn.sessionID, "turn_id", turnID, "error", err)
 	}
-	// REQ-MEM-010, REQ-CCT-007: memory capture runs after an external turn
-	// too, over the mirrored transcript, with the agent's background chain.
+	// REQ-MEM-010: memory capture runs after an external turn too, over the
+	// mirrored transcript, with the agent's background chain (spec 78
+	// REQ-RPR-009: the chain as it is; a Claude Code or Antigravity target
+	// refuses the pass's tools and the chain moves on).
 	if captureEligible(reason, res.child, run.owner, run.specs, res.cfg) {
 		if c := rn.reg.memoryCapturer(); c != nil {
 			c.Capture(core.CaptureRequest{

@@ -169,6 +169,37 @@ type RuntimeAccount struct {
 	Home string
 }
 
+// RuntimePrompt is one headless, tool-less prompt run of an external runtime
+// for a router call (spec 78, REQ-RPR-002): the official CLI in print mode,
+// the prompt on stdin, no tools, no MCP, nothing kept for a resume.
+type RuntimePrompt struct {
+	// Config holds the account keys (Account, Binary, Auth, APIKeyEnv,
+	// ConfigDir or Home), Model, and Effort, as an agent turn of the account
+	// gets them. Workspace, AppendSystemPrompt, and MCPKey are not used.
+	Config RuntimeConfig
+	// System is the system text (Claude Code: --system-prompt). Antigravity
+	// has no system flag: the caller puts the text in Prompt.
+	System string
+	// Prompt is written to the process's stdin, never passed as an argument.
+	Prompt string
+	// Dir is the working directory: an empty folder the caller owns.
+	Dir string
+	// Emit gets the run's text and thinking deltas, whole assistant
+	// messages, usage, and plan windows, in order. It may be nil.
+	Emit func(RuntimeEvent)
+}
+
+// RuntimePrompter is implemented by an external runtime that runs one
+// RuntimePrompt (spec 78). RunPrompt takes a slot of the runtime's
+// concurrency limit, as a turn does, and kills the process group when ctx
+// ends. A failure before the first text returns a *RuntimeEarlyError whose
+// Class is a router class ("not_found", "auth", "rate_limit", "quota",
+// "missing_secret", "client", "runtime") and whose Message is the CLI's own
+// short message; a failure after it returns another error.
+type RuntimePrompter interface {
+	RunPrompt(ctx context.Context, p RuntimePrompt) error
+}
+
 // RuntimeAccountStatus is the health of one Claude Code account
 // (API-CCT-011). Email and Plan come from `claude auth status` and are never
 // stored.
