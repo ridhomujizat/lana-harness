@@ -77,6 +77,7 @@ import { emitGitRootEvent } from "../api/workbench-git";
 import { baseName, isUnder, repoDisplay } from "./workbench-git-model";
 import { ProgramTile, TabTiles } from "./workbench-tile";
 import { AccountsPanel, AccountsPopover, AgentHookNotice, createAccountSession, type AccountActions } from "./workbench-accounts";
+import { useWorkbenchRestart } from "./workbench-core";
 import { chime, setSoundEnabled, soundEnabled, unlockAudio } from "./workbench-sound";
 import { ActionMenu, CloseSpaceDialog, RenameDialog, longPress, type DialogState, type MenuTarget } from "./workbench-actions";
 import { Menu, MenuItem, MenuSeparator } from "../ui/gr8r";
@@ -2117,8 +2118,14 @@ export function WorkbenchPage() {
   /* Spec 82: Switch here acts on the focused pane of the shown tab. */
   const accountsTab = pickTab(pickSpace(layout));
   const accountsFocusId = accountsTab?.focus || (accountsTab ? tabSessions(accountsTab)[0] : undefined);
+  /* Spec 84 REQ-WBR-004, REQ-WBR-006: the outdated-core notice, the restart
+     dialog it and the Accounts popup open, and a reload of the panes after
+     any restart (the restored panes have new pids, so they attach again). */
+  const coreRestart = useWorkbenchRestart(() => void load());
   const accountActions: AccountActions = {
     focused: accountsFocusId ? sessions[accountsFocusId] ?? null : null,
+    coreOutdated: coreRestart.outdated,
+    restartWorkbench: coreRestart.open,
     /* The pane is the owner's shell with the account's line typed in, so
        exiting the agent returns to the prompt (spec 77 revision 7). */
     newTab: (line, title, claudeAccount, agyAccount) => {
@@ -2452,9 +2459,11 @@ export function WorkbenchPage() {
       <PaneAccessContext.Provider value={paneAccess}>
       <WbGitContext.Provider value={git.context}>
         {banner}
+        {coreRestart.notice}
         <AgentHookNotice />
         {overlays}
         {accountsOverlay}
+        {coreRestart.dialog}
         <PhoneWorkbench
           layout={layout}
           sessions={sessions}
@@ -2496,9 +2505,11 @@ export function WorkbenchPage() {
     <main id="main" className={"wb-page" + (git.open ? " wbg-open" : "") + (git.maximized ? " wbg-maxed" : "")}>
       {overlays}
       {accountsOverlay}
+      {coreRestart.dialog}
       {panelOpen ? panel : null}
       <section className="wb-main">
         {banner}
+        {coreRestart.notice}
         <AgentHookNotice />
         <div className="wb-tabs" role="tablist">
           {!panelOpen ? (

@@ -27,6 +27,7 @@ import { Ic } from "../ui/icons";
 import { AGENT_HOOK_SETTINGS_HREF, AGENT_HOOK_TITLE, agentHookSummary } from "./agent-hook-settings";
 import { AgentLogo } from "./agent-logo";
 import { planLabel } from "./router/limits";
+import { SWITCH_CORE_OUTDATED } from "./workbench-core";
 
 /* Spec 77: the Workbench "Accounts" popup. It lists the Router's accounts
    grouped by provider, each account in its own folder, so no login is ever
@@ -59,6 +60,10 @@ export interface AccountActions {
   /* The focused pane's session, which Switch here acts on; null or absent
      when the space has no pane. */
   focused?: WorkbenchSession | null;
+  /* Spec 84 REQ-WBR-006: the core is older than the daemon, so Switch here
+     cannot work in place; restartWorkbench opens the restart confirm. */
+  coreOutdated?: boolean;
+  restartWorkbench?: () => void;
 }
 
 /* Spec 82 REQ-WAS-001 and spec 83 REQ-WAG-003: why Switch here is off. */
@@ -551,17 +556,33 @@ export function AccountsPanel({
     else actions.newTab(t.line, undefined, t.name);
     onClose();
   };
-  const switchButton = (t: SwitchTarget, blocked: string) => (
-    <button
-      type="button"
-      className="wb-acc-act"
-      disabled={Boolean(blocked) || switching !== null}
-      title={blocked || "Continue this pane's conversation on " + t.label}
-      onClick={() => askSwitch(t)}
-    >
-      <Ic name="arrow-left-right" size={13} /> {switching === keyOf(t) ? "Switching…" : "Switch here"}
+  /* Spec 84 REQ-WBR-006: an outdated core cannot switch in place. */
+  const coreOutdated = Boolean(actions.coreOutdated);
+  const restartWorkbench = actions.restartWorkbench
+    ? () => {
+        onClose();
+        actions.restartWorkbench?.();
+      }
+    : undefined;
+  const restartButton = restartWorkbench ? (
+    <button type="button" className="wb-acc-act" onClick={restartWorkbench}>
+      <Ic name="refresh-cw" size={13} /> Restart Workbench
     </button>
-  );
+  ) : null;
+  const switchButton = (t: SwitchTarget, reason: string) => {
+    const blocked = coreOutdated ? SWITCH_CORE_OUTDATED : reason;
+    return (
+      <button
+        type="button"
+        className="wb-acc-act"
+        disabled={Boolean(blocked) || switching !== null}
+        title={blocked || "Continue this pane's conversation on " + t.label}
+        onClick={() => askSwitch(t)}
+      >
+        <Ic name="arrow-left-right" size={13} /> {switching === keyOf(t) ? "Switching…" : "Switch here"}
+      </button>
+    );
+  };
   const switchExtras = (t: SwitchTarget) => (
     <>
       {confirmSwitch === keyOf(t) ? (
@@ -582,11 +603,14 @@ export function AccountsPanel({
       {switchNote?.key === keyOf(t) ? (
         <div className="wb-acc-switch-note" role="alert">
           <p className="wb-acc-error">{switchNote.message}</p>
-          {switchNote.outdated && t.line ? (
+          {switchNote.outdated && (t.line || restartButton) ? (
             <div className="wb-acc-actions">
-              <button type="button" className="wb-acc-act" onClick={() => openNewTab(t)}>
-                <Ic name="square-terminal" size={13} /> Open in a new tab
-              </button>
+              {restartButton}
+              {t.line ? (
+                <button type="button" className="wb-acc-act" onClick={() => openNewTab(t)}>
+                  <Ic name="square-terminal" size={13} /> Open in a new tab
+                </button>
+              ) : null}
             </div>
           ) : null}
         </div>
@@ -642,6 +666,12 @@ export function AccountsPanel({
       </div>
 
       <div className="wb-acc-scroll">
+        {coreOutdated ? (
+          <div className="wb-acc-core" role="status">
+            <p className="wb-acc-note">{SWITCH_CORE_OUTDATED}.</p>
+            {restartButton}
+          </div>
+        ) : null}
         {noMatch ? (
           <p className="wb-acc-note wb-acc-empty" role="status">
             No accounts match

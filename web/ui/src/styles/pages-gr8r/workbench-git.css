@@ -3029,3 +3029,60 @@ html[data-shell="macos-app"]:not([data-shell-fullscreen]) .wbg-panel.wbg-sheet.i
     padding-left: 28px;
   }
 }
+
+/* Spec 84 REQ-WBR-006: one slim line while the Workbench core is older than
+   the daemon. A tint, no colored edge bar. */
+.wb-core-notice {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: var(--s-2) var(--s-2) 0;
+  padding: 5px 6px 5px 10px;
+  border: 1px solid var(--border);
+  border-radius: var(--r-md, 8px);
+  background: var(--amber-soft);
+  color: var(--text);
+  font-size: var(--fs-sm);
+}
+
+.wb-core-notice-icon {
+  flex: none;
+  color: var(--amber);
+}
+
+.wb-core-notice-text {
+  flex: 1 1 auto;
+  min-width: 0;
+  line-height: 1.4;
+}
+
+.wb-core-notice > .btn,
+.wb-core-notice > .wb-icon-btn {
+  flex: none;
+}
+
+.wb-core-dialog-text {
+  margin: 0;
+  line-height: 1.5;
+}
+
+.wb-core-result {
+  margin-top: 4px;
+}
+
+/* The Accounts popup's restart line. */
+.wb-acc-core {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 6px;
+  margin: 0 0 6px;
+  padding: 6px 8px;
+  border-radius: var(--r-md, 8px);
+  background: var(--amber-soft);
+}
+
+.wb-acc-core > .wb-acc-note {
+  color: var(--text-2);
+}

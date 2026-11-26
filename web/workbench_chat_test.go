@@ -946,9 +946,8 @@ func TestWorkbenchChatHubIdleStop(t *testing.T) {
 	stream.stop()
 
 	waitChatHubGone(t, s, "abc")
-	if !view.isClosed() {
-		t.Fatal("view attachment was not closed")
-	}
+	// The hub drops out of the map before its loop closes the view stream.
+	waitStreamClosed(t, view, "view attachment was not closed")
 }
 
 // TestChatHubResizeReattaches checks that a pane size change makes the hub open

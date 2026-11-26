@@ -396,7 +396,7 @@ func (s *server) session(id string) (*session, error) {
 func (s *server) do(req Request) (any, error) {
 	switch req.Op {
 	case "hello":
-		return Hello{Version: ProtocolVersion, PID: os.Getpid(), Started: s.started, Features: coreFeatures}, nil
+		return Hello{Version: ProtocolVersion, PID: os.Getpid(), Started: s.started, Features: coreFeatures, AppVersion: buildVersion, Commit: buildCommit}, nil
 	case "list":
 		s.mu.Lock()
 		all := make([]*session, 0, len(s.order))

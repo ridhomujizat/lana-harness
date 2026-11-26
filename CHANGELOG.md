@@ -7,6 +7,16 @@ but their config keys, events, and tools may still change between betas.
 
 ## [Unreleased]
 
+## [0.6.0-beta.14] - 2026-11-26
+
+### Added
+
+- Workbench: Restart Workbench, so an update's Workbench features work without restarting the laptop. Settings → General → Workbench shows the Workbench core's version, marked Outdated when it is older than Lana, with a Restart Workbench button; the Workbench shows a slim notice with Restart while its core is outdated, and the Accounts popup's Switch here says to restart and offers it. All panes close and reopen; Claude Code and Antigravity conversations resume, and a running turn stops. The daemon serves it as `GET /v1/workbench/core` and `POST /v1/workbench/core/restart`.
+
+### Fixed
+
+- Tests: racy Workbench chat hub and terminal redraw tests no longer fail CI.
+
 ## [0.6.0-beta.13] - 2026-11-26
 
 ### Added
