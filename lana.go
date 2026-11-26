@@ -2034,6 +2034,45 @@ func (rt *Runtime) SetRoomRead(ctx context.Context, room string, at int64) (int6
 	return reads.SetRoomRead(ctx, room, at)
 }
 
+// RoomStates returns every room's read, archive, and clear state keyed by room
+// name (REQ-ARC-004). It requires the store to implement core.RoomStateStore.
+func (rt *Runtime) RoomStates(ctx context.Context) (map[string]core.RoomState, error) {
+	if err := rt.closedError(); err != nil {
+		return nil, err
+	}
+	states, ok := rt.store.(core.RoomStateStore)
+	if !ok {
+		return nil, ErrRoomStoreUnsupported
+	}
+	return states.RoomStates(ctx)
+}
+
+// SetRoomArchived stores a room's archive time, replacing any previous value
+// (REQ-ARC-002). It requires the store to implement core.RoomStateStore.
+func (rt *Runtime) SetRoomArchived(ctx context.Context, room string, at int64) error {
+	if err := rt.closedError(); err != nil {
+		return err
+	}
+	states, ok := rt.store.(core.RoomStateStore)
+	if !ok {
+		return ErrRoomStoreUnsupported
+	}
+	return states.SetRoomArchived(ctx, room, at)
+}
+
+// SetRoomCleared stores a room's clear time and returns the previous value
+// (REQ-ARC-003). It requires the store to implement core.RoomStateStore.
+func (rt *Runtime) SetRoomCleared(ctx context.Context, room string, at int64) (int64, error) {
+	if err := rt.closedError(); err != nil {
+		return 0, err
+	}
+	states, ok := rt.store.(core.RoomStateStore)
+	if !ok {
+		return 0, ErrRoomStoreUnsupported
+	}
+	return states.SetRoomCleared(ctx, room, at)
+}
+
 // AppendRuntimeNote writes a hidden runtime user message to the session log.
 // The note is not an owner message: display surfaces hide it (REQ-MEM-021) and
 // a turn that starts afterwards reads it as context (API-ROOM-003,

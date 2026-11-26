@@ -80,6 +80,7 @@ export const SETUP_STEPS = [
 export type RouteView =
   | "home"
   | "chats"
+  | "chats-archived"
   | "chat"
   | "logs"
   | "tools"
@@ -132,6 +133,10 @@ export interface Route {
 export const ROUTE_TABLE: RouteEntry[] = [
   { path: "#/home", view: "home", section: "home" },
   { path: "#/chats", view: "chats", section: "chats" },
+  /* Spec 85 REQ-ARC-008: "archived" is a reserved segment here, matched before
+     the {name} rule below. An agent literally named "archived" cannot open at
+     #/chats/archived; that is the documented trade-off of the reserved route. */
+  { path: "#/chats/archived", view: "chats-archived", section: "chats" },
   { path: "#/chats/{name}", view: "chat", section: "chats" },
   { path: "#/logs", view: "logs", section: "logs" },
   { path: "#/tools", view: "tools", section: "tools" },

@@ -56,6 +56,10 @@ type fakeWebBackend struct {
 	sentNotes map[string]string
 	// roomReads holds the room read marks (REQ-ROOM-005).
 	roomReads map[string]int64
+	// roomArchived and roomCleared hold the room archive and clear times
+	// (REQ-ARC-001, REQ-ARC-004).
+	roomArchived map[string]int64
+	roomCleared  map[string]int64
 	// savedAttachments records every file accepted by SaveAttachment.
 	savedAttachments []attach.Info
 	// attachmentPaths maps a workspace-relative attachments/ path to a file on
@@ -85,6 +89,8 @@ func newFakeWebBackend() *fakeWebBackend {
 		replyErr:        map[string]error{},
 		sentNotes:       map[string]string{},
 		roomReads:       map[string]int64{},
+		roomArchived:    map[string]int64{},
+		roomCleared:     map[string]int64{},
 		attachmentPaths: map[string]string{},
 		attachmentErr:   map[string]error{},
 		frames:          core.NewObserve[core.LiveFrame](),
@@ -640,6 +646,9 @@ func (f *fakeWebBackend) ListAgentSessions(_ context.Context, filter core.Sessio
 		if filter.Before > 0 && info.UpdatedAt >= filter.Before {
 			continue
 		}
+		if filter.UpdatedAfter > 0 && info.UpdatedAt <= filter.UpdatedAfter {
+			continue
+		}
 		out = append(out, info)
 	}
 	sort.SliceStable(out, func(i, j int) bool {
@@ -696,6 +705,48 @@ func (f *fakeWebBackend) SetRoomRead(_ context.Context, room string, at int64) (
 		f.roomReads[room] = at
 	}
 	return f.roomReads[room], nil
+}
+
+// RoomStates implements web.Backend; it merges the read, archive, and clear
+// marks into one state per room (REQ-ARC-004).
+func (f *fakeWebBackend) RoomStates(_ context.Context) (map[string]core.RoomState, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	out := make(map[string]core.RoomState, len(f.roomReads)+len(f.roomArchived)+len(f.roomCleared))
+	for room, at := range f.roomReads {
+		state := out[room]
+		state.ReadAt = at
+		out[room] = state
+	}
+	for room, at := range f.roomArchived {
+		state := out[room]
+		state.ArchivedAt = at
+		out[room] = state
+	}
+	for room, at := range f.roomCleared {
+		state := out[room]
+		state.ClearedAt = at
+		out[room] = state
+	}
+	return out, nil
+}
+
+// SetRoomArchived implements web.Backend (REQ-ARC-002).
+func (f *fakeWebBackend) SetRoomArchived(_ context.Context, room string, at int64) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.roomArchived[room] = at
+	return nil
+}
+
+// SetRoomCleared implements web.Backend; it returns the previous clear time
+// (REQ-ARC-003).
+func (f *fakeWebBackend) SetRoomCleared(_ context.Context, room string, at int64) (int64, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	previous := f.roomCleared[room]
+	f.roomCleared[room] = at
+	return previous, nil
 }
 
 // ScanEvents walks every session's events of the wanted kinds, in created_at

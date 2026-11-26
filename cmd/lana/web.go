@@ -1811,6 +1811,21 @@ func (b *webBackend) SetRoomRead(ctx context.Context, room string, at int64) (in
 	return b.rt.SetRoomRead(ctx, room, at)
 }
 
+// RoomStates implements web.Backend (REQ-ARC-004).
+func (b *webBackend) RoomStates(ctx context.Context) (map[string]core.RoomState, error) {
+	return b.rt.RoomStates(ctx)
+}
+
+// SetRoomArchived implements web.Backend (REQ-ARC-002).
+func (b *webBackend) SetRoomArchived(ctx context.Context, room string, at int64) error {
+	return b.rt.SetRoomArchived(ctx, room, at)
+}
+
+// SetRoomCleared implements web.Backend (REQ-ARC-003).
+func (b *webBackend) SetRoomCleared(ctx context.Context, room string, at int64) (int64, error) {
+	return b.rt.SetRoomCleared(ctx, room, at)
+}
+
 // ScanEvents implements web.Backend. It delegates to the runtime's cross-session
 // event scan the agent overview reads (API-DSH-001).
 func (b *webBackend) ScanEvents(ctx context.Context, kinds []string, sinceMS int64) iter.Seq2[core.ScannedEvent, error] {

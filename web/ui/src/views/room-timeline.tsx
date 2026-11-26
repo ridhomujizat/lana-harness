@@ -32,7 +32,7 @@ import { useSessionPresence } from "../lib/session-presence";
 import { ErrorDetails } from "../ui/ui";
 import { Ic } from "../ui/icons";
 import { pinToBottom, useStickToBottom } from "./scroll-pin";
-import { Badge, Button, Skeleton } from "../ui/gr8r";
+import { Badge, Button, IconButton, Menu, MenuItem, MenuSeparator, Skeleton } from "../ui/gr8r";
 import { AgentAvatar } from "./agent-avatar";
 import { JobNoticeLine } from "./job-notice";
 import { ComposerTray } from "./composer-tray";
@@ -249,9 +249,15 @@ function mergeEvent(list: SessionEvent[], event: SessionEvent): SessionEvent[] {
    The room memo caches this per segment (perf: chat load). */
 function segmentEntries(
   segment: Segment,
-  segEvents: SessionEvent[],
-  live: LiveTurnState
+  rawEvents: SessionEvent[],
+  live: LiveTurnState,
+  /* Spec 85 REQ-ARC-005/011: events at or before the room's clear are hidden. */
+  clearedAt: number
 ): TimelineNode[] {
+  const segEvents =
+    clearedAt > 0
+      ? rawEvents.filter((event) => Number(event.created_at) > clearedAt)
+      : rawEvents;
   const threadEvents = segEvents.filter(
     (event) =>
       event.kind !== "knowledge/compiled" && event.kind !== "memory/captured"
@@ -420,9 +426,12 @@ export interface RoomViewProps {
   initialDraft?: string;
   /* "dock": the compact chat dock window, which draws its own header. */
   variant?: "page" | "dock";
+  /* Spec 85 REQ-ARC-009: the room header's ⋯ menu actions. */
+  onArchive?: (archived: boolean) => void;
+  onClear?: () => void;
 }
 
-export function RoomView({ room, initialDraft, variant = "page" }: RoomViewProps) {
+export function RoomView({ room, initialDraft, variant = "page", onArchive, onClear }: RoomViewProps) {
   /* API-WF-021: the reply of a workflow chat command shown above the composer. */
   const [commandReply, setCommandReply] = useState("");
   const [segments, setSegments] = useState<Segment[]>([]);
@@ -467,6 +476,12 @@ export function RoomView({ room, initialDraft, variant = "page" }: RoomViewProps
   /* The composer tray's background task panel; /tasks opens it. */
   const [tasksOpen, setTasksOpen] = useState(false);
   const [cancelling, setCancelling] = useState(false);
+  /* Spec 85 REQ-ARC-009: the header ⋯ menu. */
+  const [menuOpen, setMenuOpen] = useState(false);
+  const roomMenuRef = useRef<HTMLSpanElement>(null);
+  const clearedAt = Number(room.cleared_at) || 0;
+  const archived = Number(room.archived_at) > 0;
+  const lana = room.name === "lana";
 
   const scrollRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
@@ -585,7 +600,9 @@ export function RoomView({ room, initialDraft, variant = "page" }: RoomViewProps
   }, []);
 
   /* REQ-ROOM-002: the newest page of segments loads first, ascending by
-     updated_at so the last segment is the most recently active. */
+     updated_at so the last segment is the most recently active. Spec 85
+     REQ-ARC-011: the page also reloads when the room's cleared_at changes, so
+     the server's now-filtered segments replace the cleared ones at once. */
   useEffect(() => {
     let alive = true;
     roomSegments(room.name, { limit: LIMIT })
@@ -612,7 +629,7 @@ export function RoomView({ room, initialDraft, variant = "page" }: RoomViewProps
     return () => {
       alive = false;
     };
-  }, [room.name, loadEvents]);
+  }, [room.name, loadEvents, clearedAt]);
 
   const lastSegment =
     segments.length > 0 ? segments[segments.length - 1] : null;
@@ -871,22 +888,28 @@ export function RoomView({ room, initialDraft, variant = "page" }: RoomViewProps
     const liveKey = turnRunning + "|" + liveTurnId + "|" + liveStartedAt;
     const blocks: { segment: Segment; items: TimelineNode[] }[] = [];
     const liveIds = new Set<string>();
-    for (let index = 0; index < segments.length; index += 1) {
-      const segment = segments[index];
+    /* Spec 85 REQ-ARC-005: a segment last updated at or before the clear is
+       gone from the timeline. */
+    const shownSegments =
+      clearedAt > 0
+        ? segments.filter((segment) => Number(segment.updated_at) > clearedAt)
+        : segments;
+    for (let index = 0; index < shownSegments.length; index += 1) {
+      const segment = shownSegments[index];
       if (!segment) {
         continue;
       }
       const id = segment.session_id;
       const segEvents = events[id] || [];
       const isNewest = id === newestId;
-      const key = isNewest ? liveKey : "";
+      const key = clearedAt + (isNewest ? "|" + liveKey : "");
       liveIds.add(id);
       let cached = cache.get(id);
       if (!cached || cached.events !== segEvents || cached.liveKey !== key) {
         cached = {
           events: segEvents,
           liveKey: key,
-          items: segmentEntries(segment, segEvents, isNewest ? liveNow : {}),
+          items: segmentEntries(segment, segEvents, isNewest ? liveNow : {}, clearedAt),
         };
         cache.set(id, cached);
       }
@@ -968,7 +991,7 @@ export function RoomView({ room, initialDraft, variant = "page" }: RoomViewProps
       }
     }
     return withDays;
-  }, [segments, events, newestId, turnRunning, liveTurnId, liveStartedAt]);
+  }, [segments, events, newestId, turnRunning, liveTurnId, liveStartedAt, clearedAt]);
 
   useStickToBottom(scrollRef, stickRef);
 
@@ -1662,6 +1685,83 @@ export function RoomView({ room, initialDraft, variant = "page" }: RoomViewProps
               View profile
             </Button>
           )}
+          <span ref={roomMenuRef} className="room-head-more">
+            <IconButton
+              icon="ellipsis"
+              size="sm"
+              label="Chat actions"
+              aria-haspopup="menu"
+              aria-expanded={menuOpen}
+              onClick={() => setMenuOpen((value) => !value)}
+            />
+          </span>
+          {/* Spec 85 REQ-ARC-009: Clear, Archive/Unarchive (lana disabled), then
+              the room settings action (teams) or View profile (agents). */}
+          <Menu
+            anchorRef={roomMenuRef}
+            open={menuOpen}
+            onClose={() => setMenuOpen(false)}
+            className="room-head-menu"
+          >
+            {onClear ? (
+              <MenuItem
+                icon="eraser"
+                onClick={() => {
+                  setMenuOpen(false);
+                  onClear();
+                }}
+              >
+                <span className="menu-2l">
+                  <span className="menu-2l-title">Clear chat…</span>
+                  <span className="menu-2l-sub">Remove every message in this chat</span>
+                </span>
+              </MenuItem>
+            ) : null}
+            {onArchive ? (
+              <MenuItem
+                icon={archived ? "archive-restore" : "archive"}
+                disabled={lana}
+                onClick={() => {
+                  if (lana) {
+                    return;
+                  }
+                  setMenuOpen(false);
+                  onArchive(!archived);
+                }}
+              >
+                <span className="menu-2l">
+                  <span className="menu-2l-title">
+                    {archived ? "Unarchive chat" : "Archive chat"}
+                  </span>
+                  {lana ? (
+                    <span className="menu-2l-sub">Main agent, always in Chats</span>
+                  ) : null}
+                </span>
+              </MenuItem>
+            ) : null}
+            {onClear || onArchive ? <MenuSeparator /> : null}
+            {team ? (
+              <MenuItem
+                icon="settings"
+                onClick={() => {
+                  setMenuOpen(false);
+                  setSettingsTab("members");
+                }}
+              >
+                Room settings
+              </MenuItem>
+            ) : (
+              <MenuItem
+                icon="user-round"
+                onClick={() => {
+                  setMenuOpen(false);
+                  window.location.hash = "#/agents/" + encodeURIComponent(room.name);
+                }}
+              >
+                View profile
+              </MenuItem>
+            )}
+          </Menu>
         </div>
       </header>
       )}
@@ -1675,6 +1775,22 @@ export function RoomView({ room, initialDraft, variant = "page" }: RoomViewProps
           stopping={stoppingId === openDiscussion.log.id}
           onStop={() => void stopRoomDiscussion(openDiscussion.sessionId, "stop")}
         />
+      ) : null}
+
+      {/* Spec 85 REQ-ARC-008: an archived room keeps its banner over the
+          timeline with a one-tap way back into Chats. */}
+      {archived ? (
+        <div className="room-archived" role="status">
+          <Ic name="archive" size={16} />
+          <span className="room-archived-text">
+            Archived — hidden from Chats. Messages here keep it archived.
+          </span>
+          {onArchive ? (
+            <Button size="sm" variant="secondary" icon="archive-restore" onClick={() => onArchive(false)}>
+              Unarchive
+            </Button>
+          ) : null}
+        </div>
       ) : null}
 
       {loadError ? (
@@ -1691,8 +1807,12 @@ export function RoomView({ room, initialDraft, variant = "page" }: RoomViewProps
       ) : null}
 
       <div className="room-timeline-scroll" ref={scrollRef} onScroll={onScroll}>
-        {!loading && segments.length === 0 ? (
-          <RoomEmpty room={room} team={team} teamFaces={teamFaces} />
+        {!loading && nodes.length === 0 ? (
+          clearedAt > 0 ? (
+            <RoomCleared room={room} team={team} teamFaces={teamFaces} />
+          ) : (
+            <RoomEmpty room={room} team={team} teamFaces={teamFaces} />
+          )
         ) : (
           <div className="room-timeline">
             {loading && segments.length === 0 ? <SkeletonHint /> : null}
@@ -1989,6 +2109,51 @@ function RoomEmpty({
       ) : room.title ? (
         <p className="room-empty-text muted">{room.title}</p>
       ) : null}
+    </div>
+  );
+}
+
+/* Spec 85 REQ-ARC-011: an empty timeline of a cleared room shows the clear
+   divider, the room face, and a way into the older sessions in History. */
+function RoomCleared({
+  room,
+  team,
+  teamFaces,
+}: {
+  room: RoomRow;
+  team: boolean;
+  teamFaces: FaceRef[];
+}) {
+  return (
+    <div className="room-empty room-cleared">
+      <div className="room-cleared-divider">
+        <span className="room-divider-line" aria-hidden="true" />
+        <span className="room-cleared-text">
+          {"Chat cleared · " + relativeShort(Number(room.cleared_at) || 0)}
+        </span>
+        <span className="room-divider-line" aria-hidden="true" />
+      </div>
+      {team && teamFaces.length > 0 ? (
+        <TeamAvatar
+          size={64}
+          items={teamFaces.map((face) => ({
+            name: face.name,
+            color: gr8rColor(face.color),
+          }))}
+        />
+      ) : (
+        <AgentAvatar
+          name={room.name}
+          color={gr8rColor(room.color)}
+          size="xl"
+          presence={Boolean(room.presence)}
+        />
+      )}
+      <h2 className="room-empty-title">{"Fresh start with " + displayLabel(room)}</h2>
+      <p className="room-empty-text muted">Earlier messages are in History.</p>
+      <Button as="a" href="#/history" variant="secondary" icon="history">
+        Open in History
+      </Button>
     </div>
   );
 }

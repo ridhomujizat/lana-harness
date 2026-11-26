@@ -67,8 +67,8 @@ func TestMigrateV11ToV12RouterCallKey(t *testing.T) {
 	if err := s.db.QueryRow("PRAGMA user_version").Scan(&version); err != nil {
 		t.Fatal(err)
 	}
-	if version != schemaVersion || schemaVersion != 12 {
-		t.Fatalf("version=%d schemaVersion=%d, want 12", version, schemaVersion)
+	if version != schemaVersion || schemaVersion != 13 {
+		t.Fatalf("version=%d schemaVersion=%d, want 13", version, schemaVersion)
 	}
 	page, err := s.ListRouterCalls(ctx, routerdb.CallFilter{})
 	if err != nil {

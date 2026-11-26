@@ -1,9 +1,10 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 
-/* The room calls and the session stream are mocked so the list, the timeline
+/* The room calls and the session stream are mocked so the list, the timeline,
    dividers, the older-page load, the live activity row and the composer can be
-   observed (AC-ROOM-002, AC-ROOM-003, AC-ROOM-006). */
+   observed (AC-ROOM-002, AC-ROOM-003, AC-ROOM-006). Spec 85 adds archive and
+   clear, so those calls and cancelTurn are mocked too. */
 vi.mock("../api/rooms", async (importOriginal) => {
   const actual = await importOriginal<typeof import("../api/rooms")>();
   return {
@@ -13,7 +14,13 @@ vi.mock("../api/rooms", async (importOriginal) => {
     roomSegments: vi.fn(),
     sendToRoom: vi.fn(),
     markRoomRead: vi.fn(),
+    archiveRoom: vi.fn(),
+    clearRoom: vi.fn(),
   };
+});
+vi.mock("../api/turns", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("../api/turns")>();
+  return { ...actual, cancelTurn: vi.fn() };
 });
 vi.mock("../api/client", async (importOriginal) => {
   const actual = await importOriginal<typeof import("../api/client")>();
@@ -30,10 +37,17 @@ vi.mock("../api/attachments", async (importOriginal) => {
 
 import { openStream } from "../api/client";
 import type { StreamHandlers } from "../api/client";
-import { openRoomsStream, roomSegments, sendToRoom } from "../api/rooms";
+import {
+  archiveRoom,
+  clearRoom,
+  openRoomsStream,
+  roomSegments,
+  sendToRoom,
+} from "../api/rooms";
 import type { RoomRow, Segment } from "../api/rooms";
 import { listEvents } from "../api/sessions";
 import type { SessionEvent } from "../api/sessions";
+import { cancelTurn } from "../api/turns";
 import { ChatsPage } from "./chats";
 
 /* A room name that matches no row keeps the list rendered without mounting the
@@ -101,6 +115,9 @@ beforeEach(() => {
     turn: "started",
     turn_id: "t1",
   });
+  vi.mocked(archiveRoom).mockResolvedValue({ archived_at: 5000 });
+  vi.mocked(clearRoom).mockResolvedValue({ cleared_at: 6000, previous: 0 });
+  vi.mocked(cancelTurn).mockResolvedValue({ turn: "t1" });
   vi.mocked(openStream).mockImplementation(() => ({ close: () => {} }));
 });
 
@@ -509,5 +526,124 @@ describe("Room composer (REQ-ROOM-003)", () => {
     await waitFor(() => {
       expect(vi.mocked(sendToRoom)).toHaveBeenCalledWith("dana", { text: "rencana minggu depan", new_topic: true });
     });
+  });
+});
+
+describe("Chat archive and clear (spec 85)", () => {
+  it("keeps archived rows out of the list and the All count, and shows the Archived row", async () => {
+    installRows([room({ name: "dana" }), room({ name: "zoe", archived_at: 5000 })]);
+
+    const { container } = render(<ChatsPage roomName={NO_ROOM} />);
+
+    /* Only dana is active, so All counts one and the list holds one row. */
+    expect(await screen.findByRole("tab", { name: "All 1" })).toBeTruthy();
+    expect(container.querySelectorAll(".rooms-rows .rooms-row").length).toBe(1);
+
+    /* The Archived row shows the names; the count is only in its label. */
+    const archived = container.querySelector(".archived-row");
+    expect(archived).not.toBeNull();
+    expect(archived?.textContent).toContain("Archived");
+    expect(archived?.getAttribute("aria-label")).toBe("Archived, 1 chat");
+    expect(archived?.textContent).toContain("zoe");
+  });
+
+  it("offers Archive chat for other agents but not lana, and archives with a toast", async () => {
+    installRows([room({ name: "lana" }), room({ name: "dana" })]);
+
+    render(<ChatsPage roomName={NO_ROOM} />);
+    expect(await screen.findByText("lana")).toBeTruthy();
+
+    function openRowMenu(name: string) {
+      const row = screen.getByText(name).closest(".rooms-row") as HTMLElement;
+      fireEvent.click(row.querySelector(".rooms-row-more") as HTMLElement);
+    }
+
+    /* lana (the main agent) has no Archive item. */
+    openRowMenu("lana");
+    expect(await screen.findByRole("menuitem", { name: /Clear chat/ })).toBeTruthy();
+    expect(screen.queryByRole("menuitem", { name: "Archive chat" })).toBeNull();
+
+    /* Toggle lana's menu shut, then archive dana from its own menu. */
+    openRowMenu("lana");
+    await waitFor(() => {
+      expect(screen.queryByRole("menuitem", { name: /Clear chat/ })).toBeNull();
+    });
+    openRowMenu("dana");
+    fireEvent.click(await screen.findByRole("menuitem", { name: "Archive chat" }));
+
+    expect(vi.mocked(archiveRoom)).toHaveBeenCalledWith("dana", true);
+    expect(await screen.findByText("Chat archived")).toBeTruthy();
+  });
+
+  it("lists only archived rows in the archived view and never opens an active room", async () => {
+    installRows([room({ name: "dana" }), room({ name: "zoe", archived_at: 5000 })]);
+    window.location.hash = "";
+
+    const { container } = render(<ChatsPage archived />);
+
+    expect(await screen.findByText("Archived")).toBeTruthy();
+    expect(screen.getByText("zoe")).toBeTruthy();
+    expect(screen.queryByText("dana")).toBeNull();
+    expect(container.querySelectorAll(".archived-view .rooms-row").length).toBe(1);
+    /* Bug 1: it must not jump to the first active room. */
+    expect(window.location.hash).not.toBe("#/chats/dana");
+    expect(window.location.hash).toBe("#/chats/zoe");
+  });
+
+  it("cancels the running turn before clearing a working room", async () => {
+    const order: string[] = [];
+    vi.mocked(cancelTurn).mockImplementation(async () => {
+      order.push("cancel");
+      return { turn: "t1" };
+    });
+    vi.mocked(clearRoom).mockImplementation(async () => {
+      order.push("clear");
+      return { cleared_at: 6000, previous: 0 };
+    });
+    installRows([
+      room({
+        name: "dana",
+        presence: { state: "working", label: "Running bash", since: 0, session_id: "s_work" },
+      }),
+    ]);
+
+    render(<ChatsPage roomName={NO_ROOM} />);
+    expect(await screen.findByText("dana")).toBeTruthy();
+
+    const row = screen.getByText("dana").closest(".rooms-row") as HTMLElement;
+    fireEvent.click(row.querySelector(".rooms-row-more") as HTMLElement);
+    fireEvent.click(await screen.findByRole("menuitem", { name: /Clear chat/ }));
+    fireEvent.click(await screen.findByRole("button", { name: "Clear chat" }));
+
+    await waitFor(() => {
+      expect(vi.mocked(clearRoom)).toHaveBeenCalledWith("dana");
+    });
+    expect(vi.mocked(cancelTurn)).toHaveBeenCalledWith("s_work");
+    expect(order).toEqual(["cancel", "clear"]);
+  });
+
+  it("clears an idle room without cancelling a turn", async () => {
+    installRows([room({ name: "cody" })]);
+
+    render(<ChatsPage roomName={NO_ROOM} />);
+    expect(await screen.findByText("cody")).toBeTruthy();
+
+    const row = screen.getByText("cody").closest(".rooms-row") as HTMLElement;
+    fireEvent.click(row.querySelector(".rooms-row-more") as HTMLElement);
+    fireEvent.click(await screen.findByRole("menuitem", { name: /Clear chat/ }));
+    fireEvent.click(await screen.findByRole("button", { name: "Clear chat" }));
+
+    await waitFor(() => {
+      expect(vi.mocked(clearRoom)).toHaveBeenCalledWith("cody");
+    });
+    expect(vi.mocked(cancelTurn)).not.toHaveBeenCalled();
+  });
+
+  it("shows Chat cleared for a cleared room with no newer message", async () => {
+    installRows([room({ name: "dana", last_message: null, cleared_at: 5000 })]);
+
+    render(<ChatsPage roomName={NO_ROOM} />);
+
+    expect(await screen.findByText("Chat cleared")).toBeTruthy();
   });
 });

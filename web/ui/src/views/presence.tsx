@@ -429,3 +429,16 @@ export function useRooms(): RoomsState {
 export function refreshRooms(): Promise<void> {
   return poll();
 }
+
+/* Spec 85 REQ-ARC-007/008/011: patch one row in place after an archive or a
+   clear, so the list reflects the change at once (an optimistic update). The
+   live stream sends the authoritative `room` event shortly after. */
+export function patchRoom(name: string, patch: Partial<RoomRow>): void {
+  if (!roomsState.rows.some((row) => row.name === name)) {
+    return;
+  }
+  const rows = roomsState.rows.map((row) =>
+    row.name === name ? { ...row, ...patch } : row
+  );
+  setState({ rows, byName: indexRows(rows) });
+}

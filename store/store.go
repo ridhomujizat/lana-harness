@@ -40,7 +40,7 @@ var (
 	ErrInvalidPolicy         = errors.New("invalid policy")
 )
 
-const schemaVersion = 12
+const schemaVersion = 13
 
 var validKinds = map[string]bool{
 	core.KindSessionCreated: true, core.KindTurnStart: true, core.KindTurnEnd: true,
@@ -110,7 +110,7 @@ func (s *Store) migrate(ctx context.Context) error {
 	if version > schemaVersion {
 		return ErrSchemaTooNew
 	}
-	names := map[int]string{1: "session_log", 2: "session_leases", 3: "session_status_waiting_input", 4: "session_text", 5: "room_reads", 6: "workflows", 7: "calendar", 8: "router", 9: "session_title", 10: "workflow_node_via", 11: "workflow_candidates", 12: "router_call_key"}
+	names := map[int]string{1: "session_log", 2: "session_leases", 3: "session_status_waiting_input", 4: "session_text", 5: "room_reads", 6: "workflows", 7: "calendar", 8: "router", 9: "session_title", 10: "workflow_node_via", 11: "workflow_candidates", 12: "router_call_key", 13: "room_state"}
 	for v := version + 1; v <= schemaVersion; v++ {
 		name := fmt.Sprintf("migrations/%04d_%s.sql", v, names[v])
 		data, err := migrationFS.ReadFile(name)
@@ -788,6 +788,61 @@ func (s *Store) SetRoomRead(ctx context.Context, room string, at int64) (int64, 
 	return stored, nil
 }
 
+// RoomStates implements core.RoomStateStore (REQ-ARC-004). It returns every
+// room row keyed by room name; a room with no row is simply absent.
+func (s *Store) RoomStates(ctx context.Context) (map[string]core.RoomState, error) {
+	if err := s.assertOpen(); err != nil {
+		return nil, err
+	}
+	rows, err := s.db.QueryContext(ctx, "SELECT room, read_at, archived_at, cleared_at FROM room_reads")
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = rows.Close() }()
+	out := map[string]core.RoomState{}
+	for rows.Next() {
+		var room string
+		var state core.RoomState
+		if err := rows.Scan(&room, &state.ReadAt, &state.ArchivedAt, &state.ClearedAt); err != nil {
+			return nil, err
+		}
+		out[room] = state
+	}
+	return out, rows.Err()
+}
+
+// SetRoomArchived implements core.RoomStateStore (REQ-ARC-002). It upserts the
+// archive time of a room, replacing any previous value; a row created here
+// keeps read_at 0.
+func (s *Store) SetRoomArchived(ctx context.Context, room string, at int64) error {
+	return s.withWrite(ctx, func(conn *sql.Conn) error {
+		_, err := conn.ExecContext(ctx, "INSERT INTO room_reads (room, read_at, archived_at) VALUES (?, 0, ?) ON CONFLICT(room) DO UPDATE SET archived_at = excluded.archived_at", room, at)
+		return err
+	})
+}
+
+// SetRoomCleared implements core.RoomStateStore (REQ-ARC-003). It upserts the
+// clear time of a room and returns the previous value (0 when the room had no
+// row). A row created here keeps read_at 0.
+func (s *Store) SetRoomCleared(ctx context.Context, room string, at int64) (int64, error) {
+	var previous int64
+	err := s.withWrite(ctx, func(conn *sql.Conn) error {
+		err := conn.QueryRowContext(ctx, "SELECT cleared_at FROM room_reads WHERE room = ?", room).Scan(&previous)
+		if err != nil && !errors.Is(err, sql.ErrNoRows) {
+			return err
+		}
+		if errors.Is(err, sql.ErrNoRows) {
+			previous = 0
+		}
+		_, err = conn.ExecContext(ctx, "INSERT INTO room_reads (room, read_at, cleared_at) VALUES (?, 0, ?) ON CONFLICT(room) DO UPDATE SET cleared_at = excluded.cleared_at", room, at)
+		return err
+	})
+	if err != nil {
+		return 0, err
+	}
+	return previous, nil
+}
+
 func (s *Store) loadEvents(ctx context.Context, sessionID string) ([]core.SessionEvent, error) {
 	var out []core.SessionEvent
 	for event, err := range s.Events(ctx, sessionID, 1) {
@@ -923,6 +978,10 @@ func (s *Store) List(ctx context.Context, f core.SessionFilter) ([]core.SessionI
 	if f.Before > 0 {
 		query += " AND updated_at < ?"
 		args = append(args, f.Before)
+	}
+	if f.UpdatedAfter > 0 {
+		query += " AND updated_at > ?"
+		args = append(args, f.UpdatedAfter)
 	}
 	query += " ORDER BY updated_at DESC, created_at DESC, id DESC"
 	if f.Limit > 0 {
@@ -1615,5 +1674,6 @@ var _ core.LeaseProbe = (*Store)(nil)
 var _ core.EventScanner = (*Store)(nil)
 var _ core.AgentEventCounter = (*Store)(nil)
 var _ core.RoomReadStore = (*Store)(nil)
+var _ core.RoomStateStore = (*Store)(nil)
 var _ core.SessionSearcher = (*Store)(nil)
 var _ core.SessionTextReader = (*Store)(nil)

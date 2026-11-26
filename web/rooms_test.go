@@ -684,3 +684,184 @@ func TestPresenceOwnChatBeatsTeamRoom(t *testing.T) {
 		t.Fatalf("presence = %+v, want the own chat's status", row.Presence)
 	}
 }
+
+// REQ-ARC-002: archive sets and clears archived_at, needs a boolean archived,
+// and rejects an unknown room.
+func TestRoomArchive(t *testing.T) {
+	backend := newFakeWebBackend()
+	backend.agents = []Agent{{Name: "dana", Kind: "agent"}}
+	s, cookie, csrf := newLoggedInSessionServer(t, backend)
+
+	rr := serveAuth(s, sessionTestRequest(http.MethodPost, "/v1/rooms/dana/archive", `{"archived":true}`, cookie, csrf))
+	if rr.Code != http.StatusOK {
+		t.Fatalf("archive status = %d, body = %q", rr.Code, rr.Body.String())
+	}
+	var body roomArchiveResponse
+	if err := json.Unmarshal(rr.Body.Bytes(), &body); err != nil {
+		t.Fatal(err)
+	}
+	if body.ArchivedAt <= 0 {
+		t.Fatalf("archived_at = %d, want a time", body.ArchivedAt)
+	}
+	if row := roomRowForTest(t, s, cookie, "dana"); row.ArchivedAt != body.ArchivedAt {
+		t.Fatalf("row archived_at = %d, want %d", row.ArchivedAt, body.ArchivedAt)
+	}
+
+	// Unarchive sets it back to 0.
+	rr = serveAuth(s, sessionTestRequest(http.MethodPost, "/v1/rooms/dana/archive", `{"archived":false}`, cookie, csrf))
+	if rr.Code != http.StatusOK {
+		t.Fatalf("unarchive status = %d, body = %q", rr.Code, rr.Body.String())
+	}
+	if err := json.Unmarshal(rr.Body.Bytes(), &body); err != nil {
+		t.Fatal(err)
+	}
+	if body.ArchivedAt != 0 {
+		t.Fatalf("unarchive archived_at = %d, want 0", body.ArchivedAt)
+	}
+	if row := roomRowForTest(t, s, cookie, "dana"); row.ArchivedAt != 0 {
+		t.Fatalf("row archived_at = %d, want 0", row.ArchivedAt)
+	}
+
+	// A missing or non-bool archived is invalid_body.
+	for _, payload := range []string{`{}`, `{"archived":"yes"}`, `{"archived":1}`} {
+		rr := serveAuth(s, sessionTestRequest(http.MethodPost, "/v1/rooms/dana/archive", payload, cookie, csrf))
+		assertAuthError(t, rr, http.StatusBadRequest, "invalid_body")
+	}
+
+	rr = serveAuth(s, sessionTestRequest(http.MethodPost, "/v1/rooms/missing/archive", `{"archived":true}`, cookie, csrf))
+	assertAuthError(t, rr, http.StatusNotFound, "room_not_found")
+}
+
+// REQ-ARC-002: the main agent cannot be archived (409), but unarchiving it is
+// allowed.
+func TestRoomArchiveLanaNotArchivable(t *testing.T) {
+	backend := newFakeWebBackend()
+	backend.agents = []Agent{{Name: "lana", Kind: "agent"}}
+	s, cookie, csrf := newLoggedInSessionServer(t, backend)
+
+	rr := serveAuth(s, sessionTestRequest(http.MethodPost, "/v1/rooms/lana/archive", `{"archived":true}`, cookie, csrf))
+	assertAuthError(t, rr, http.StatusConflict, "room_not_archivable")
+
+	rr = serveAuth(s, sessionTestRequest(http.MethodPost, "/v1/rooms/lana/archive", `{"archived":false}`, cookie, csrf))
+	if rr.Code != http.StatusOK {
+		t.Fatalf("unarchive lana status = %d, body = %q", rr.Code, rr.Body.String())
+	}
+}
+
+// REQ-ARC-003, REQ-ARC-004: clear sets cleared_at, moves read_at to now, and
+// drops the stale last_message; restore undoes it and rejects an out-of-range n.
+func TestRoomClearAndRestore(t *testing.T) {
+	backend := newFakeWebBackend()
+	backend.agents = []Agent{{Name: "dana", Kind: "agent"}}
+	info := backend.addSession(core.SessionInfo{ID: id.New(), Agent: "dana", Channel: "web", Address: "owner", CreatedAt: 1000, UpdatedAt: 1000})
+	backend.appendEvent(info.ID, core.SessionEvent{Kind: core.KindAssistantMessage, CreatedAt: 1000, Payload: json.RawMessage(`{"v":1,"content":[{"type":"text","text":"hello"}]}`)})
+	s, cookie, csrf := newLoggedInSessionServer(t, backend)
+
+	if row := roomRowForTest(t, s, cookie, "dana"); row.LastMessage == nil {
+		t.Fatalf("precondition: last_message is nil")
+	}
+
+	rr := serveAuth(s, sessionTestRequest(http.MethodPost, "/v1/rooms/dana/clear", `{}`, cookie, csrf))
+	if rr.Code != http.StatusOK {
+		t.Fatalf("clear status = %d, body = %q", rr.Code, rr.Body.String())
+	}
+	var body roomClearResponse
+	if err := json.Unmarshal(rr.Body.Bytes(), &body); err != nil {
+		t.Fatal(err)
+	}
+	if body.ClearedAt <= 0 || body.Previous != 0 {
+		t.Fatalf("clear = %+v, want cleared_at now and previous 0", body)
+	}
+	row := roomRowForTest(t, s, cookie, "dana")
+	if row.ClearedAt != body.ClearedAt {
+		t.Fatalf("row cleared_at = %d, want %d", row.ClearedAt, body.ClearedAt)
+	}
+	if row.LastMessage != nil {
+		t.Fatalf("last_message = %+v, want nil after clear", row.LastMessage)
+	}
+	backend.mu.Lock()
+	readAt := backend.roomReads["dana"]
+	backend.mu.Unlock()
+	if readAt != body.ClearedAt {
+		t.Fatalf("read_at = %d, want cleared_at %d", readAt, body.ClearedAt)
+	}
+
+	// restore 0 undoes the clear and answers the previous value.
+	rr = serveAuth(s, sessionTestRequest(http.MethodPost, "/v1/rooms/dana/clear", `{"restore":0}`, cookie, csrf))
+	if rr.Code != http.StatusOK {
+		t.Fatalf("restore status = %d, body = %q", rr.Code, rr.Body.String())
+	}
+	if err := json.Unmarshal(rr.Body.Bytes(), &body); err != nil {
+		t.Fatal(err)
+	}
+	if body.ClearedAt != 0 || body.Previous <= 0 {
+		t.Fatalf("restore = %+v, want cleared_at 0 and the previous clear", body)
+	}
+	row = roomRowForTest(t, s, cookie, "dana")
+	if row.ClearedAt != 0 || row.LastMessage == nil {
+		t.Fatalf("after restore row = %+v, want cleared_at 0 and last_message set", row)
+	}
+
+	// An out-of-range restore is invalid_restore.
+	for _, payload := range []string{`{"restore":5}`, `{"restore":-1}`} {
+		rr := serveAuth(s, sessionTestRequest(http.MethodPost, "/v1/rooms/dana/clear", payload, cookie, csrf))
+		assertAuthError(t, rr, http.StatusBadRequest, "invalid_restore")
+	}
+
+	rr = serveAuth(s, sessionTestRequest(http.MethodPost, "/v1/rooms/missing/clear", `{}`, cookie, csrf))
+	assertAuthError(t, rr, http.StatusNotFound, "room_not_found")
+}
+
+// REQ-ARC-005: segments leave out sessions last updated at or before the clear.
+func TestRoomSegmentsFilteredByClearedAt(t *testing.T) {
+	backend := newFakeWebBackend()
+	backend.agents = []Agent{{Name: "dana", Kind: "agent"}}
+	backend.addSession(core.SessionInfo{ID: id.New(), Agent: "dana", Channel: "web", Address: "owner", CreatedAt: 1000, UpdatedAt: 1000})
+	fresh := backend.addSession(core.SessionInfo{ID: id.New(), Agent: "dana", Channel: "web", Address: "owner", CreatedAt: 1000, UpdatedAt: 3000})
+	s, cookie, _ := newLoggedInSessionServer(t, backend)
+
+	backend.mu.Lock()
+	backend.roomCleared["dana"] = 2000
+	backend.mu.Unlock()
+
+	page := segmentsForTest(t, s, cookie, "/v1/rooms/dana/segments")
+	if len(page.Segments) != 1 || page.Segments[0].SessionID != fresh.ID {
+		t.Fatalf("segments = %+v, want only the fresh session %s", page.Segments, fresh.ID)
+	}
+}
+
+// REQ-ARC-006: after a clear the next message starts a new web session.
+func TestRoomSendAfterClearCreatesSession(t *testing.T) {
+	backend := newFakeWebBackend()
+	backend.agentNames["dana"] = true
+	backend.agents = []Agent{{Name: "dana", Kind: "agent"}}
+	existing := backend.addSession(core.SessionInfo{ID: id.New(), Agent: "dana", Channel: "web", Address: "owner", CreatedAt: 1000, UpdatedAt: 1000})
+	s, cookie, csrf := newLoggedInSessionServer(t, backend)
+
+	// Without a clear the existing session is reused.
+	rr := serveAuth(s, sessionTestRequest(http.MethodPost, "/v1/rooms/dana/messages", `{"text":"hi"}`, cookie, csrf))
+	var reused roomSendResponse
+	if err := json.Unmarshal(rr.Body.Bytes(), &reused); err != nil {
+		t.Fatal(err)
+	}
+	if reused.Created || reused.SessionID != existing.ID {
+		t.Fatalf("reused = %+v, want session %s", reused, existing.ID)
+	}
+
+	rr = serveAuth(s, sessionTestRequest(http.MethodPost, "/v1/rooms/dana/clear", `{}`, cookie, csrf))
+	if rr.Code != http.StatusOK {
+		t.Fatalf("clear status = %d, body = %q", rr.Code, rr.Body.String())
+	}
+
+	rr = serveAuth(s, sessionTestRequest(http.MethodPost, "/v1/rooms/dana/messages", `{"text":"fresh"}`, cookie, csrf))
+	if rr.Code != http.StatusOK {
+		t.Fatalf("send status = %d, body = %q", rr.Code, rr.Body.String())
+	}
+	var created roomSendResponse
+	if err := json.Unmarshal(rr.Body.Bytes(), &created); err != nil {
+		t.Fatal(err)
+	}
+	if !created.Created || created.SessionID == existing.ID || created.SessionID == "" {
+		t.Fatalf("after clear = %+v, want a new session", created)
+	}
+}

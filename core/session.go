@@ -54,7 +54,11 @@ type SessionFilter struct {
 	// Before, when > 0, keeps only sessions last updated before this Unix ms
 	// time (REQ-ROOM-002).
 	Before int64
-	Limit  int
+	// UpdatedAfter, when > 0, keeps only sessions last updated after this Unix
+	// ms time. A cleared room passes its cleared_at so its timeline starts at
+	// the clear (REQ-ARC-005).
+	UpdatedAfter int64
+	Limit        int
 }
 
 // SessionStore is the append-only event log.
@@ -110,6 +114,28 @@ type RoomReadStore interface {
 	// SetRoomRead stores at as the read time of room and returns the stored
 	// value. The read time only moves forward.
 	SetRoomRead(ctx context.Context, room string, at int64) (int64, error)
+}
+
+// RoomState is the read, archive, and clear state of one room (REQ-ARC-001).
+// A zero time means never read, not archived, or never cleared.
+type RoomState struct {
+	ReadAt     int64
+	ArchivedAt int64
+	ClearedAt  int64
+}
+
+// RoomStateStore is an optional SessionStore extension that stores the archive
+// and clear state of every room next to its read time (REQ-ARC-001). The SQLite
+// store implements it; the in-memory store does not.
+type RoomStateStore interface {
+	// RoomStates returns every room's state keyed by room name (REQ-ARC-004).
+	RoomStates(ctx context.Context) (map[string]RoomState, error)
+	// SetRoomArchived stores at as the archive time of room, replacing any
+	// previous value (REQ-ARC-002).
+	SetRoomArchived(ctx context.Context, room string, at int64) error
+	// SetRoomCleared stores at as the clear time of room and returns the
+	// previous value (REQ-ARC-003).
+	SetRoomCleared(ctx context.Context, room string, at int64) (previous int64, err error)
 }
 
 // ScannedEvent is one session_events row with the owning session's agent.

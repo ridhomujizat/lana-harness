@@ -1817,6 +1817,203 @@ func TestRoomReadsUpsertKeepsMax(t *testing.T) {
 	}
 }
 
+// REQ-ARC-002, REQ-ARC-003, REQ-ARC-004: archive and clear upsert the room
+// state, a row created only for one of them has read_at 0, and SetRoomCleared
+// returns the previous value.
+func TestRoomStateUpsert(t *testing.T) {
+	ctx := context.Background()
+	s, _ := openTest(t)
+
+	if err := s.SetRoomArchived(ctx, "dana", 500); err != nil {
+		t.Fatal(err)
+	}
+	states, err := s.RoomStates(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := states["dana"]; got != (core.RoomState{ArchivedAt: 500}) {
+		t.Fatalf("after archive = %+v, want archived_at 500", got)
+	}
+
+	// A read mark survives the archive upsert, which must not touch read_at.
+	if _, err := s.SetRoomRead(ctx, "dana", 800); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.SetRoomArchived(ctx, "dana", 900); err != nil {
+		t.Fatal(err)
+	}
+
+	previous, err := s.SetRoomCleared(ctx, "dana", 1000)
+	if err != nil || previous != 0 {
+		t.Fatalf("first clear previous=%d err=%v, want 0", previous, err)
+	}
+	previous, err = s.SetRoomCleared(ctx, "dana", 2000)
+	if err != nil || previous != 1000 {
+		t.Fatalf("second clear previous=%d err=%v, want 1000", previous, err)
+	}
+
+	states, err = s.RoomStates(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := states["dana"]; got != (core.RoomState{ReadAt: 800, ArchivedAt: 900, ClearedAt: 2000}) {
+		t.Fatalf("state = %+v, want read 800 archive 900 clear 2000", got)
+	}
+
+	// Unarchiving sets the time back to 0.
+	if err := s.SetRoomArchived(ctx, "dana", 0); err != nil {
+		t.Fatal(err)
+	}
+	// A room created only by a clear has read_at 0.
+	if _, err := s.SetRoomCleared(ctx, "karin", 50); err != nil {
+		t.Fatal(err)
+	}
+	states, _ = s.RoomStates(ctx)
+	if got := states["dana"]; got != (core.RoomState{ReadAt: 800, ClearedAt: 2000}) {
+		t.Fatalf("unarchived dana = %+v", got)
+	}
+	if got := states["karin"]; got != (core.RoomState{ClearedAt: 50}) {
+		t.Fatalf("clear-only karin = %+v, want read_at 0", got)
+	}
+}
+
+// REQ-ARC-001: a fresh database has the room_reads archived_at and cleared_at
+// columns.
+func TestMigrateFreshAddsRoomState(t *testing.T) {
+	s, _ := openTest(t)
+	if n := countRows(t, s, "SELECT COUNT(*) FROM pragma_table_info('room_reads') WHERE name IN ('archived_at', 'cleared_at')"); n != 2 {
+		t.Fatalf("room state columns=%d, want 2", n)
+	}
+}
+
+// v12Database builds a schema-version-12 database the way the previous binary
+// left it: migrations 0001-0012 applied and user_version set to 12.
+func v12Database(t *testing.T) (*sql.DB, string) {
+	t.Helper()
+	path := filepath.Join(t.TempDir(), "lana.db")
+	dsn := "file:" + path + "?_pragma=busy_timeout(5000)&_pragma=journal_mode(WAL)&_pragma=synchronous(NORMAL)&_pragma=foreign_keys(1)"
+	db, err := sql.Open("sqlite", dsn)
+	if err != nil {
+		t.Fatal(err)
+	}
+	db.SetMaxOpenConns(1)
+	if _, err := db.Exec("PRAGMA foreign_keys = OFF"); err != nil {
+		t.Fatal(err)
+	}
+	for _, name := range []string{
+		"migrations/0001_session_log.sql", "migrations/0002_session_leases.sql",
+		"migrations/0003_session_status_waiting_input.sql", "migrations/0004_session_text.sql",
+		"migrations/0005_room_reads.sql", "migrations/0006_workflows.sql",
+		"migrations/0007_calendar.sql", "migrations/0008_router.sql",
+		"migrations/0009_session_title.sql", "migrations/0010_workflow_node_via.sql",
+		"migrations/0011_workflow_candidates.sql", "migrations/0012_router_call_key.sql",
+	} {
+		data, err := migrationFS.ReadFile(name)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err := db.Exec(string(data)); err != nil {
+			t.Fatalf("apply %s: %v", name, err)
+		}
+	}
+	if _, err := db.Exec("PRAGMA foreign_keys = ON"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.Exec("PRAGMA user_version = 12"); err != nil {
+		t.Fatal(err)
+	}
+	return db, path
+}
+
+// REQ-ARC-001: a version-12 database gains the archived_at and cleared_at
+// columns, and an existing read row keeps its read_at and reads the new columns
+// as 0.
+func TestMigrateV12ToV13AddsRoomState(t *testing.T) {
+	ctx := context.Background()
+	db, path := v12Database(t)
+	if _, err := db.Exec("INSERT INTO room_reads (room, read_at) VALUES ('dana', 7000)"); err != nil {
+		t.Fatal(err)
+	}
+	if err := db.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	s, err := Open(ctx, path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = s.Close() }()
+
+	var version int
+	if err := s.db.QueryRow("PRAGMA user_version").Scan(&version); err != nil {
+		t.Fatal(err)
+	}
+	if version != schemaVersion || schemaVersion != 13 {
+		t.Fatalf("version=%d schemaVersion=%d, want 13", version, schemaVersion)
+	}
+	if n := countRows(t, s, "SELECT COUNT(*) FROM pragma_table_info('room_reads') WHERE name IN ('archived_at', 'cleared_at')"); n != 2 {
+		t.Fatalf("room state columns=%d, want 2", n)
+	}
+	states, err := s.RoomStates(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := states["dana"]; got != (core.RoomState{ReadAt: 7000}) {
+		t.Fatalf("dana state=%+v, want read_at 7000 and zero archive/clear", got)
+	}
+	if err := s.SetRoomArchived(ctx, "dana", 8000); err != nil {
+		t.Fatal(err)
+	}
+	states, _ = s.RoomStates(ctx)
+	if got := states["dana"]; got != (core.RoomState{ReadAt: 7000, ArchivedAt: 8000}) {
+		t.Fatalf("dana state after archive=%+v", got)
+	}
+}
+
+// REQ-ARC-005: UpdatedAfter keeps only sessions last updated after the given
+// time, so a cleared room's timeline starts at the clear.
+func TestListFilterUpdatedAfter(t *testing.T) {
+	ctx := context.Background()
+	s, _ := openTest(t)
+	old, err := s.Create(ctx, core.NewSession{Agent: "dana", Channel: "web", Address: "owner", Workspace: t.TempDir()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	mid, err := s.Create(ctx, core.NewSession{Agent: "dana", Channel: "web", Address: "owner", Workspace: t.TempDir()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	recent, err := s.Create(ctx, core.NewSession{Agent: "dana", Channel: "web", Address: "owner", Workspace: t.TempDir()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	setTimes := func(id string, created, updated int64) {
+		t.Helper()
+		if _, err := s.db.Exec("UPDATE sessions SET created_at = ?, updated_at = ? WHERE id = ?", created, updated, id); err != nil {
+			t.Fatal(err)
+		}
+	}
+	setTimes(old.ID, 100, 100)
+	setTimes(mid.ID, 200, 200)
+	setTimes(recent.ID, 300, 300)
+
+	all, err := s.List(ctx, core.SessionFilter{})
+	if err != nil || len(all) != 3 {
+		t.Fatalf("all=%+v err=%v, want 3", all, err)
+	}
+	afterMid, err := s.List(ctx, core.SessionFilter{UpdatedAfter: 200})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(afterMid) != 1 || afterMid[0].ID != recent.ID {
+		t.Fatalf("afterMid=%+v, want only recent %s", afterMid, recent.ID)
+	}
+	none, err := s.List(ctx, core.SessionFilter{UpdatedAfter: 300})
+	if err != nil || len(none) != 0 {
+		t.Fatalf("after all=%+v err=%v, want none", none, err)
+	}
+}
+
 // REQ-ROOM-005: a fresh database has the room_reads table at the current schema
 // version.
 func TestMigrateFreshAddsRoomReads(t *testing.T) {

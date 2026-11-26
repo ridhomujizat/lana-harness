@@ -233,6 +233,15 @@ type Backend interface {
 	// SetRoomRead stores a room's read time, which only moves forward, and
 	// returns the stored value (REQ-ROOM-005).
 	SetRoomRead(ctx context.Context, room string, at int64) (int64, error)
+	// RoomStates returns every room's read, archive, and clear state keyed by
+	// room name (REQ-ARC-004).
+	RoomStates(ctx context.Context) (map[string]core.RoomState, error)
+	// SetRoomArchived stores a room's archive time, replacing any previous
+	// value (REQ-ARC-002).
+	SetRoomArchived(ctx context.Context, room string, at int64) error
+	// SetRoomCleared stores a room's clear time and returns the previous value
+	// (REQ-ARC-003).
+	SetRoomCleared(ctx context.Context, room string, at int64) (int64, error)
 	// ScanEvents reads events of the given kinds across every session, created
 	// at or after sinceMS. The agent overview reads the last seven days with it
 	// (API-DSH-001).

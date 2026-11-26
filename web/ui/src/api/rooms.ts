@@ -37,6 +37,9 @@ export interface RoomRow {
   unread: number;
   turns_7d: number;
   last_active_at: number;
+  /* Spec 85 REQ-ARC-004: the archive/clear state of the room, 0 when unset. */
+  archived_at?: number;
+  cleared_at?: number;
 }
 
 export interface RoomLastMessage {
@@ -214,6 +217,45 @@ export function markRoomRead(name: string): Promise<MarkRoomReadResponse> {
   return request<MarkRoomReadResponse>(
     "POST",
     "/v1/rooms/" + encodeURIComponent(name) + "/read"
+  );
+}
+
+export interface ArchiveRoomResponse {
+  archived_at: number;
+}
+
+export interface ClearRoomResponse {
+  cleared_at: number;
+  previous: number;
+}
+
+/* Spec 85 REQ-ARC-002: archive (true) or unarchive (false) a room. The agent
+   named "lana" cannot be archived (the server answers 409 room_not_archivable). */
+export function archiveRoom(
+  name: string,
+  archived: boolean
+): Promise<ArchiveRoomResponse> {
+  return request<ArchiveRoomResponse>(
+    "POST",
+    "/v1/rooms/" + encodeURIComponent(name) + "/archive",
+    { archived }
+  );
+}
+
+/* Spec 85 REQ-ARC-003: clear the room timeline ({}), or undo a clear with
+   {restore: previous}. Clearing deletes nothing. */
+export function clearRoom(
+  name: string,
+  restore?: number
+): Promise<ClearRoomResponse> {
+  const payload: { restore?: number } = {};
+  if (restore !== undefined) {
+    payload.restore = restore;
+  }
+  return request<ClearRoomResponse>(
+    "POST",
+    "/v1/rooms/" + encodeURIComponent(name) + "/clear",
+    payload
   );
 }
 
