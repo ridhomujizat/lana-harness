@@ -234,7 +234,7 @@ label = "Work"
 	agy.status = AntigravityStatus{
 		Installed: true, Binary: "/bin/agy", Version: "1.5.17", VersionOK: true, PoolWarning: true,
 		Accounts: []AntigravityAccountStatus{
-			{Name: "agy-2", SignedIn: true, Tier: "Google AI Pro", Priority: 10, Pool: true,
+			{Name: "agy-2", SignedIn: true, Tier: "Google AI Pro", Email: "second@example.com", Priority: 10, Pool: true,
 				Windows: []AntigravityWindow{{Group: "Gemini Models", Type: "5h", Remaining: &remaining}}},
 			{Name: "antigravity", Builtin: true, Priority: 20, Pool: true},
 		},
@@ -256,6 +256,10 @@ label = "Work"
 	}
 	if builtin.DisplayName != "antigravity" || builtin.SignIn.State != "idle" || builtin.Windows == nil {
 		t.Fatalf("built-in = %+v", builtin)
+	}
+	// Spec 77 REQ-WRA-014: each account has email, "" when unknown.
+	if work.Email != "second@example.com" || !strings.Contains(string(got.body), `"email":""`) {
+		t.Fatalf("email: %s", got.body)
 	}
 	for _, want := range []string{`"cooling_until":null`, `"windows_updated_at":null`, `"usage_24h":{"calls":0`} {
 		if !strings.Contains(string(got.body), want) {

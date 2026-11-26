@@ -60,6 +60,7 @@ import {
   ErrorState,
   Input,
   Radio,
+  Select,
   Skeleton,
   Tabs,
   Toggle,
@@ -69,6 +70,19 @@ import { GenerateAvatarButton } from "./avatar-dialog";
 import type { AvatarSavedResult } from "./avatar-dialog";
 import { ModelPicker } from "./model-picker";
 import type { ModelOption } from "./model-picker";
+import {
+  accountOptions,
+  mergeAccountChoices,
+  modelAccounts,
+  useAntigravityAccounts,
+  withAccount,
+} from "./model-accounts";
+
+/* "claude-work" of "claude-work/opus". */
+function addressAccountOf(value: string): string {
+  const slash = value.indexOf("/");
+  return slash > 0 ? value.slice(0, slash) : "";
+}
 
 /* REQ-WEB-047: the agent detail header, the seven-tab bar, and the General
    tab. The other tabs show a placeholder until their slices land (T-030). */
@@ -671,6 +685,7 @@ export function AgentDetailPage({ name, tab }: AgentDetailPageProps) {
   /* A legacy runtime = "claude-code" file is rewritten on the next save. */
   const [legacyRuntime, setLegacyRuntime] = useState(false);
   const { accounts } = useClaudeAccounts();
+  const agyAccounts = useAntigravityAccounts();
   const tabsRef = useRef<HTMLDivElement | null>(null);
   const pendingTabFocus = useRef(false);
 
@@ -1318,9 +1333,24 @@ export function AgentDetailPage({ name, tab }: AgentDetailPageProps) {
     ...(variant && form && !customModel
       ? [{ value: form.model, label: form.model, group: "Current" }]
       : []),
-    ...choiceOptions(choices, page ? page.providers : undefined, accounts),
+    ...choiceOptions(
+      mergeAccountChoices(choices, formModel, page ? page.providers : null, accounts),
+      page ? page.providers : undefined,
+      accounts,
+      true
+    ),
     { value: OTHER_MODEL, label: "Other…", sticky: true },
   ];
+  /* Spec 77 revision 6: the account the picked Claude Code or Antigravity
+     model runs on, when more than one account offers it. */
+  const modelFamily =
+    legacy || customModel
+      ? null
+      : modelAccounts(formModel, choices, page ? page.providers : null, accounts);
+  const accountChoices =
+    modelFamily && modelFamily.accounts.length > 1
+      ? accountOptions(modelFamily, accounts, agyAccounts)
+      : null;
   const modelValue = legacy
     ? LEGACY_MODEL
     : customModel
@@ -1675,6 +1705,31 @@ export function AgentDetailPage({ name, tab }: AgentDetailPageProps) {
                   ) : null}
                 </div>
               </div>
+
+              {accountChoices ? (
+                <div className="srow">
+                  <div className="agent-srow-text">
+                    <label className="t" htmlFor="agent-model-account">
+                      Account
+                    </label>
+                    <div className="d">
+                      {modelFamily && modelFamily.family === "antigravity"
+                        ? "The Antigravity account the model runs on."
+                        : "The Claude Code account the model runs on."}
+                    </div>
+                  </div>
+                  <div className="agent-ctl">
+                    <Select
+                      id="agent-model-account"
+                      aria-label="Account"
+                      value={addressAccountOf(formModel)}
+                      disabled={saving}
+                      options={accountChoices}
+                      onChange={(account) => pickModel(withAccount(formModel, account))}
+                    />
+                  </div>
+                </div>
+              ) : null}
 
               {effortLevels ? (
                 <div className="srow">

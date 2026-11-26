@@ -20,6 +20,13 @@ import { ClaudeCodeNote, choiceOptions } from "./agent-runtime";
 import { EffortControl } from "./effort-control";
 import { ModelPicker } from "./model-picker";
 import type { ModelOption } from "./model-picker";
+import {
+  accountOptions,
+  mergeAccountChoices,
+  modelAccounts,
+  useAntigravityAccounts,
+  withAccount,
+} from "./model-accounts";
 import { choiceLevels, effortChoice, keptEffort } from "./effort";
 import {
   ClaudeCodeBadge,
@@ -155,6 +162,7 @@ export function CreateAgentDialog({
   const [effort, setEffort] = useState("");
   const [router, setRouter] = useState<RouterOverview | null>(null);
   const { accounts } = useClaudeAccounts();
+  const agyAccounts = useAntigravityAccounts();
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const [details, setDetails] = useState<unknown[]>([]);
@@ -188,8 +196,15 @@ export function CreateAgentDialog({
     effortChoice(model, choices, router ? router.combos : null),
     claudeAccount !== ""
   );
+  /* Spec 77 revision 6: the accounts offering the picked model. */
+  const modelFamily = modelAccounts(model, choices, router ? router.providers : null, accounts);
   const modelOptions = useMemo((): ModelOption[] => {
-    const options = choiceOptions(choices, router ? router.providers : undefined, accounts);
+    const options = choiceOptions(
+      mergeAccountChoices(choices, model, router ? router.providers : null, accounts),
+      router ? router.providers : undefined,
+      accounts,
+      true
+    );
     const known = !model || options.some((option) => option.value === model);
     return [
       { value: "", label: "Same as the default agent" },
@@ -362,6 +377,27 @@ export function CreateAgentDialog({
           />
           {claudeAccount ? <ClaudeCodeNote account={claudeAccount} /> : null}
         </div>
+
+        {modelFamily && modelFamily.accounts.length > 1 ? (
+          <div className="field">
+            <label className="field-label" htmlFor="create-agent-account">
+              Account
+            </label>
+            <Select
+              id="create-agent-account"
+              aria-label="Account"
+              value={model.slice(0, model.indexOf("/"))}
+              disabled={busy}
+              options={accountOptions(modelFamily, accounts, agyAccounts)}
+              onChange={(account) => setModel(withAccount(model, account))}
+            />
+            <span className="hint">
+              {modelFamily.family === "antigravity"
+                ? "The Antigravity account the model runs on."
+                : "The Claude Code account the model runs on."}
+            </span>
+          </div>
+        ) : null}
 
         {levels ? (
           <div className="field">

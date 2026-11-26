@@ -248,6 +248,12 @@ func (s *Server) putClaudeAccount(w http.ResponseWriter, r *http.Request, store 
 			writeProviderIssue(w, path+".config_dir", "cannot create the account folder: "+err.Error())
 			return
 		}
+		// Spec 77 REQ-WRA-001: the account shares history, projects and the
+		// user settings with the default Claude Code folder, and REQ-WRA-012:
+		// an account that never signed in gets the default's .claude.json
+		// without its login keys, before the sign-in command is shown. A
+		// failure is only logged; the save goes on.
+		s.shareClaudeAccount(name, dir)
 	}
 	configChanged := !bytes.Equal(candidate, file.Raw)
 	restartRequired := !isLiveStore(store)

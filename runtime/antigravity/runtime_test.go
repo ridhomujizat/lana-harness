@@ -683,6 +683,24 @@ func TestBuildEnvScrub(t *testing.T) {
 	}
 }
 
+// Spec 77 REQ-WRA-013: an added account gets SSH_CONNECTION (file-based token
+// storage, no Keychain dialog); the built-in account does not; a value the
+// daemon already has is kept, exactly once.
+func TestBuildEnvFileTokenStorage(t *testing.T) {
+	base := []string{"HOME=/daemon", "PATH=/bin"}
+	want := "SSH_CONNECTION=127.0.0.1 0 127.0.0.1 0"
+	if env := buildEnv(base, core.RuntimeConfig{Home: "/acc"}); !hasEnv(env, want) || countPrefix(env, "SSH_CONNECTION=") != 1 {
+		t.Fatalf("added = %v", env)
+	}
+	if env := buildEnv(base, core.RuntimeConfig{}); countPrefix(env, "SSH_CONNECTION=") != 0 {
+		t.Fatalf("built-in = %v", env)
+	}
+	preset := append([]string{"SSH_CONNECTION=10.0.0.1 22 10.0.0.2 22"}, base...)
+	if env := buildEnv(preset, core.RuntimeConfig{Home: "/acc"}); !hasEnv(env, "SSH_CONNECTION=10.0.0.1 22 10.0.0.2 22") || countPrefix(env, "SSH_CONNECTION=") != 1 {
+		t.Fatalf("preset = %v", env)
+	}
+}
+
 func TestConvertMCP(t *testing.T) {
 	servers := convertMCP(`{"mcpServers":{"lana":{"type":"http","url":"http://127.0.0.1:1/mcp","headers":{"Authorization":"Bearer t"}}}}`)
 	if len(servers) != 1 || servers[0].Name != "lana" || servers[0].Type != "http" || servers[0].URL != "http://127.0.0.1:1/mcp" {

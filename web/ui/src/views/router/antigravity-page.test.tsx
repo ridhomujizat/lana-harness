@@ -40,6 +40,7 @@ function agyAccount(overrides: Partial<AntigravityAccount> & { name: string }): 
     builtin: false,
     label: "",
     display_name: "",
+    email: "",
     home: "/Users/x/.lana/antigravity/" + overrides.name,
     binary: "/usr/local/bin/agy",
     disabled: false,
@@ -135,6 +136,15 @@ afterEach(() => {
   vi.clearAllMocks();
 });
 
+/* Spec 77 revision 4: an account's settings open under its row. */
+function openRow(row: HTMLElement) {
+  const name = (row.getAttribute("aria-label") || "").replace(/^Account /, "");
+  const button = within(row).getByRole("button", { name: "Details of " + name });
+  if (button.getAttribute("aria-expanded") !== "true") {
+    fireEvent.click(button);
+  }
+}
+
 describe("Antigravity page", () => {
   it("asks to install the CLI when agy is missing", async () => {
     vi.mocked(api.getAntigravity).mockResolvedValue(
@@ -171,22 +181,73 @@ describe("Antigravity page", () => {
     const home = await screen.findByRole("listitem", { name: "Account antigravity" });
     const work = screen.getByRole("listitem", { name: "Account agy-2" });
     expect(home.textContent).toContain("Signed in with your own agy login");
+    /* Spec 77 revision 4: one list, no separate order card; the settings
+       open under the row. */
+    expect(screen.queryByRole("heading", { name: "Account order" })).toBeNull();
+    expect(within(work).getByRole("button", { name: "Move Work" })).toBeTruthy();
+    expect(within(work).queryByText("3 calls · 9k in / 1k out")).toBeNull();
+    openRow(home);
+    openRow(work);
     expect(within(home).getAllByText("Free").length).toBeGreaterThan(0);
     expect(within(home).getByText("Gemini · 5 hours")).toBeTruthy();
     expect(within(home).getByText("Gemini · weekly")).toBeTruthy();
-    expect(within(home).getByText(/^42 % used · resets /)).toBeTruthy();
+    expect(within(home).getByText("42%")).toBeTruthy();
     expect(within(home).getByText("12 calls · 45k in / 3k out")).toBeTruthy();
     expect(within(work).getByText("Work")).toBeTruthy();
     expect(within(work).getAllByText("Pro").length).toBeGreaterThan(0);
     expect(within(work).getByText("Claude · 5 hours")).toBeTruthy();
-    expect(within(work).getByText(/^80 % used/)).toBeTruthy();
+    expect(within(work).getByText("80%")).toBeTruthy();
     expect(within(work).getByText("3 calls · 9k in / 1k out")).toBeTruthy();
     expect(within(work).getByText("Signed in")).toBeTruthy();
     expect(within(work).getByRole("button", { name: "Rename agy-2" })).toBeTruthy();
     expect(screen.getByText(AGY_TERMS_NOTE)).toBeTruthy();
     expect(screen.getByText(POOL_TERMS_NOTE)).toBeTruthy();
     expect(screen.getByText(/^Updated /)).toBeTruthy();
-    expect(screen.getByRole("list", { name: "Antigravity account order" })).toBeTruthy();
+    const list = screen.getByRole("list", { name: "Antigravity accounts" });
+    expect(within(list).getAllByRole("listitem").map((item) => item.getAttribute("aria-label"))).toEqual([
+      "Account antigravity",
+      "Account agy-2",
+    ]);
+  });
+
+  /* Spec 77 revision 4: the Google email under the name. */
+  it("shows the account email on the row", async () => {
+    vi.mocked(api.getAntigravity).mockResolvedValue(
+      agyStatus({
+        accounts: [
+          agyAccount({ name: "antigravity", builtin: true, home: "", display_name: "antigravity", email: "me@gmail.com" }),
+          agyAccount({ name: "agy-2", label: "Work", display_name: "Work", email: "work@gmail.com" }),
+          agyAccount({ name: "agy-3", display_name: "lab@gmail.com", email: "lab@gmail.com" }),
+        ],
+      })
+    );
+    renderPage();
+    const work = await screen.findByRole("listitem", { name: "Account agy-2" });
+    expect(within(work).getByText(/· work@gmail\.com/)).toBeTruthy();
+    expect(within(screen.getByRole("listitem", { name: "Account antigravity" })).getByText(/· me@gmail\.com/)).toBeTruthy();
+    /* The email is the name already: not repeated. */
+    const lab = screen.getByRole("listitem", { name: "Account agy-3" });
+    expect(within(lab).getAllByText(/lab@gmail\.com/)).toHaveLength(1);
+  });
+
+  it("reads the email, empty when the daemon leaves it out", async () => {
+    const actual = await vi.importActual<typeof import("../../api/router")>("../../api/router");
+    const body = {
+      installed: true,
+      accounts: [{ name: "antigravity", builtin: true }, { name: "agy-2", email: "work@gmail.com" }],
+    };
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue({ ok: true, status: 200, text: async () => JSON.stringify(body) } as Response)
+    );
+    try {
+      const value = await actual.getAntigravity();
+      expect(value.accounts.map((account) => account.email)).toEqual(["", "work@gmail.com"]);
+      /* No label: the email names the account. */
+      expect(value.accounts[1]?.display_name).toBe("work@gmail.com");
+    } finally {
+      vi.unstubAllGlobals();
+    }
   });
 
   it("refreshes the quota windows", async () => {
@@ -201,7 +262,7 @@ describe("Antigravity page", () => {
   it("saves the account order with runtime antigravity", async () => {
     vi.mocked(api.getAntigravity).mockResolvedValue(TWO);
     renderPage();
-    const list = await screen.findByRole("list", { name: "Antigravity account order" });
+    const list = await screen.findByRole("list", { name: "Antigravity accounts" });
     fireEvent.click(within(list).getByRole("checkbox", { name: "Use antigravity as backup" }));
     await waitFor(() =>
       expect(vi.mocked(api.savePoolOrder)).toHaveBeenCalledWith("antigravity", ["agy-2"], ["antigravity"], "v1")
@@ -355,6 +416,7 @@ describe("Antigravity page", () => {
     });
     renderPage();
     const row = await screen.findByRole("listitem", { name: "Account agy-2" });
+    openRow(row);
     fireEvent.click(within(row).getByRole("button", { name: "Remove agy-2" }));
     const dialog = await screen.findByRole("dialog");
     const folder = within(dialog).getByRole("checkbox", { name: /Also delete the account folder/ }) as HTMLInputElement;
@@ -371,6 +433,7 @@ describe("Antigravity page", () => {
     vi.mocked(api.deleteProvider).mockResolvedValue({ name: "agy-2", version: "v2", restart_required: false });
     renderPage();
     const row = await screen.findByRole("listitem", { name: "Account agy-2" });
+    openRow(row);
     fireEvent.click(within(row).getByRole("button", { name: "Remove agy-2" }));
     const dialog = await screen.findByRole("dialog");
     fireEvent.click(within(dialog).getByRole("checkbox", { name: /Also delete the account folder/ }));

@@ -13,6 +13,7 @@
 //	FAKEAGY_SIGNED_OUT     "1" makes `models` print the signed-out error and exit 1
 //	FAKEAGY_USAGE          `-p /usage` prints this file
 //	FAKEAGY_LOGIN_CODE     `acp --login` succeeds only when stdin matches this
+//	FAKEAGY_LOGIN_EMAIL    a successful `acp --login` prints "Logged in as <this>."
 //
 // The fixture is the recorded `agy acp` conversation. Each line is a one-line
 // JSON object the recorder wrote: {"dir":"send"|"recv","msg":{…}}, where
@@ -52,7 +53,7 @@ type rpcMsg struct {
 }
 
 // selectedEnv lists the environment variables the fake records.
-var selectedEnv = []string{"HOME", "USERPROFILE", "AGY_CLI_DISABLE_AUTO_UPDATE", "GEMINI_API_KEY", "GOOGLE_API_KEY"}
+var selectedEnv = []string{"HOME", "USERPROFILE", "AGY_CLI_DISABLE_AUTO_UPDATE", "GEMINI_API_KEY", "GOOGLE_API_KEY", "SSH_CONNECTION"}
 
 var (
 	logMu sync.Mutex
@@ -137,7 +138,7 @@ func runUsage(argv []string) {
 
 // runLogin fakes `agy acp --login`: it prints the link and the code prompt,
 // reads one stdin line, records it, and exits 0 only when it matches
-// FAKEAGY_LOGIN_CODE.
+// FAKEAGY_LOGIN_CODE, after "Logged in as <FAKEAGY_LOGIN_EMAIL>." when set.
 func runLogin(argv []string) {
 	cwd, _ := os.Getwd()
 	logStart(argv, cwd)
@@ -152,6 +153,9 @@ func runLogin(argv []string) {
 	line := strings.TrimRight(sc.Text(), "\r")
 	writeRecord(map[string]any{"kind": "login", "line": line})
 	if line != "" && line == os.Getenv("FAKEAGY_LOGIN_CODE") {
+		if email := os.Getenv("FAKEAGY_LOGIN_EMAIL"); email != "" {
+			fmt.Printf("Logged in as %s.\n", email)
+		}
 		return
 	}
 	fmt.Fprintln(os.Stderr, "login failed: bad code")

@@ -75,10 +75,8 @@ import { prune as pruneTermCache } from "./workbench-term-cache";
 import { WbGitContext, useWbGit, useWorkbenchGit } from "./workbench-git-state";
 import { emitGitRootEvent } from "../api/workbench-git";
 import { baseName, isUnder, repoDisplay } from "./workbench-git-model";
-import { AgentLogo } from "./agent-logo";
 import { ProgramTile, TabTiles } from "./workbench-tile";
-import { AgentHookNotice, ClaudeAccountsPanel, ClaudeAccountsPopover, type AccountActions } from "./workbench-accounts";
-import { toolReady, usePluginTool } from "./plugins";
+import { AccountsPanel, AccountsPopover, AgentHookNotice, type AccountActions } from "./workbench-accounts";
 import { chime, setSoundEnabled, soundEnabled, unlockAudio } from "./workbench-sound";
 import { ActionMenu, CloseSpaceDialog, RenameDialog, longPress, type DialogState, type MenuTarget } from "./workbench-actions";
 import { Menu, MenuItem, MenuSeparator } from "../ui/gr8r";
@@ -992,7 +990,7 @@ function SplitView({
 interface PhoneProps {
   onMenu: (target: MenuTarget) => void;
   onCloseTab: (spaceId: string, tabId: string) => void;
-  /* The Claude accounts plugin, when its tool is installed. */
+  /* The Accounts popup (spec 77: the Router's accounts). */
   onAccounts?: () => void;
   layout: WbLayout;
   sessions: Sessions;
@@ -1096,7 +1094,7 @@ function PhoneMenuExtra({
       {item("files", "Files", onFiles)}
       {item("git-compare", "Changes", onChanges, changeCount ? <span className="wbg-badge">{changeCount}</span> : null)}
       {item("plus", "New terminal", onNewTerminal)}
-      {onAccounts ? item("users", "Claude accounts", onAccounts) : null}
+      {onAccounts ? item("users", "Accounts", onAccounts) : null}
       <div className="msep" role="separator" />
       <div className="wbg-font-row">
         <span>Text size</span>
@@ -2105,9 +2103,8 @@ export function WorkbenchPage() {
     },
   };
 
-  /* Spec 56: the Claude accounts plugin, on once claude-swap is installed. */
-  const claudeTool = usePluginTool("claude-accounts");
-  const accountsReady = toolReady(claudeTool);
+  /* Spec 77: the Accounts popup reads the Router's Claude Code and
+     Antigravity accounts; it needs no tool, so it is always on. */
   const [accountsAnchor, setAccountsAnchor] = useState<HTMLElement | null>(null);
   const [accountsSheet, setAccountsSheet] = useState(false);
   const { attach: accountsAttach, full: accountsFull, gripProps: accountsGrip } = useSheetDrag(() => setAccountsSheet(false));
@@ -2140,33 +2137,27 @@ export function WorkbenchPage() {
         .catch((err) => setError(errorMessage(err)));
     },
   };
-  const accountsOverlay =
-    accountsReady && claudeTool ? (
-      <>
-        {accountsAnchor ? (
-          <ClaudeAccountsPopover
-            anchor={accountsAnchor}
-            binary={claudeTool.binary_path}
-            actions={accountActions}
-            onClose={() => setAccountsAnchor(null)}
-          />
-        ) : null}
-        {accountsSheet ? (
-          <div className="wb-sheet-back" onClick={() => setAccountsSheet(false)}>
-            <div
-              ref={accountsAttach}
-              className={"wb-sheet" + (accountsFull ? " is-full" : "")}
-              role="dialog"
-              aria-label="Claude accounts"
-              onClick={(e) => e.stopPropagation()}
-            >
-              <div className="wb-sheet-grip sheet-grip" {...accountsGrip} />
-              <ClaudeAccountsPanel binary={claudeTool.binary_path} actions={accountActions} onClose={() => setAccountsSheet(false)} />
-            </div>
+  const accountsOverlay = (
+    <>
+      {accountsAnchor ? (
+        <AccountsPopover anchor={accountsAnchor} actions={accountActions} onClose={() => setAccountsAnchor(null)} />
+      ) : null}
+      {accountsSheet ? (
+        <div className="wb-sheet-back" onClick={() => setAccountsSheet(false)}>
+          <div
+            ref={accountsAttach}
+            className={"wb-sheet" + (accountsFull ? " is-full" : "")}
+            role="dialog"
+            aria-label="Accounts"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="wb-sheet-grip sheet-grip" {...accountsGrip} />
+            <AccountsPanel actions={accountActions} onClose={() => setAccountsSheet(false)} />
           </div>
-        ) : null}
-      </>
-    ) : null;
+        </div>
+      ) : null}
+    </>
+  );
 
   /* Rename and close (spaces and tabs). */
   const [menu, setMenu] = useState<MenuTarget | null>(null);
@@ -2234,7 +2225,7 @@ export function WorkbenchPage() {
                 onChanges={() => git.toggle("changes")}
                 changeCount={git.changeCount}
                 onNewTerminal={() => void newTerminal()}
-                onAccounts={accountsReady ? () => setAccountsSheet(true) : undefined}
+                onAccounts={() => setAccountsSheet(true)}
               />
             ) : undefined
           }
@@ -2478,7 +2469,7 @@ export function WorkbenchPage() {
           onNewSpace={newSpace}
           onMenu={setMenu}
           onCloseTab={closeTabNow}
-          onAccounts={accountsReady ? () => setAccountsSheet(true) : undefined}
+          onAccounts={() => setAccountsSheet(true)}
           onSelectTab={(sid, tid) => update((l) => selectTab(l, sid, tid))}
           onFocus={(sid, tid, id) => update((l) => focusPane(l, sid, tid, id))}
           onRestart={actions.onRestart}
@@ -2692,18 +2683,16 @@ export function WorkbenchPage() {
           ) : null}
           {tabHover ? <TabWorktreeCard tabId={tabHover.id} rect={tabHover.rect} tab={space?.tabs.find((x) => x.id === tabHover.id)} sessions={sessions} /> : null}
           <span className="wb-spacer" />
-          {accountsReady ? (
-            <button
-              type="button"
-              className="wb-acc-btn"
-              aria-label="Claude accounts"
-              data-tip="Claude accounts"
-              onClick={(e) => setAccountsAnchor(accountsAnchor ? null : e.currentTarget)}
-            >
-              <AgentLogo agent="claude" size={16} />
-              <span>Accounts</span>
-            </button>
-          ) : null}
+          <button
+            type="button"
+            className="wb-acc-btn"
+            aria-label="Accounts"
+            data-tip="Accounts"
+            onClick={(e) => setAccountsAnchor(accountsAnchor ? null : e.currentTarget)}
+          >
+            <Ic name="users" size={15} />
+            <span>Accounts</span>
+          </button>
           {tab ? (
             <span className="wb-attached">
               <StatusDot status="working" /> {attached > 1 ? "Attached here · " + attached + " clients" : "Attached here"}

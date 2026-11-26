@@ -15,6 +15,7 @@ import { RefreshControl, claudeLimitsStale, claudeUpdatedAt, newestUpdatedAt, us
 import { ANTIGRAVITY_KIND, rememberClaudeAccounts } from "./presets";
 import { providerIndex } from "./provider-logo";
 import { failureOf } from "./router-common";
+import { useAntigravityAccounts } from "../model-accounts";
 
 /* Router → Quota (REQ-RTR-012, REQ-CCR-008, REQ-CCT-011), like 9router's
    Quota Tracker: one Claude Code card per account with its email, plan, and
@@ -29,6 +30,7 @@ export function RouterQuota() {
   const [claude, setClaude] = useState<ClaudeAgentStatus | null>(null);
   const [providers, setProviders] = useState<RouterProvider[]>([]);
   const [refreshing, setRefreshing] = useState(false);
+  const agyAccounts = useAntigravityAccounts();
   const autoChecked = useRef(false);
   useTick();
 
@@ -150,7 +152,12 @@ export function RouterQuota() {
             <ClaudeAccountCard key={account.name} account={account} limit={limitOf(account.name)} />
           ))}
           {antigravityLimits.map((limit) => (
-            <AntigravityLimitCard key={limit.provider} limit={limit} />
+            <AntigravityLimitCard
+              key={limit.provider}
+              limit={limit}
+              title={agyAccounts.find((account) => account.name === limit.provider)?.label || undefined}
+              email={agyAccounts.find((account) => account.name === limit.provider)?.email || undefined}
+            />
           ))}
           {providerLimits.map((limit) => (
             <LimitCard key={limit.provider} limit={limit} provider={index[limit.provider]} />

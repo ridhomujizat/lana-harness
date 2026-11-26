@@ -216,3 +216,63 @@ func TestSignInBuiltin(t *testing.T) {
 		}
 	}
 }
+
+// Spec 77 REQ-WRA-014, REQ-WRA-013: a successful sign-in returns the email of
+// agy's "Logged in as <email>." line, and the added account's agy runs with
+// SSH_CONNECTION (file-based token storage) unless the daemon already has one.
+func TestSignInWithEmail(t *testing.T) {
+	owner := t.TempDir()
+	home := filepath.Join(t.TempDir(), "agy-2")
+	h := newHarness(t, "acp_turn1.jsonl", Options{}, "HOME="+owner, "FAKEAGY_LOGIN_CODE=c", "FAKEAGY_LOGIN_EMAIL=second@example.com")
+	linkCh := make(chan string, 1)
+	code := make(chan string, 1)
+	type result struct {
+		email string
+		err   error
+	}
+	resCh := make(chan result, 1)
+	go func() {
+		email, err := h.rt.SignInWithEmail(context.Background(), core.RuntimeAccount{Name: "agy-2", Home: home},
+			func(u string) { linkCh <- u }, code)
+		resCh <- result{email, err}
+	}()
+	waitLink(t, linkCh)
+	code <- "c"
+	var res result
+	select {
+	case res = <-resCh:
+	case <-time.After(10 * time.Second):
+		t.Fatal("sign-in did not finish")
+	}
+	if res.err != nil || res.email != "second@example.com" {
+		t.Fatalf("sign-in = %q, %v", res.email, res.err)
+	}
+	if os.Getenv("SSH_CONNECTION") == "" {
+		found := false
+		for _, e := range h.log() {
+			if e.Kind == "start" && len(e.Argv) == 2 && e.Argv[1] == "--login" {
+				found = hasEnv(e.Env, FileTokenStorageEnvName+"="+FileTokenStorageEnvValue)
+			}
+		}
+		if !found {
+			t.Fatal("the added account's agy ran without SSH_CONNECTION")
+		}
+	}
+}
+
+func TestLoggedInEmail(t *testing.T) {
+	cases := map[string]string{
+		"Logged in as a@b.com.":                 "a@b.com",
+		"Logged in as a.b@c.co.id":              "a.b@c.co.id",
+		"  \x1b[32mLogged in as x@y.z.\x1b[0m ": "x@y.z",
+		"Logged in as someone.":                 "",
+		"Logged in as a@b.com and more":         "",
+		"Not logged in as a@b.com.":             "",
+		"":                                      "",
+	}
+	for line, want := range cases {
+		if got := loggedInEmail(line); got != want {
+			t.Fatalf("loggedInEmail(%q) = %q, want %q", line, got, want)
+		}
+	}
+}

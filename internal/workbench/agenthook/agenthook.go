@@ -71,6 +71,7 @@ func quoteBinary(lanaBinary string) string {
 // ErrInvalidSettings. Before the first change it writes a copy next to the file
 // as settings.json.lana-bak, once.
 func Install(settingsPath, lanaBinary string) (bool, error) {
+	settingsPath = resolveLink(settingsPath)
 	top, existed, err := load(settingsPath)
 	if err != nil {
 		return false, err
@@ -179,6 +180,7 @@ func installEntry(hooks *orderedObject, target hookTarget) (bool, error) {
 // file without the hooks is no change. A file that is not a JSON object is left
 // alone with ErrInvalidSettings.
 func Remove(settingsPath string) (bool, error) {
+	settingsPath = resolveLink(settingsPath)
 	top, existed, err := load(settingsPath)
 	if err != nil {
 		return false, err
@@ -327,6 +329,23 @@ func hasCommand(hooks *orderedObject, event, command string) bool {
 		}
 	}
 	return false
+}
+
+// resolveLink returns the file a symlinked settings.json points at, so a write
+// replaces the target and the link survives (spec 77 REQ-WRA-002: a Router
+// account shares the default folder's settings.json through a link). A path
+// that is not a link, or a link whose target cannot be resolved, is returned
+// as it is.
+func resolveLink(settingsPath string) string {
+	info, err := os.Lstat(settingsPath)
+	if err != nil || info.Mode()&os.ModeSymlink == 0 {
+		return settingsPath
+	}
+	target, err := filepath.EvalSymlinks(settingsPath)
+	if err != nil {
+		return settingsPath
+	}
+	return target
 }
 
 // load reads settingsPath into an ordered object. A missing or empty file is an

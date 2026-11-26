@@ -100,6 +100,12 @@ type agySignInPort interface {
 	SignIn(ctx context.Context, account core.RuntimeAccount, onLink func(url string), code <-chan string) error
 }
 
+// agySignInEmailPort is the sign-in that also reports the account's email
+// (runtime/antigravity Runtime.SignInWithEmail, spec 77 REQ-WRA-014).
+type agySignInEmailPort interface {
+	SignInWithEmail(ctx context.Context, account core.RuntimeAccount, onLink func(url string), code <-chan string) (string, error)
+}
+
 // antigravitySignInPort returns the Antigravity runtime's sign-in.
 func (rt *Runtime) antigravitySignInPort() (agySignInPort, error) {
 	if rt.registry == nil {
@@ -171,7 +177,18 @@ func (rt *Runtime) StartAntigravitySignIn(account core.RuntimeAccount) (Antigrav
 	go func() {
 		defer close(run.done)
 		defer cancel()
-		err := port.SignIn(ctx, account, onLink, run.code)
+		var err error
+		email := ""
+		if emailPort, ok := port.(agySignInEmailPort); ok {
+			email, err = emailPort.SignInWithEmail(ctx, account, onLink, run.code)
+		} else {
+			err = port.SignIn(ctx, account, onLink, run.code)
+		}
+		if err == nil {
+			// Spec 77 REQ-WRA-014: the email agy printed, or none (a sign-in
+			// that printed no email may be another Google account).
+			rt.setAntigravityEmail(account.Name, email)
+		}
 		deadline := errors.Is(ctx.Err(), context.DeadlineExceeded)
 		s.mu.Lock()
 		defer s.mu.Unlock()

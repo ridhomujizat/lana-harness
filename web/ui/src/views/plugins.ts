@@ -1,6 +1,4 @@
-import { useEffect, useState } from "react";
-
-import { listPackages, openToolboxStream, type PackageView } from "../api/toolbox";
+import type { PackageView } from "../api/toolbox";
 
 /* Spec 56: plugins add features to Lana pages. A plugin needs one installed
    tool (spec 34); it turns on by itself once that tool is installed. */
@@ -19,42 +17,11 @@ export interface PluginDef {
   icon?: string;
 }
 
-export const PLUGINS: PluginDef[] = [
-  {
-    id: "claude-accounts",
-    name: "Claude accounts",
-    description:
-      "Every Claude Code account in one popup: 5-hour and weekly usage, switch the default login, open Claude Code on any account in a new tab or beside the focused pane.",
-    requires: "claude-swap",
-    where: "Workbench",
-    href: "#/workbench",
-    logo: "claude",
-  },
-];
+/* Spec 77 REQ-WRA-007: the claude-swap "Claude accounts" plugin left; the
+   Workbench popup reads the Router's Claude Code accounts instead. The Tools
+   page hides the Plugins section while this list is empty. */
+export const PLUGINS: PluginDef[] = [];
 
 export function toolReady(pkg: PackageView | undefined): boolean {
   return Boolean(pkg && (pkg.status === "installed" || pkg.status === "too_old") && pkg.binary_path);
-}
-
-/* The Toolbox package a plugin needs, kept live with the Toolbox stream. */
-export function usePluginTool(pluginId: string): PackageView | undefined {
-  const plugin = PLUGINS.find((p) => p.id === pluginId);
-  const [pkg, setPkg] = useState<PackageView | undefined>(undefined);
-  useEffect(() => {
-    if (!plugin) return;
-    let alive = true;
-    const load = () =>
-      listPackages()
-        .then((r) => alive && setPkg((r.packages || []).find((p) => p.id === plugin.requires)))
-        .catch(() => alive && setPkg(undefined));
-    load();
-    const stream = openToolboxStream((id) => {
-      if (!id || id === plugin.requires) load();
-    });
-    return () => {
-      alive = false;
-      stream.close();
-    };
-  }, [plugin]);
-  return pkg;
 }

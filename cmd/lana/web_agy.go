@@ -133,7 +133,7 @@ func (b *webBackend) AntigravityStatus(ctx context.Context) (web.AntigravityStat
 		row := web.AntigravityAccountStatus{
 			Name: account.Name, Builtin: account.Builtin, Label: account.Label, Home: account.Home,
 			Binary: account.Status.Binary, Disabled: account.Disabled, AllowScheduled: account.AllowScheduled,
-			SignedIn: account.Status.LoggedIn, Error: account.Status.Error, Tier: account.Tier,
+			SignedIn: account.Status.LoggedIn, Error: account.Status.Error, Tier: account.Tier, Email: account.Email,
 			ModelsCount: account.ModelsCount, Running: account.Status.Running, Queued: account.Status.Queued,
 			Windows:          agyWindows(account),
 			WindowsUpdatedAt: optionalTime(account.WindowsUpdatedAt), WindowsError: account.WindowsError,

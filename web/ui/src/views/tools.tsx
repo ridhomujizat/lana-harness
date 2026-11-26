@@ -327,7 +327,8 @@ export function ToolsPage() {
         </div>
       ) : null}
 
-      {packages ? (
+      {/* Spec 77 REQ-WRA-007: the section hides while there is no plugin. */}
+      {packages && PLUGINS.length > 0 ? (
         <>
           <h2 className="tl-h2">Plugins</h2>
           <div className="tl-grid-apps">

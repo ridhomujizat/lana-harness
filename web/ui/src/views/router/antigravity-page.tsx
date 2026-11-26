@@ -266,28 +266,15 @@ function LabelForm({
   );
 }
 
-function AgyAccountRow({
-  account,
-  busy,
-  flow,
-  highlighted,
-  renaming,
-  canSignIn,
-  onSignIn,
-  onSendCode,
-  onCancelSignIn,
-  onDismissFlow,
-  onAskRemove,
-  onRename,
-  onSaveLabel,
-  onCancelRename,
-}: {
+interface AgyRowProps {
   account: AntigravityAccount;
   busy: boolean;
   flow: AgyFlow | undefined;
   highlighted: boolean;
   renaming: boolean;
   canSignIn: boolean;
+  /* The row starts open (a list of one, a new account). */
+  open: boolean;
   onSignIn: () => void;
   onSendCode: (code: string) => void;
   onCancelSignIn: () => void;
@@ -296,129 +283,159 @@ function AgyAccountRow({
   onRename: () => void;
   onSaveLabel: (label: string) => void;
   onCancelRename: () => void;
-}) {
+}
+
+/* Spec 77 revision 4: one account as a row of the accounts list. The row
+   line has the logo, name, email, tier, state, the quota bar, and Sign in;
+   the sign-in panel shows under it; the windows, facts, and Remove open
+   under the row. */
+export function agyAccountItem(props: AgyRowProps): OrderItem {
+  const { account, busy, flow, highlighted, renaming } = props;
   const users = account.agents.map((name) => "agents." + name).concat(account.combos.map((name) => "combos." + name));
   const display = account.display_name || account.label || account.name;
   const windows = antigravityWindows(account);
   const active = isActive(flow);
-  return (
-    <li
-      className={"rt-acct" + (account.disabled ? " is-off" : "") + (highlighted ? " is-new" : "")}
-      aria-label={"Account " + account.name}
-    >
-      <div className="rt-acct-head">
-        <ProviderLogo logo="antigravity" name="Antigravity" size={32} />
-        <div className="rt-acct-id">
-          {renaming ? (
-            <LabelForm account={account} busy={busy} onSave={onSaveLabel} onCancel={onCancelRename} />
-          ) : (
-            <span className="rt-acct-name">
-              <span className="trunc" title={display}>
-                {display}
-              </span>
-              {account.builtin ? <Badge>Built in</Badge> : null}
-              {account.builtin ? null : (
-                <IconButton icon="pencil" size="xs" label={"Rename " + account.name} disabled={busy} onClick={onRename} />
+  return {
+    id: account.name,
+    label: display,
+    rowLabel: "Account " + account.name,
+    rowClass: (account.disabled ? "is-off" : "") + (highlighted ? " is-new" : ""),
+    windows,
+    coolingUntil: account.cooling_until,
+    pool: account.pool,
+    open: props.open,
+    lead: <ProviderLogo logo="antigravity" name="Antigravity" size={32} />,
+    name: renaming ? (
+      <LabelForm account={account} busy={busy} onSave={props.onSaveLabel} onCancel={props.onCancelRename} />
+    ) : (
+      <span className="rt-acct-name">
+        <span className="trunc" title={display}>
+          {display}
+        </span>
+        {account.builtin ? <Badge>Built in</Badge> : null}
+        {account.builtin ? null : (
+          <IconButton icon="pencil" size="xs" label={"Rename " + account.name} disabled={busy} onClick={props.onRename} />
+        )}
+      </span>
+    ),
+    sub: (
+      <>
+        <span className="rt-acct-sub">
+          <span className="mono">{account.name}</span>
+          {account.email && display !== account.email ? <span className="trunc"> · {account.email}</span> : null}
+        </span>
+        {account.tier ? <Badge tone="violet">{account.tier}</Badge> : null}
+        {account.disabled ? <Badge tone="gray">Off</Badge> : null}
+        {account.signed_in ? (
+          <Badge tone="green" dot>
+            Signed in
+          </Badge>
+        ) : (
+          <Badge tone="amber" dot>
+            Not signed in
+          </Badge>
+        )}
+      </>
+    ),
+    rowActions:
+      !account.builtin && !account.signed_in && !active ? (
+        <Button size="sm" variant="primary" icon="log-in" disabled={busy || !props.canSignIn} onClick={props.onSignIn}>
+          Sign in
+        </Button>
+      ) : null,
+    below:
+      account.builtin || flow || account.error ? (
+        <>
+          {account.builtin ? (
+            <p className="hint rt-agy-builtin">
+              {account.signed_in ? (
+                "Signed in with your own agy login"
+              ) : (
+                <>
+                  Run <code className="mono">agy</code> in a terminal to sign in
+                </>
               )}
-            </span>
-          )}
-          <span className="rt-acct-sub">
-            <span className="mono">{account.name}</span>
-            {account.tier ? <span> · {account.tier}</span> : null}
-          </span>
-        </div>
-        <div className="rt-acct-state">
-          {account.tier ? <Badge tone="violet">{account.tier}</Badge> : null}
-          {account.disabled ? <Badge tone="gray">Off</Badge> : null}
-          {account.signed_in ? (
-            <Badge tone="green" dot>
-              Signed in
-            </Badge>
-          ) : (
-            <Badge tone="amber" dot>
-              Not signed in
-            </Badge>
-          )}
-        </div>
-        <div className="rt-acct-acts">
-          {!account.builtin && !account.signed_in && !active ? (
-            <Button size="sm" variant="primary" icon="log-in" disabled={busy || !canSignIn} onClick={onSignIn}>
-              Sign in
-            </Button>
-          ) : null}
-          {account.builtin ? null : (
-            <IconButton icon="trash-2" size="sm" label={"Remove " + account.name} disabled={busy} onClick={onAskRemove} />
-          )}
-        </div>
-      </div>
-
-      {account.builtin ? (
-        <p className="hint rt-agy-builtin">
-          {account.signed_in ? (
-            "Signed in with your own agy login"
-          ) : (
-            <>
-              Run <code className="mono">agy</code> in a terminal to sign in
-            </>
-          )}
-        </p>
-      ) : null}
-      {flow && flow.phase === "succeeded" ? (
-        <p className="rt-signin-ok" role="status">
-          <Ic name="circle-check" size={14} /> Signed in{account.tier ? " · " + account.tier : ""}
-        </p>
-      ) : null}
-      {flow ? (
-        <AgySignInPanel
-          flow={flow}
-          onSend={onSendCode}
-          onCancel={onCancelSignIn}
-          onRetry={onSignIn}
-          onDismiss={onDismissFlow}
-        />
-      ) : null}
-
-      <div className="rt-acct-body">
-        <div className="rt-acct-windows">
-          {account.signed_in || windows.length > 0 ? <PlanWindows windows={windows} /> : null}
-          {account.windows_error ? (
-            <p className="rt-limit-err" role="status">
-              <Ic name="circle-alert" size={12} />
-              <span>{account.windows_error}</span>
             </p>
           ) : null}
-        </div>
-        <dl className="rt-facts rt-acct-facts">
-          <dt>Last 24 h</dt>
-          <dd className="num">{usageText(account)}</dd>
-          <dt>Runs</dt>
-          <dd className="num">
-            {count(account.running)} running · {count(account.queued)} queued
-          </dd>
-          <dt>Models</dt>
-          <dd className="num">{account.models_count ? count(account.models_count) : "None listed yet"}</dd>
-          <dt>Used by</dt>
-          <dd>
-            <UsedBy usedBy={users} />
-          </dd>
-          {account.home ? (
-            <>
-              <dt>Folder</dt>
-              <dd className="mono trunc" title={account.home}>
-                {account.home}
-              </dd>
-            </>
+          {flow && flow.phase === "succeeded" ? (
+            <p className="rt-signin-ok" role="status">
+              <Ic name="circle-check" size={14} /> Signed in{account.tier ? " · " + account.tier : ""}
+            </p>
           ) : null}
-        </dl>
-      </div>
-      {account.error ? (
-        <p className="rt-limit-err rt-acct-foot" role="status">
-          <Ic name="circle-alert" size={12} />
-          <span>{account.error}</span>
-        </p>
-      ) : null}
-    </li>
-  );
+          {flow ? (
+            <AgySignInPanel
+              flow={flow}
+              onSend={props.onSendCode}
+              onCancel={props.onCancelSignIn}
+              onRetry={props.onSignIn}
+              onDismiss={props.onDismissFlow}
+            />
+          ) : null}
+          {account.error ? (
+            <p className="rt-limit-err" role="status">
+              <Ic name="circle-alert" size={12} />
+              <span>{account.error}</span>
+            </p>
+          ) : null}
+        </>
+      ) : null,
+    details: (
+      <>
+        <div className="rt-acct-body">
+          <div className="rt-acct-windows">
+            {/* The windows show as bars on the row (spec 77). */}
+            {account.signed_in && windows.length === 0 ? <PlanWindows windows={windows} /> : null}
+            {account.windows_error ? (
+              <p className="rt-limit-err" role="status">
+                <Ic name="circle-alert" size={12} />
+                <span>{account.windows_error}</span>
+              </p>
+            ) : null}
+            {!account.signed_in && windows.length === 0 && !account.windows_error ? (
+              <p className="hint">Sign in to read the quota.</p>
+            ) : null}
+          </div>
+          <dl className="rt-facts rt-acct-facts">
+            <dt>Last 24 h</dt>
+            <dd className="num">{usageText(account)}</dd>
+            <dt>Runs</dt>
+            <dd className="num">
+              {count(account.running)} running · {count(account.queued)} queued
+            </dd>
+            <dt>Models</dt>
+            <dd className="num">{account.models_count ? count(account.models_count) : "None listed yet"}</dd>
+            <dt>Used by</dt>
+            <dd>
+              <UsedBy usedBy={users} />
+            </dd>
+            {account.home ? (
+              <>
+                <dt>Folder</dt>
+                <dd className="mono trunc" title={account.home}>
+                  {account.home}
+                </dd>
+              </>
+            ) : null}
+          </dl>
+        </div>
+        {account.builtin ? null : (
+          <div className="rt-acct-more-acts">
+            <Button
+              size="sm"
+              variant="ghost"
+              icon="trash-2"
+              className="rt-acct-remove"
+              disabled={busy}
+              onClick={props.onAskRemove}
+              aria-label={"Remove " + account.name}
+            >
+              Remove
+            </Button>
+          </div>
+        )}
+      </>
+    ),
+  };
 }
 
 /* ------------------------------------------------------------------ */
@@ -474,18 +491,6 @@ function RemoveDialog({
 /* Page                                                                */
 /* ------------------------------------------------------------------ */
 
-/* The rows of the account order list. */
-export function antigravityOrderItems(accounts: AntigravityAccount[]): OrderItem[] {
-  return accounts.map((account) => ({
-    id: account.name,
-    label: account.display_name || account.name,
-    detail: account.tier || (account.signed_in ? "" : "Not signed in"),
-    windows: antigravityWindows(account),
-    coolingUntil: account.cooling_until,
-    pool: account.pool,
-  }));
-}
-
 export function AntigravityDetail() {
   const [status, setStatus] = useState<AntigravityStatus | null>(null);
   const [failed, setFailed] = useState(false);
@@ -537,8 +542,28 @@ export function AntigravityDetail() {
     }
   }, []);
 
+  /* Once per mount: when a signed-in account has no quota windows yet (after
+     a daemon restart nothing is probed until asked), probe them all. The
+     daemon probes an account at most once a minute. */
   useEffect(() => {
-    void reloadStatus();
+    let alive = true;
+    void reloadStatus().then((value) => {
+      const missing = (value?.accounts || []).some((account) => account.signed_in && account.windows.length === 0);
+      if (!alive || !missing) {
+        return;
+      }
+      void routerApi
+        .refreshRouterLimits()
+        .catch(() => {})
+        .then(() => {
+          if (alive) {
+            void reloadStatus();
+          }
+        });
+    });
+    return () => {
+      alive = false;
+    };
   }, [reloadStatus]);
 
   /* The config version guards the writes. */
@@ -908,41 +933,34 @@ export function AntigravityDetail() {
           <EmptyState size="sm" icon="user-plus" text="No Antigravity account yet. Add one to use your Google plan." />
         ) : null}
         {accounts.length > 0 ? (
-          <ul className="rt-accts">
-            {accounts.map((account) => (
-              <AgyAccountRow
-                key={account.name}
-                account={account}
-                busy={busyRow === account.name}
-                flow={flows[account.name]}
-                highlighted={highlight === account.name}
-                renaming={renaming === account.name}
-                canSignIn={usable}
-                onSignIn={() => void signIn(account.name)}
-                onSendCode={(code) => void sendCode(account.name, code)}
-                onCancelSignIn={() => void cancelSignIn(account.name)}
-                onDismissFlow={() => setFlow(account.name, null)}
-                onAskRemove={() => setRemoving(account)}
-                onRename={() => setRenaming(account.name)}
-                onSaveLabel={(label) => void saveLabel(account, label)}
-                onCancelRename={() => setRenaming("")}
-              />
-            ))}
-          </ul>
+          <AccountOrderList
+            label="Antigravity accounts"
+            sortable={accounts.length > 1}
+            onSave={saveOrder}
+            items={accounts.map((account) =>
+              agyAccountItem({
+                account,
+                busy: busyRow === account.name,
+                flow: flows[account.name],
+                highlighted: highlight === account.name,
+                renaming: renaming === account.name,
+                canSignIn: usable,
+                open: accounts.length === 1 || highlight === account.name,
+                onSignIn: () => void signIn(account.name),
+                onSendCode: (code) => void sendCode(account.name, code),
+                onCancelSignIn: () => void cancelSignIn(account.name),
+                onDismissFlow: () => setFlow(account.name, null),
+                onAskRemove: () => setRemoving(account),
+                onRename: () => setRenaming(account.name),
+                onSaveLabel: (label) => void saveLabel(account, label),
+                onCancelRename: () => setRenaming(""),
+              })
+            )}
+          />
         ) : null}
         {accounts.length > 1 ? <p className="hint rt-conn-note">{AGY_TERMS_NOTE}</p> : null}
+        {accounts.length > 1 ? <p className="hint rt-conn-note">{POOL_TERMS_NOTE}</p> : null}
       </Panel>
-
-      {accounts.length > 1 ? (
-        <Panel title="Account order" className="rt-order-panel">
-          <AccountOrderList
-            label="Antigravity account order"
-            items={antigravityOrderItems(accounts)}
-            onSave={saveOrder}
-          />
-          <p className="hint rt-conn-note">{POOL_TERMS_NOTE}</p>
-        </Panel>
-      ) : null}
 
       {removing ? (
         <RemoveDialog
