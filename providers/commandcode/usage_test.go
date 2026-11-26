@@ -265,4 +265,3 @@ func TestUsageUpdateEmpty(t *testing.T) {
 		t.Errorf("update = %+v", u)
 	}
 }
-
