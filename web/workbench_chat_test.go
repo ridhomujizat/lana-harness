@@ -97,7 +97,56 @@ func shortenChatTimers(t *testing.T) {
 // so a lingering poll loop cannot race the restores.
 func stopHubsAfter(t *testing.T, s *Server) {
 	t.Helper()
-	t.Cleanup(func() { s.stopChatHubs() })
+	t.Cleanup(func() {
+		s.chatMu.Lock()
+		hubs := make([]*chatHub, 0, len(s.chatHubs))
+		for _, hub := range s.chatHubs {
+			hubs = append(hubs, hub)
+		}
+		s.chatMu.Unlock()
+		s.stopChatHubs()
+		// stopChatHubs gives each loop a second; wait longer under a loaded
+		// race run, so no loop is left reading the vars being restored.
+		for _, hub := range hubs {
+			waitHubLoopDone(t, hub)
+		}
+	})
+}
+
+// stopHubAfter stops a hub the test built with getChatHub and waits for its
+// poll loop to end, before the package-var restores of shortenChatTimers and
+// stubChatLocate run (cleanups run last-registered first, so call it after
+// them). A deferred hub.stop() is not enough: stop drops the hub from the
+// server's map, so stopHubsAfter no longer sees it, and its loop can still be
+// inside refresh reading chatLocate or idleExpired reading chatIdleStop while
+// the cleanups restore them.
+func stopHubAfter(t *testing.T, hub *chatHub) {
+	t.Helper()
+	t.Cleanup(func() {
+		hub.stop()
+		waitHubLoopDone(t, hub)
+	})
+}
+
+// waitHubLoopDone waits for a stopped hub's poll loop to return.
+func waitHubLoopDone(t *testing.T, hub *chatHub) {
+	t.Helper()
+	select {
+	case <-hub.loopDone:
+	case <-time.After(10 * time.Second):
+		t.Error("chat hub poll loop did not end")
+	}
+}
+
+// lengthenChatSwapWait makes a resize's view swap wait for the core's
+// replay-end marker for the whole test, so a check that the old mirror still
+// serves cannot be undone by the fallback firing on a loaded machine, and a
+// swap the test sees is the marker's.
+func lengthenChatSwapWait(t *testing.T) {
+	t.Helper()
+	old := chatViewSwapWait
+	chatViewSwapWait = time.Minute
+	t.Cleanup(func() { chatViewSwapWait = old })
 }
 
 // chatStream reads SSE events off a live chat stream in the background.
@@ -281,6 +330,20 @@ func waitHubMirrorChange(t *testing.T, hub *chatHub, prev *claudechat.Mirror) *c
 		}
 		if time.Now().After(deadline) {
 			t.Fatal("hub mirror did not change")
+		}
+		time.Sleep(2 * time.Millisecond)
+	}
+}
+
+// waitStreamClosed waits for a fake attachment to be closed. A view swap
+// publishes the new mirror under the hub lock and closes the old stream after
+// it, so the close can trail the mirror change a test observes.
+func waitStreamClosed(t *testing.T, stream *fakeWorkbenchStream, what string) {
+	t.Helper()
+	deadline := time.Now().Add(3 * time.Second)
+	for !stream.isClosed() {
+		if time.Now().After(deadline) {
+			t.Fatal(what)
 		}
 		time.Sleep(2 * time.Millisecond)
 	}
@@ -549,7 +612,7 @@ func TestWorkbenchChatSayDialog(t *testing.T) {
 	s.SetWorkbench(fake)
 
 	hub := s.getChatHub("abc")
-	defer hub.stop()
+	stopHubAfter(t, hub)
 	hub.addView()
 
 	view := waitFakeStream(t, fake, "abc", "view")
@@ -894,6 +957,7 @@ func TestWorkbenchChatHubIdleStop(t *testing.T) {
 // marker arrives.
 func TestChatHubResizeReattaches(t *testing.T) {
 	shortenChatTimers(t)
+	lengthenChatSwapWait(t)
 	// addView alone leaves the hub with no subscriber, so keep it from idling
 	// out while the test drives it.
 	chatIdleStop = time.Minute
@@ -908,7 +972,7 @@ func TestChatHubResizeReattaches(t *testing.T) {
 	s.SetWorkbench(fake)
 
 	hub := s.getChatHub("abc")
-	defer hub.stop()
+	stopHubAfter(t, hub)
 	hub.addView()
 
 	view1 := waitFakeStream(t, fake, "abc", "view")
@@ -926,15 +990,15 @@ func TestChatHubResizeReattaches(t *testing.T) {
 	if got := waitHubMirrorChange(t, hub, mirror1); got == mirror1 {
 		t.Fatal("hub kept the old mirror after the replay-end marker")
 	}
-	if !view1.isClosed() {
-		t.Fatal("old view stream was not closed after the swap")
-	}
+	waitStreamClosed(t, view1, "old view stream was not closed after the swap")
 }
 
 // TestChatHubResizeWaitsForReplay checks that the old mirror keeps serving until
-// the new attachment has replayed, well before chatViewSwapWait (500ms) passes.
+// the new attachment has replayed. chatViewSwapWait is lengthened so its
+// fallback cannot fire inside the test, however slow the machine.
 func TestChatHubResizeWaitsForReplay(t *testing.T) {
 	shortenChatTimers(t)
+	lengthenChatSwapWait(t)
 	// addView alone leaves the hub with no subscriber, so keep it from idling
 	// out while the test drives it.
 	chatIdleStop = time.Minute
@@ -949,7 +1013,7 @@ func TestChatHubResizeWaitsForReplay(t *testing.T) {
 	s.SetWorkbench(fake)
 
 	hub := s.getChatHub("abc")
-	defer hub.stop()
+	stopHubAfter(t, hub)
 	hub.addView()
 
 	view1 := waitFakeStream(t, fake, "abc", "view")
@@ -959,7 +1023,7 @@ func TestChatHubResizeWaitsForReplay(t *testing.T) {
 	view2 := waitFakeStreamChange(t, fake, "abc", "view", view1)
 
 	// A redraw without the replay-end marker must not swap the mirror, and the
-	// old attachment must stay open, while the 500ms wait has not passed.
+	// old attachment must stay open, while chatViewSwapWait has not passed.
 	view2.push([]byte("partial redraw\r\n"))
 	time.Sleep(50 * time.Millisecond)
 	if got := hubMirror(hub); got != mirror1 {
