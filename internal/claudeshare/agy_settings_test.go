@@ -3,7 +3,9 @@ package claudeshare
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
+	"time"
 )
 
 // agyLoginState lists agy's login and state files of an account HOME (spec 77
@@ -144,5 +146,51 @@ func TestLinkAntigravitySettingsKeeps(t *testing.T) {
 	}
 	if read(t, filepath.Join(account, ".gemini", "antigravity-cli", "settings.json")) != "own" {
 		t.Fatal("account settings changed without an owner item")
+	}
+}
+
+// Spec 83 REQ-WAG-004: an account mcp_config.json that `agy mcp add` turned
+// into a file is renamed and linked again; a link is kept; the built-in
+// account and a missing owner file are left alone.
+func TestRelinkAgyMCPConfig(t *testing.T) {
+	owner, account := t.TempDir(), t.TempDir()
+	now := time.Unix(1700000000, 0)
+	src := filepath.Join(account, ".gemini", "config", "mcp_config.json")
+	dst := filepath.Join(owner, ".gemini", "config", "mcp_config.json")
+
+	// No owner file: nothing happens.
+	if item, err := RelinkAgyMCPConfig(account, owner, now); err != nil || item.Action != Skipped {
+		t.Fatalf("no owner file = %+v, %v", item, err)
+	}
+	if err := os.MkdirAll(filepath.Dir(dst), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(dst, []byte(`{"mcpServers":{"hub":{}}}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Dir(src), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(src, []byte(`{"mcpServers":{"hub":{},"new":{}}}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	item, err := RelinkAgyMCPConfig(account, owner, now)
+	if err != nil || item.Action != Adopted || item.Backup != src+".before-share-1700000000" {
+		t.Fatalf("relink = %+v, %v", item, err)
+	}
+	if target, err := os.Readlink(src); err != nil || target != dst {
+		t.Fatalf("link = %q, %v", target, err)
+	}
+	if data, err := os.ReadFile(item.Backup); err != nil || !strings.Contains(string(data), `"new"`) {
+		t.Fatalf("backup = %s, %v", data, err)
+	}
+	if item, err := RelinkAgyMCPConfig(account, owner, now); err != nil || item.Action != Kept {
+		t.Fatalf("second relink = %+v, %v", item, err)
+	}
+	if item, err := RelinkAgyMCPConfig("", owner, now); err != nil || item.Action != Skipped {
+		t.Fatalf("built-in = %+v, %v", item, err)
+	}
+	if item, err := RelinkAgyMCPConfig(owner, owner, now); err != nil || item.Action != Skipped {
+		t.Fatalf("owner HOME = %+v, %v", item, err)
 	}
 }

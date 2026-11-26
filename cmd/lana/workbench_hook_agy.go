@@ -6,6 +6,9 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"time"
+
+	"github.com/ridhomujizat/lana-harness/internal/workbench"
 )
 
 // Antigravity (agy) hooks of spec 77 REQ-WRA-009: `lana workbench hook
@@ -19,6 +22,7 @@ const agyEmptyAnswer = "{}"
 
 // agyHookInput is the part of the agy hook JSON the hooks read.
 type agyHookInput struct {
+	ConversationID string   `json:"conversationId"`
 	Cwd            string   `json:"cwd"`
 	WorkspacePaths []string `json:"workspacePaths"`
 	ToolCall       struct {
@@ -109,6 +113,7 @@ func workbenchAgySessionStart(in io.Reader, out io.Writer) int {
 		agyWrite(out, agyEmptyAnswer)
 		return 0
 	}
+	workbenchAgyRecord(id, input.ConversationID)
 	cwd := input.workDir()
 	if cwd == "" {
 		cwd, _ = os.Getwd()
@@ -141,6 +146,7 @@ func workbenchAgyPostEdit(in io.Reader, out io.Writer) int {
 	if !ok {
 		return 0
 	}
+	workbenchAgyRecord(id, input.ConversationID)
 	return workbenchAgyReport(id, input.workDir(), input.editedPath())
 }
 
@@ -153,3 +159,29 @@ func agyWrite(out io.Writer, answer string) {
 // workbenchAgyReport reports an edit; a variable so tests can see what the
 // post-edit hook passes on without a daemon or a repo.
 var workbenchAgyReport = workbenchReportEdit
+
+// workbenchAgyRecord records the agy conversation of a pane for the Workbench
+// core (spec 83 REQ-WAG-001); a variable so tests never write a real home.
+var workbenchAgyRecord = recordAgyConversation
+
+// recordAgyConversation writes <Lana home>/workbench/agents/<pane>.json with the
+// conversation id and this process's HOME (the pane's account). The Lana home
+// is the core's LANA_WORKBENCH_HOME, else LANA_HOME; without either, or with an
+// id of another shape, nothing is written. A failure is ignored: the hook's
+// answer never depends on it.
+func recordAgyConversation(pane, conversation string) {
+	if conversation == "" {
+		return
+	}
+	lanaHome := os.Getenv(workbench.EnvWorkbenchHome)
+	if lanaHome == "" {
+		lanaHome = os.Getenv("LANA_HOME")
+	}
+	if lanaHome == "" {
+		return
+	}
+	home, _ := os.UserHomeDir()
+	_ = workbench.WriteAgentRecord(lanaHome, pane, workbench.AgentRecord{
+		Agent: workbench.AgentAgy, ConversationID: conversation, Home: home, At: time.Now(),
+	})
+}

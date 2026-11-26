@@ -41,6 +41,10 @@ type agentQuery struct {
 	PID     int       // agent pid from agentdetect.Identify
 	Cwd     string    // the agent's working directory as the core knows it ("" when unknown)
 	Started time.Time // when the core first saw this agent pid; zero = unknown
+	// SessionID is the Workbench pane and LanaHome the core's Lana home, where
+	// the agy hooks record a pane's conversation (spec 83 REQ-WAG-001).
+	SessionID string
+	LanaHome  string
 }
 
 // agentAdapters is the adapter table (spec 60 REQ-WR-012). A later agent is one
@@ -59,6 +63,14 @@ var agentAdapters = []agentAdapter{
 		validID: isOmpID,
 		resume:  "omp --resume",
 		cont:    "omp --continue",
+	},
+	{
+		// Spec 83 REQ-WAG-001, REQ-WAG-002: Antigravity.
+		label:   "agy",
+		lookup:  agyLookup,
+		validID: isAgyID,
+		resume:  "agy --conversation",
+		cont:    "agy --continue",
 	},
 }
 
@@ -95,16 +107,19 @@ func resumeLine(label, id, configDir, home string, env []string) (string, bool) 
 	if !ok {
 		return "", false
 	}
-	cmd := a.resume
-	if i := strings.IndexByte(cmd, ' '); i >= 0 {
-		cmd = cmd[:i]
-	}
-	tail := "--continue"
+	cmd, resume, _ := strings.Cut(a.resume, " ")
+	_, tail, _ := strings.Cut(a.cont, " ")
 	if id != "" && a.validID(id) {
-		tail = "--resume " + id
+		tail = resume + " " + id
 	}
 	if label == "claude" && configDir != "" {
 		if line, ok := claudeResumeLine(configDir, tail, home, env); ok {
+			return line, true
+		}
+	}
+	if label == "agy" && configDir != "" {
+		// Spec 83 REQ-WAG-002: a named account runs under its HOME again.
+		if line, ok := agyResumeLine(configDir, tail); ok {
 			return line, true
 		}
 	}

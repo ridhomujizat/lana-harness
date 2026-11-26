@@ -17,6 +17,17 @@ but their config keys, events, and tools may still change between betas.
 ### Fixed
 
 - Workbench: Show as chat works for Claude Code panes on a Router account (it was empty).
+- Workbench: MCP servers of the built-in account (`~/.claude.json`, user scope) are mirrored into every Claude Code account at launch, like claude-swap: a New tab, Beside, Sign in, or restored pane of an account gets the servers you added with `claude mcp add`, and adds, edits, and removals follow. The account's own previous entries are saved once to `.lana-mcp-displaced.json` in its folder. `lana claude mcp-sync --account <name>` runs the mirror by hand.
+
+### Changed
+
+- Workbench: the Accounts popup's Beside is now Switch here for Claude Code accounts: the focused pane's conversation continues in the same pane on the chosen account, like switching with claude-swap. Lana stops Claude with Ctrl+C (asking first when a turn is running) and resumes the conversation with `claude --resume` on the new login; a later restore resumes it on that account too. Panes opened before this change, or a Workbench core started by an older Lana, still offer New tab. Antigravity accounts keep Beside.
+- Workbench: Antigravity panes get the same scheme: Switch here (instead of Beside) continues the focused pane's agy conversation on another Antigravity account with `agy --conversation`, a pane restored after a reboot resumes its conversation on the same account, and an account whose `mcp_config.json` was replaced by `agy mcp add` is linked back to the shared file before agy starts.
+- Workbench: the "Connect Claude Code and Antigravity to the Workbench" hook switch moved from the Accounts popup to Settings → General → Workbench, with an Install button while a folder lacks the hooks; the popup shows a one-line "Hooks: N/M folders" link instead.
+
+### Fixed
+
+- Workbench: a pane opened from the Accounts popup (New tab, Beside, Sign in) is a shell with the agent typed in, so exiting Claude Code or Antigravity returns to the prompt instead of showing "Process exited".
 
 ## [0.6.0-beta.12] - 2026-11-26
 

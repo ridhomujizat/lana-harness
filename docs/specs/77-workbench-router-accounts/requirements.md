@@ -10,9 +10,12 @@
   agy sign-in; "belum ada tampilan email accountnya di manage antigravity". REQ-WRA-011..014)
 - **Revision**: 5 (2026-11-26: an added Antigravity account HOME showed agy's first-run onboarding ("Choose your
   color scheme" …) although the owner already did it. REQ-WRA-015)
+- **Revision**: 7 (2026-11-26: owner saw "Process exited 0" after leaving claude with Ctrl+C twice in an
+  account pane and read it as an error. REQ-WRA-004 and REQ-WRA-008: the pane is the shell, the agent line is
+  typed into it)
 - **Owner**: ridho
 - **Supersedes**: spec 56 REQ-PLG-010..013 (the claude-swap "Claude accounts" plugin)
-- **Related**: spec 39 (Claude Code accounts), spec 60 (restore), spec 69 (agent hooks), spec 75 (pools)
+- **Related**: spec 39 (Claude Code accounts), spec 60 (restore), spec 69 (agent hooks), spec 75 (pools), spec 81 (shared MCP servers)
 
 ## Why
 
@@ -73,9 +76,34 @@ opens `#/router/providers/claude-code`; adding, removing and renaming accounts l
 - **New tab**: a Workbench terminal in the focused folder running the account's `claude` with its folder:
   `env CLAUDE_CONFIG_DIR=<dir> CLAUDE_SECURESTORAGE_CONFIG_DIR=<dir> <binary>`; the built-in account
   `env -u CLAUDE_CONFIG_DIR -u CLAUDE_SECURESTORAGE_CONFIG_DIR <binary>`.
-- **Beside**: the same with `--continue`, split right of the focused pane (a new tab when none).
+- **Beside**: the same with `--continue`, split right of the focused pane (a new tab when none). Replaced by
+  Switch here: for Claude Code accounts by spec 82, for Antigravity accounts by spec 83.
+- **Switch here** (Claude Code accounts, spec 82, replaces Beside): the focused pane's conversation continues in
+  the same pane on the account. The daemon (`POST /v1/workbench/sessions/{id}/switch-account`
+  `{"claude_account": "<name>"}`) mirrors a named account's MCP servers, and the Workbench core stops the pane's
+  claude with Ctrl+C until the shell owns the terminal again (at most 6 times / 5 s), then types
+  `CLAUDE_CONFIG_DIR='<dir>' CLAUDE_SECURESTORAGE_CONFIG_DIR='<dir>' claude --resume <id>` (the built-in
+  account: `env -u CLAUDE_CONFIG_DIR -u CLAUDE_SECURESTORAGE_CONFIG_DIR claude --resume <id>`) and records the
+  new config dir for REQ-WRA-006. It is off, with the reason as its tooltip, when the pane has no conversation id
+  or is not a shell running claude, and for the account the pane already runs on; a working pane asks first.
+  Refusals are 409 `no_conversation`, `not_switchable`, `still_running`, or `core_outdated` (an older running
+  core; the popup then offers New tab).
 - **Sign in** (signed out only): a new tab running the account's `login_command` (spec 39).
 - **Use for new terminals** (REQ-WRA-005).
+
+Since revision 7 each of these panes is the owner's own shell, with the line typed into it once the shell has
+printed (`POST /v1/workbench/sessions` `input`, a single line of at most 4 KiB), instead of the line being the
+pane's process. Exiting the agent (or the sign-in) returns to the shell prompt in the same pane, like a normal
+terminal, instead of ending the pane with "Process exited". Values are POSIX single-quoted:
+`env CLAUDE_CONFIG_DIR='<dir>' CLAUDE_SECURESTORAGE_CONFIG_DIR='<dir>' <binary>`; the binary is quoted only when
+it holds anything outside `[A-Za-z0-9_./-]`. The typed line is not persisted: a restore brings the pane back as
+a shell, and a Claude Code conversation that was running is resumed by spec 60 as before.
+
+Since spec 81, MCP servers of the built-in account (`~/.claude.json`, user scope) are mirrored into every Claude
+Code account at launch, like claude-swap: before a New tab, Beside, or Sign in pane of a named account starts
+(the create body names it, `claude_account`), and before a restored pane of a named account is resumed
+(REQ-WRA-006), the daemon sets that account's `.claude.json` `mcpServers` to the built-in one. The typed lines are
+unchanged, and `lana claude mcp-sync --account <name>` does the same by hand.
 
 ### REQ-WRA-005: Workbench default account
 
@@ -107,7 +135,8 @@ and Antigravity (`GET /v1/router/antigravity`, hidden when agy is not installed 
 collapsed state is remembered per browser; while searching (name, email, plan or tier, label) groups with a
 match open and groups without one hide. Antigravity rows show tier, tags (signed out, cooling, disabled, most
 room) and a bar per quota window (used = 1 − remaining). Actions: New tab runs the account's agy with its
-own HOME (`env HOME=<home> <binary>`; the built-in account plain `<binary>`), Beside adds `--continue`; a
+own HOME (`env HOME=<home> <binary>`; the built-in account plain `<binary>`), Beside adds `--continue`
+(since revision 7 typed into a shell pane like REQ-WRA-004, `env HOME='<home>' SSH_CONNECTION='…' <binary>`); a
 signed-out account links to the Antigravity Router page (its sign-in is a link + code flow). There is no
 Workbench default for Antigravity: a HOME for a whole shell would break it. Antigravity conversations are
 shared across accounts since revision 3 (REQ-WRA-010); restoring an agy pane after a reboot is not covered.
@@ -146,6 +175,10 @@ model; a PostToolUse answer must be `{}`.
   folder gains `kind` (`"claude"` or `"antigravity"`); the other fields are unchanged.
 - The switch reads "Connect Claude Code and Antigravity to the Workbench" and, when on,
   "Installed in N of M folders (Claude x, Antigravity y)".
+- Since spec 82 the switch lives in Settings → General → Workbench, with an **Install** button while a folder
+  lacks the hooks (the Workbench install notice's action, also after the notice was dismissed) and the folders
+  that could not be updated. The Accounts popup keeps one footer line, "Hooks: N/M folders" or "Hooks off",
+  linking to `#/settings/general`.
 
 ### REQ-WRA-010: Shared Antigravity conversations (revision 3, experimental)
 
@@ -165,7 +198,9 @@ opt-in for a scratch daemon); `LANA_SHARE_HISTORY=1` also opens the REQ-WRA-001 
 
 **Experimental, pending the owner's live test**: resuming another account's conversation is unverified.
 Conversations hold `cascade_id`/`gen_metadata` blobs that may be bound to the Google account that made them.
-The agy resume line for restore stays out of scope, and Lana's own agy runs are unchanged.
+Lana's own agy runs are unchanged. Since spec 83 a restored agy pane is resumed (`agy --conversation <id>` under
+its account HOME), Antigravity rows have Switch here, and a named account's `mcp_config.json` is relinked
+before a Workbench pane starts agy on it.
 
 ### REQ-WRA-011: Shared Antigravity settings (revision 4)
 

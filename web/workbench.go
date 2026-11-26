@@ -47,6 +47,10 @@ type WorkbenchBackend interface {
 	Create(ctx context.Context, opts workbench.CreateOptions) (workbench.Session, error)
 	Kill(ctx context.Context, id string) error
 	Restart(ctx context.Context, id string) (workbench.Session, error)
+	// SwitchAccount continues a pane's conversation of agent ("claude" or
+	// "agy") on the account of configDir (claude config dir or agy HOME), ""
+	// for the built-in one (spec 82 REQ-WAS-002, spec 83 REQ-WAG-003).
+	SwitchAccount(ctx context.Context, id, agent, configDir string) (workbench.Session, error)
 	Resize(ctx context.Context, id string, cols, rows int) error
 	Layout(ctx context.Context) (json.RawMessage, error)
 	SetLayout(ctx context.Context, layout json.RawMessage) error
@@ -118,6 +122,8 @@ func (s *Server) registerWorkbenchRoutes() {
 	s.Handle("DELETE /v1/workbench/sessions/{id}", http.HandlerFunc(s.handleWorkbenchKill))
 	s.Handle("POST /v1/workbench/sessions/{id}/restart", http.HandlerFunc(s.handleWorkbenchRestart))
 	s.Handle("POST /v1/workbench/sessions/{id}/resize", http.HandlerFunc(s.handleWorkbenchResize))
+	// Spec 82 REQ-WAS-002: continue a pane's conversation on another account.
+	s.Handle("POST /v1/workbench/sessions/{id}/switch-account", http.HandlerFunc(s.handleWorkbenchSwitchAccount))
 	// The worktree reports of spec 69 (REQ-WA-030).
 	s.Handle("PUT /v1/workbench/sessions/{id}/worktree", http.HandlerFunc(s.handleWorkbenchSetWorktree))
 	s.Handle("DELETE /v1/workbench/sessions/{id}/worktree", http.HandlerFunc(s.handleWorkbenchClearWorktree))
@@ -174,6 +180,18 @@ type workbenchCreateBody struct {
 	Rows    int               `json:"rows"`
 	Title   string            `json:"title"`
 	Labels  map[string]string `json:"labels"`
+	// Input is a line typed into the new shell (a Workbench account pane runs
+	// its agent this way, so exiting the agent returns to the prompt).
+	Input string `json:"input"`
+	// ClaudeAccount names the Claude Code account the pane launches (the
+	// Accounts popup's New tab, Beside, Sign in). For a named account the
+	// daemon first mirrors the built-in account's MCP servers into it
+	// (spec 81 REQ-SMC-005).
+	ClaudeAccount string `json:"claude_account"`
+	// AgyAccount names the Antigravity account the pane launches; for a named
+	// account the daemon first relinks its mcp_config.json to the owner's
+	// (spec 83 REQ-WAG-004).
+	AgyAccount string `json:"agy_account"`
 }
 
 // handleWorkbenchCreate serves the POST of REQ-WB-040 (REQ-WB-043 audit).
@@ -190,6 +208,14 @@ func (s *Server) handleWorkbenchCreate(w http.ResponseWriter, r *http.Request) {
 	if !decodeJSONObject(w, r, workbenchBodyLimit, &body) {
 		return
 	}
+	if err := workbench.ValidateCreateInput(body.Input); err != nil {
+		writeAPIError(w, http.StatusBadRequest, "invalid_request", err.Error())
+		return
+	}
+	s.mirrorClaudeMCP(r.Context(), body.ClaudeAccount)
+	if home := s.agyAccountHomes(r.Context())[body.AgyAccount]; home != "" {
+		s.relinkAgyMCP(body.AgyAccount, home)
+	}
 	sess, err := backend.Create(r.Context(), workbench.CreateOptions{
 		Command: body.Command,
 		Dir:     expandWorkbenchDir(body.Dir),
@@ -201,6 +227,7 @@ func (s *Server) handleWorkbenchCreate(w http.ResponseWriter, r *http.Request) {
 		Rows:   body.Rows,
 		Title:  body.Title,
 		Labels: body.Labels,
+		Input:  body.Input,
 	})
 	if err != nil {
 		s.writeWorkbenchError(w, "workbench create", err)
@@ -209,6 +236,99 @@ func (s *Server) handleWorkbenchCreate(w http.ResponseWriter, r *http.Request) {
 	browser, _ := sessionFromContext(r.Context())
 	s.auditWorkbench("create", sess.ID, browser)
 	writeJSON(w, http.StatusOK, sess)
+}
+
+// workbenchSwitchAccountBody is the POST
+// /v1/workbench/sessions/{id}/switch-account body of spec 82 REQ-WAS-002.
+type workbenchSwitchAccountBody struct {
+	// ClaudeAccount is the account a Claude Code conversation continues on:
+	// "claude-code" for the built-in one or a Claude Code account of the
+	// config, enabled or not.
+	ClaudeAccount string `json:"claude_account"`
+	// AgyAccount is the account an Antigravity conversation continues on
+	// (spec 83): "antigravity" for the built-in one or an Antigravity account
+	// of the config. Exactly one of the two is set.
+	AgyAccount string `json:"agy_account"`
+}
+
+// workbenchSwitchRefusals are the core's switch refusals, each answered 409
+// with its code and the core's message, which the popup shows (spec 82
+// REQ-WAS-002).
+var workbenchSwitchRefusals = []struct {
+	kind error
+	code string
+}{
+	{workbench.ErrNoConversation, workbench.CodeNoConversation},
+	{workbench.ErrNotSwitchable, workbench.CodeNotSwitchable},
+	{workbench.ErrStillRunning, workbench.CodeStillRunning},
+	{workbench.ErrCoreOutdated, workbench.CodeCoreOutdated},
+}
+
+// handleWorkbenchSwitchAccount serves POST
+// /v1/workbench/sessions/{id}/switch-account (spec 82 REQ-WAS-002): it checks
+// the account, mirrors the built-in account's MCP servers into a named one
+// (spec 81, fail-open), and asks the core to stop the pane's claude and resume
+// its conversation on the account. A refusal is 409 with its code.
+func (s *Server) handleWorkbenchSwitchAccount(w http.ResponseWriter, r *http.Request) {
+	if !s.controlAllowed(r) {
+		refuseControlLocked(w)
+		return
+	}
+	backend := s.workbenchOrError(w)
+	if backend == nil {
+		return
+	}
+	var body workbenchSwitchAccountBody
+	if !decodeJSONObject(w, r, workbenchBodyLimit, &body) {
+		return
+	}
+	claudeName, agyName := strings.TrimSpace(body.ClaudeAccount), strings.TrimSpace(body.AgyAccount)
+	var agent, name, dir string
+	switch {
+	case claudeName != "" && agyName == "":
+		d, ok := s.claudeAccountDirs(r.Context())[claudeName]
+		if !ok {
+			writeAPIError(w, http.StatusBadRequest, "invalid_request", "claude_account must be claude-code or a Claude Code account of the Router")
+			return
+		}
+		agent, name, dir = "claude", claudeName, d
+	case agyName != "" && claudeName == "":
+		d, ok := s.agyAccountHomes(r.Context())[agyName]
+		if !ok {
+			writeAPIError(w, http.StatusBadRequest, "invalid_request", "agy_account must be antigravity or an Antigravity account of the Router")
+			return
+		}
+		agent, name, dir = workbench.AgentAgy, agyName, d
+	default:
+		writeAPIError(w, http.StatusBadRequest, "invalid_request", "set one of claude_account or agy_account")
+		return
+	}
+	if dir != "" {
+		if st, err := os.Stat(dir); err != nil || !st.IsDir() {
+			writeAPIError(w, http.StatusBadRequest, "invalid_request", "the account's folder does not exist; sign in to it first")
+			return
+		}
+	}
+	if agent == workbench.AgentAgy {
+		s.relinkAgyMCP(name, dir)
+	} else {
+		s.mirrorClaudeMCP(r.Context(), name)
+	}
+	id := r.PathValue("id")
+	sess, err := backend.SwitchAccount(r.Context(), id, agent, dir)
+	if err != nil {
+		for _, refusal := range workbenchSwitchRefusals {
+			if errors.Is(err, refusal.kind) {
+				writeAPIError(w, http.StatusConflict, refusal.code, err.Error())
+				return
+			}
+		}
+		s.writeWorkbenchError(w, "workbench switch account", err)
+		return
+	}
+	browser, _ := sessionFromContext(r.Context())
+	s.auditWorkbench("switch-account", id, browser)
+	writeJSON(w, http.StatusOK, s.decorateWorkbenchSession(sess))
 }
 
 // handleWorkbenchKill serves the DELETE of REQ-WB-040 (REQ-WB-043 audit).

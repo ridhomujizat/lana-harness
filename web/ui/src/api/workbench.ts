@@ -36,6 +36,16 @@ export interface WorkbenchSession {
      sends them. */
   work_dir?: string;
   work_dir_at?: string;
+  /* Spec 82: whether the pane's Claude Code conversation can be switched to
+     another account in place ("ready"), or why not; the conversation id it
+     would resume and the claude config dir it runs under ("" or absent for
+     the built-in account). An older core sends none of them. */
+  account_switch?: "ready" | "no_conversation" | "not_switchable";
+  /* Spec 83: the agent of that conversation; agent_config_dir is then an
+     Antigravity pane's account HOME. */
+  conversation_agent?: "claude" | "agy";
+  conversation_id?: string;
+  agent_config_dir?: string;
   /* Client only, never sent by the core: the agent finished while its pane
      was not in view (herdr's "done"). */
   done?: boolean;
@@ -48,6 +58,16 @@ export interface CreateSessionInput {
   rows?: number;
   title?: string;
   labels?: Record<string, string>;
+  /* One line typed into the new shell once it has printed (no line breaks,
+     at most 4 KiB); the pane stays the shell. */
+  input?: string;
+  /* The Claude Code account the typed line launches (spec 81 REQ-SMC-005):
+     for a named account the daemon first mirrors the built-in account's MCP
+     servers into it. */
+  claude_account?: string;
+  /* The Antigravity account the typed line launches (spec 83 REQ-WAG-004):
+     for a named account the daemon first relinks its mcp_config.json. */
+  agy_account?: string;
 }
 
 export type AttachMode = "control" | "view";
@@ -66,6 +86,23 @@ export function killWorkbenchSession(id: string): Promise<unknown> {
 
 export function restartWorkbenchSession(id: string): Promise<WorkbenchSession> {
   return request("POST", "/v1/workbench/sessions/" + encodeURIComponent(id) + "/restart");
+}
+
+/* Spec 82 REQ-WAS-002, spec 83 REQ-WAG-003: stops the pane's agent and
+   resumes its conversation on another account: a Claude Code account
+   ("claude-code" for the built-in one) or an Antigravity account
+   ("antigravity"). A refusal is a 409 ApiError with code no_conversation,
+   not_switchable, still_running or core_outdated. */
+export function switchWorkbenchAccount(
+  id: string,
+  account: string,
+  agent: "claude" | "agy" = "claude",
+): Promise<WorkbenchSession> {
+  return request(
+    "POST",
+    "/v1/workbench/sessions/" + encodeURIComponent(id) + "/switch-account",
+    agent === "agy" ? { agy_account: account } : { claude_account: account },
+  );
 }
 
 export function resizeWorkbenchSession(id: string, cols: number, rows: number): Promise<unknown> {

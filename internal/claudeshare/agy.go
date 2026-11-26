@@ -238,3 +238,37 @@ func linkReplace(account, shared, name, stamp string) (Item, error) {
 	}
 	return item, os.Symlink(dst, src)
 }
+
+// agyMCPConfigName is the agy MCP server file, relative to a HOME.
+const agyMCPConfigName = ".gemini/config/mcp_config.json"
+
+// RelinkAgyMCPConfig puts an Antigravity account's mcp_config.json back as a
+// link to the owner's (spec 83 REQ-WAG-004), the way LinkAntigravity does at
+// account save (REQ-WRA-011): an existing link is kept, a real file (an `agy mcp
+// add` that replaced the link) is renamed <name>.before-share-<unix> and
+// linked, and nothing happens when the owner has no such file. The built-in
+// account (accountHome "" or the owner's HOME) and a HOME that does not exist
+// are a no-op.
+func RelinkAgyMCPConfig(accountHome, ownerHome string, now time.Time) (Item, error) {
+	item := Item{Name: agyMCPConfigName, Action: Skipped}
+	if accountHome == "" || ownerHome == "" {
+		return item, nil
+	}
+	accountRoot, err := filepath.Abs(accountHome)
+	if err != nil {
+		return item, err
+	}
+	ownerRoot, err := filepath.Abs(ownerHome)
+	if err != nil {
+		return item, err
+	}
+	if sameDir(accountRoot, ownerRoot) {
+		return item, nil
+	}
+	if info, err := os.Stat(accountRoot); err != nil || !info.IsDir() {
+		return item, nil
+	}
+	mu.Lock()
+	defer mu.Unlock()
+	return linkReplace(accountRoot, ownerRoot, agyMCPConfigName, strconv.FormatInt(now.Unix(), 10))
+}
