@@ -100,7 +100,7 @@ func TestSessionsNotSharedAcrossAccounts(t *testing.T) {
 
 // API-CCT-011 (AC-CCT-013, runtime side): each account's status comes from
 // `claude auth status` run with its CLAUDE_CONFIG_DIR: login state, e-mail,
-// and plan (subscriptionType, else planTier), cached per account.
+// and plan (see TestAccountPlan), cached per account.
 func TestAccountStatus(t *testing.T) {
 	work, home := t.TempDir(), t.TempDir()
 	writeFile(t, filepath.Join(work, "fakeclaude_auth.json"),
@@ -216,5 +216,56 @@ func writeFile(t *testing.T, path, content string) {
 	t.Helper()
 	if err := os.WriteFile(path, []byte(content), 0o600); err != nil {
 		t.Fatal(err)
+	}
+}
+
+// The plan is the display name Claude Code caches in its global config file
+// (oauthAccount.planDisplayName) when it belongs to the same login, else
+// planTier when it is more specific than subscriptionType, else
+// subscriptionType. The file is $CLAUDE_CONFIG_DIR/.claude.json, else
+// $HOME/.claude.json.
+func TestAccountPlan(t *testing.T) {
+	const maxAuth = `{"loggedIn":true,"authMethod":"claude.ai","email":"Me@Example.com","subscriptionType":"max","planTier":"max_20x"}`
+	cases := []struct {
+		name   string
+		auth   string
+		config string // global config file content; "" = no file
+		home   bool   // the file is in HOME (built-in account), not CLAUDE_CONFIG_DIR
+		want   string
+	}{
+		{"display name", maxAuth, `{"oauthAccount":{"planDisplayName":"Ultra","emailAddress":"me@example.com","accountUuid":"x"},"projects":{}}`, false, "Ultra"},
+		{"display name in HOME", maxAuth, `{"oauthAccount":{"planDisplayName":"Ultra","emailAddress":"me@example.com"}}`, true, "Ultra"},
+		{"display name without e-mail", maxAuth, `{"oauthAccount":{"planDisplayName":"Ultra"}}`, false, "Ultra"},
+		{"other login's file", maxAuth, `{"oauthAccount":{"planDisplayName":"Pro","emailAddress":"other@example.com"}}`, false, "max_20x"},
+		{"no file", maxAuth, "", false, "max_20x"},
+		{"no file in HOME", maxAuth, "", true, "max_20x"},
+		{"broken file", maxAuth, `{"oauthAccount":`, false, "max_20x"},
+		{"unrelated planTier", `{"loggedIn":true,"email":"me@example.com","subscriptionType":"team","planTier":"default_x"}`, "", false, "team"},
+		{"planTier only", `{"loggedIn":true,"email":"me@example.com","planTier":"pro"}`, "", false, "pro"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			configDir, home := t.TempDir(), t.TempDir()
+			fileDir := configDir
+			if tc.home {
+				fileDir = home
+			}
+			if tc.config != "" {
+				writeFile(t, filepath.Join(fileDir, ".claude.json"), tc.config)
+			}
+			account := core.RuntimeAccount{Name: "claude-plan", ConfigDir: configDir}
+			env := []string{"FAKECLAUDE_AUTH_EXIT=0", "HOME=" + home}
+			if tc.home {
+				account = core.RuntimeAccount{Name: core.ClaudeCodeProvider}
+				env = append(env, "CLAUDE_CONFIG_DIR=", "FAKECLAUDE_AUTH="+tc.auth)
+			} else {
+				writeFile(t, filepath.Join(configDir, "fakeclaude_auth.json"), tc.auth)
+			}
+			h := newHarness(t, "hi.jsonl", Options{StatusTTL: time.Hour}, env...)
+			st := h.rt.AccountStatus(context.Background(), account)
+			if st.Error != "" || st.Plan != tc.want {
+				t.Fatalf("plan = %q (error %q), want %q", st.Plan, st.Error, tc.want)
+			}
+		})
 	}
 }
