@@ -308,22 +308,30 @@ describe("AccountsPanel: Claude Code", () => {
     expect(screen.queryByRole("button", { name: /Use for new terminals/ })).toBeNull();
   });
 
-  it("opening probes usage once, then reads the accounts", async () => {
+  it("opening shows the accounts at once, then probes usage in the background and rereads", async () => {
+    let finish: () => void = () => {};
+    vi.mocked(router.refreshRouterLimits).mockImplementationOnce(
+      () => new Promise((resolve) => (finish = () => resolve([])))
+    );
     render(<AccountsPanel actions={actions()} onClose={() => {}} />);
+    /* The list shows while the probe is still running. */
     await screen.findByText("Home");
-    expect(router.refreshRouterLimits).toHaveBeenCalledTimes(1);
+    await waitFor(() => expect(router.refreshRouterLimits).toHaveBeenCalledTimes(1));
     expect(router.getClaudeAgent).toHaveBeenCalledTimes(1);
     expect(router.getAntigravity).toHaveBeenCalledTimes(1);
+    finish();
+    await waitFor(() => expect(router.getClaudeAgent).toHaveBeenCalledTimes(2));
+    await waitFor(() => expect(router.getAntigravity).toHaveBeenCalledTimes(2));
   });
 
   it("Refresh probes usage, then rereads the accounts", async () => {
     render(<AccountsPanel actions={actions()} onClose={() => {}} />);
     await screen.findByText("Home");
-    expect(router.getClaudeAgent).toHaveBeenCalledTimes(1);
+    await waitFor(() => expect(router.getClaudeAgent).toHaveBeenCalledTimes(2));
     fireEvent.click(screen.getByRole("button", { name: "Refresh" }));
     expect(router.refreshRouterLimits).toHaveBeenCalledTimes(2);
-    await waitFor(() => expect(router.getClaudeAgent).toHaveBeenCalledTimes(2));
-    await waitFor(() => expect(router.getAntigravity).toHaveBeenCalledTimes(2));
+    await waitFor(() => expect(router.getClaudeAgent).toHaveBeenCalledTimes(3));
+    await waitFor(() => expect(router.getAntigravity).toHaveBeenCalledTimes(3));
   });
 });
 

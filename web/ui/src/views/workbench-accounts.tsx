@@ -332,14 +332,25 @@ export function AccountsPanel({
       .finally(() => setLoading(false));
   };
 
-  /* Opening the popup probes usage once (a daemon restart leaves the
-     windows empty until something asks); the timer only rereads. */
+  /* Opening the popup shows the accounts at once, as the Router pages do,
+     then probes usage once in the background (a daemon restart leaves the
+     windows empty until something asks) and rereads; the timer only
+     rereads. */
   useEffect(() => {
-    refreshRouterLimits()
-      .catch(() => {})
-      .then(load);
+    let alive = true;
+    void load().then(() => {
+      if (!alive) return;
+      setLoading(true);
+      refreshRouterLimits()
+        .catch(() => {})
+        .then(() => (alive ? load() : undefined))
+        .finally(() => alive && setLoading(false));
+    });
     const timer = setInterval(load, REFRESH_MS);
-    return () => clearInterval(timer);
+    return () => {
+      alive = false;
+      clearInterval(timer);
+    };
   }, [load]);
 
   useEffect(() => {
