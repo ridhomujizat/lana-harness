@@ -208,6 +208,41 @@ func TestLocateSwapBackupDir(t *testing.T) {
 	}
 }
 
+func TestLocateLanaAccountDir(t *testing.T) {
+	resetCaches(t)
+	home := t.TempDir()
+	lana := filepath.Join(t.TempDir(), "lana")
+	t.Setenv("LANA_HOME", lana)
+	t.Setenv("CLAUDE_CONFIG_DIR", "")
+
+	// The account's projects is a symlink to ~/.claude/projects (spec 77).
+	shared := filepath.Join(home, ".claude")
+	writeTranscript(t, shared, uuidC)
+	account := filepath.Join(lana, "claude", "claude-3")
+	if err := os.MkdirAll(account, 0o755); err != nil {
+		t.Fatalf("mkdir account: %v", err)
+	}
+	if err := os.Symlink(filepath.Join(shared, "projects"), filepath.Join(account, "projects")); err != nil {
+		t.Fatalf("symlink projects: %v", err)
+	}
+	writeSession(t, filepath.Join(account, "sessions"), 103, uuidC, 1000)
+	// The shared mcp dir is not an account and is never scanned.
+	writeSession(t, filepath.Join(lana, "claude", "mcp", "sessions"), 104, uuidB, 2000)
+	stubProcesses(t, map[int]int{103: 100, 104: 100}, map[int]bool{103: true, 104: true})
+
+	conv, ok := Locate(100, home)
+	if !ok || conv.SessionID != uuidC {
+		t.Fatalf("Locate = %+v, %v; want the Lana account session", conv, ok)
+	}
+	if conv.ConfigDir != account {
+		t.Fatalf("ConfigDir = %q, want %q", conv.ConfigDir, account)
+	}
+	want := filepath.Join(account, "projects", "-x", uuidC+".jsonl")
+	if conv.Path != want {
+		t.Fatalf("Path = %q, want %q", conv.Path, want)
+	}
+}
+
 func TestLocateCacheExpiry(t *testing.T) {
 	resetCaches(t)
 	home := t.TempDir()

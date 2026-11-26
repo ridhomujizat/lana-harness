@@ -14,6 +14,9 @@ but their config keys, events, and tools may still change between betas.
 
 - Router and Workbench: a Claude Code account shows the plan name Claude Code itself shows (for example "Ultra"), from the display name it caches in its global config file for the same login, else the more specific plan tier ("Max 20x" instead of "Max").
 - Router: the connections of an API key provider (for example `commandcode` and `commandcode-2`) with the same kind and base URL form one ordered pool, like Claude Code and Antigravity accounts. Drag them on the provider page; the top connection is used first and the next one answers when a connection runs out of credit, hits its rate limit, or its key is rejected. `priority` and `pool = false` work on API connections.
+### Fixed
+
+- Workbench: Show as chat works for Claude Code panes on a Router account (it was empty).
 
 ## [0.6.0-beta.12] - 2026-11-26
 

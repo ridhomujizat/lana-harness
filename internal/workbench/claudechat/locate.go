@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"strings"
 	"sync"
 	"syscall"
 	"time"
@@ -123,8 +124,9 @@ func locate(shellPID int, home string) (Conversation, bool) {
 }
 
 // configDirs returns the Claude config dirs that exist: ~/.claude, every
-// ~/.claude-swap-backup/sessions/* profile, and CLAUDE_CONFIG_DIR when set. The
-// list is cached for dirCacheTTL.
+// ~/.claude-swap-backup/sessions/* profile, every Lana Router account dir
+// <LANA_HOME>/claude/* (spec 77; its projects links to ~/.claude/projects), and
+// CLAUDE_CONFIG_DIR when set. The list is cached for dirCacheTTL.
 func configDirs(home string) []string {
 	dirsMu.Lock()
 	defer dirsMu.Unlock()
@@ -157,11 +159,33 @@ func configDirs(home string) []string {
 			add(b)
 		}
 	}
+	if lana := lanaHome(home); lana != "" {
+		accounts, _ := filepath.Glob(filepath.Join(lana, "claude", "*"))
+		for _, a := range accounts {
+			if filepath.Base(a) == "mcp" {
+				continue
+			}
+			add(a)
+		}
+	}
 	add(os.Getenv("CLAUDE_CONFIG_DIR"))
 
 	dirsCache = dirs
 	dirsCacheAt = time.Now()
 	return dirs
+}
+
+// lanaHome resolves LANA_HOME the way config.HomeDir does, falling back to
+// <home>/.lana so it follows the home the caller passed. It is "" when neither
+// is known.
+func lanaHome(home string) string {
+	if v, ok := os.LookupEnv("LANA_HOME"); ok && strings.TrimSpace(v) != "" {
+		return v
+	}
+	if home == "" {
+		return ""
+	}
+	return filepath.Join(home, ".lana")
 }
 
 // readSession parses a sessions/*.json file. A file that fails to parse, has no
