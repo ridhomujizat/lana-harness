@@ -7,6 +7,10 @@ but their config keys, events, and tools may still change between betas.
 
 ## [Unreleased]
 
+### Fixed
+
+- Workbench: Show as chat works for Claude Code panes on a Router account (it was empty).
+
 ## [0.6.0-beta.12] - 2026-11-26
 
 ### Added
